@@ -8,6 +8,17 @@ from telethon.errors import FloodWaitError
 
 from telegram_tools.models import DeleteResult, TopicInfo
 
+CLEAR_TOPIC_MESSAGES_WARNING = """\
+====================================================
+WARNING: CLEAR TOPIC MESSAGES
+
+This will permanently delete ALL MESSAGES from the selected topic(s).
+
+OK: Forum topics will NOT be deleted.
+OK: Topic IDs will NOT change.
+OK: Only messages will be removed.
+===================================================="""
+
 
 def _chunks(values: list[int], size: int) -> Iterable[list[int]]:
     for index in range(0, len(values), size):
@@ -21,8 +32,13 @@ async def _delete_batch_with_flood_wait(client, chat: Any, batch: list[int], *, 
             return len(batch)
         except FloodWaitError as exc:
             seconds = int(getattr(exc, "seconds", 0))
-            progress(f"FloodWait: sleeping {seconds}s before retrying delete batch")
+            progress(f"FloodWait: sleeping {seconds}s before retrying clear-message batch")
             await sleep(seconds)
+
+
+def confirm_clear_topic_messages(*, read=input, write=print) -> str:
+    write(CLEAR_TOPIC_MESSAGES_WARNING)
+    return read("Type DELETE to continue: ")
 
 
 async def _collect_topic_message_ids(client, chat: Any, topic: TopicInfo) -> list[int]:
@@ -63,17 +79,17 @@ async def delete_topic_messages(
                 ids.append(message_id)
 
     if not execute:
-        progress(f"Dry-run: {len(ids)} messages would be deleted")
+        progress(f"Dry-run: {len(ids)} topic messages would be cleared")
         return DeleteResult(matched=len(ids), deleted=0, dry_run=True)
 
     if confirm() != "DELETE":
-        progress("Delete cancelled")
+        progress("Clear topic messages cancelled")
         return DeleteResult(matched=len(ids), deleted=0, dry_run=False, cancelled=True)
 
     deleted = 0
     for batch in _chunks(ids, batch_size):
-        progress(f"Deleting batch of {len(batch)} messages")
+        progress(f"Clearing batch of {len(batch)} topic messages")
         deleted += await _delete_batch_with_flood_wait(client, chat, batch, sleep=sleep, progress=progress)
-        progress(f"Deleted {deleted}/{len(ids)} messages")
+        progress(f"Cleared {deleted}/{len(ids)} topic messages")
 
     return DeleteResult(matched=len(ids), deleted=deleted, dry_run=False)

@@ -7,11 +7,13 @@ import sys
 from pathlib import Path
 from typing import Sequence
 
+from telegram_tools.bot_inventory import format_bot_inventory, load_bot_tokens, validate_bots
 from telegram_tools.client import create_client
 from telegram_tools.config import ConfigError, load_config
-from telegram_tools.delete import delete_topic_messages
-from telegram_tools.discovery import discover_chats, filter_chats
+from telegram_tools.delete import confirm_clear_topic_messages, delete_topic_messages
+from telegram_tools.discovery import discover_chats, filter_chats, format_discovery_table
 from telegram_tools.exporters import write_records
+from telegram_tools.resolver import EntityResolutionError, resolve_chat
 from telegram_tools.search import search_messages
 from telegram_tools.topics import get_forum_topics, get_forum_topics_by_ids
 
@@ -31,13 +33,13 @@ def build_parser() -> argparse.ArgumentParser:
     discover.add_argument("--json", dest="json_output", help="Write discovery output to this JSON file")
     discover.add_argument("--admin-only", action="store_true", help="Only show chats where the current user is admin or creator")
 
-    delete = subparsers.add_parser("delete", help="Delete messages from forum topic(s), dry-run by default")
-    delete.add_argument("--chat", required=True, help="Chat/channel username, link, or ID")
-    topic_group = delete.add_mutually_exclusive_group(required=True)
-    topic_group.add_argument("--topic", dest="topics", action="append", type=int, help="Topic ID to delete from; repeatable")
-    topic_group.add_argument("--all-topics", action="store_true", help="Delete from every forum topic")
-    delete.add_argument("--execute", action="store_true", help="Actually delete after typing DELETE")
-    delete.add_argument("--batch-size", type=positive_int, default=100, help="Delete batch size")
+    clear_messages = subparsers.add_parser("clear-messages", help="Clear messages from forum topic(s), preserving topics and topic IDs")
+    clear_messages.add_argument("--chat", required=True, help="Chat/channel username, link, or ID")
+    topic_group = clear_messages.add_mutually_exclusive_group(required=True)
+    topic_group.add_argument("--topic", dest="topics", action="append", type=int, help="Topic ID to clear messages from; repeatable")
+    topic_group.add_argument("--all-topics", action="store_true", help="Clear messages from every forum topic")
+    clear_messages.add_argument("--execute", action="store_true", help="Actually clear messages after typing DELETE")
+    clear_messages.add_argument("--batch-size", type=positive_int, default=100, help="Clear-message batch size")
 
     search = subparsers.add_parser("search", help="Search and export messages")
     search.add_argument("--chat", required=True, help="Chat/channel username, link, or ID")
@@ -49,6 +51,9 @@ def build_parser() -> argparse.ArgumentParser:
     search.add_argument("--limit", type=positive_int, help="Maximum exported messages")
     search.add_argument("--format", choices=("json", "csv"), default="json", help="Export format")
     search.add_argument("--output", help="Output path; prints JSON to stdout when omitted")
+
+    bot_inventory = subparsers.add_parser("bot-inventory", help="Validate configured Telegram bot tokens")
+    bot_inventory.add_argument("--bots-json", default="bots.json", help="Local gitignored bot token inventory file")
 
     return parser
 
@@ -68,12 +73,13 @@ async def _run_discover(client, args) -> int:
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(json.dumps(payload, indent=2, default=str) + "\n")
     else:
-        print(json.dumps(payload, indent=2, default=str))
+        print(format_discovery_table(chats))
     return 0
 
 
-async def _run_delete(client, args) -> int:
-    peer = await client.get_input_entity(args.chat)
+async def _run_clear_messages(client, args) -> int:
+    resolved = await resolve_chat(client, args.chat)
+    peer = resolved.input_entity
     await _require_delete_permission(client, peer)
 
     if args.all_topics:
@@ -88,19 +94,19 @@ async def _run_delete(client, args) -> int:
         execute=args.execute,
         batch_size=args.batch_size,
         progress=print,
-        confirm=lambda: input("Type DELETE to permanently delete matched messages: "),
+        confirm=confirm_clear_topic_messages,
     )
     print(json.dumps(result.to_dict(), indent=2))
     return 1 if result.cancelled else 0
 
 
 async def _run_search(client, args) -> int:
-    peer = await client.get_input_entity(args.chat)
-    chat_id = int(await client.get_peer_id(args.chat))
+    resolved = await resolve_chat(client, args.chat)
+    peer = resolved.input_entity
     records = await search_messages(
         client,
         peer,
-        chat_id=chat_id,
+        chat_id=resolved.id,
         topic_id=args.topic,
         keyword=args.keyword,
         from_user=args.from_user,
@@ -119,14 +125,19 @@ async def _run_search(client, args) -> int:
 
 
 async def run(args) -> int:
+    if args.command == "bot-inventory":
+        tokens = load_bot_tokens(bots_json=args.bots_json)
+        print(format_bot_inventory(validate_bots(tokens)))
+        return 0
+
     config = load_config()
     client = create_client(config)
     await client.start()
     try:
         if args.command == "discover":
             return await _run_discover(client, args)
-        if args.command == "delete":
-            return await _run_delete(client, args)
+        if args.command == "clear-messages":
+            return await _run_clear_messages(client, args)
         if args.command == "search":
             return await _run_search(client, args)
         raise ValueError(f"Unknown command: {args.command}")
@@ -140,6 +151,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         return asyncio.run(run(args))
     except ConfigError as exc:
+        parser.error(str(exc))
+    except EntityResolutionError as exc:
         parser.error(str(exc))
     except ValueError as exc:
         parser.error(str(exc))

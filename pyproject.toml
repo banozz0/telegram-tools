@@ -10,6 +10,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
   "Telethon>=1.44,<2",
+  "python-dotenv>=1.0,<2",
 ]
 
 [project.optional-dependencies]

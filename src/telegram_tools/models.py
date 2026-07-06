@@ -48,7 +48,7 @@ class DeleteResult:
     def to_dict(self) -> dict[str, Any]:
         return {
             "matched": self.matched,
-            "deleted": self.deleted,
+            "cleared": self.deleted,
             "dry_run": self.dry_run,
             "cancelled": self.cancelled,
         }

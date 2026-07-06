@@ -22,10 +22,10 @@ def test_discover_command_accepts_admin_only_filter():
     assert args.admin_only is True
 
 
-def test_delete_defaults_to_dry_run_for_one_topic():
-    args = parse_args("delete", "--chat", "@group", "--topic", "123")
+def test_clear_messages_defaults_to_dry_run_for_one_topic():
+    args = parse_args("clear-messages", "--chat", "@group", "--topic", "123")
 
-    assert args.command == "delete"
+    assert args.command == "clear-messages"
     assert args.chat == "@group"
     assert args.topics == [123]
     assert args.all_topics is False
@@ -33,14 +33,14 @@ def test_delete_defaults_to_dry_run_for_one_topic():
     assert args.batch_size == 100
 
 
-def test_delete_requires_topic_or_all_topics():
+def test_clear_messages_requires_topic_or_all_topics():
     with pytest.raises(SystemExit):
-        parse_args("delete", "--chat", "@group")
+        parse_args("clear-messages", "--chat", "@group")
 
 
-def test_delete_rejects_non_positive_batch_size():
+def test_clear_messages_rejects_non_positive_batch_size():
     with pytest.raises(SystemExit):
-        parse_args("delete", "--chat", "@group", "--topic", "123", "--batch-size", "0")
+        parse_args("clear-messages", "--chat", "@group", "--topic", "123", "--batch-size", "0")
 
 
 def test_search_rejects_non_positive_limit():
@@ -78,3 +78,10 @@ def test_search_command_accepts_export_filters():
     assert args.until == "2026-07-06"
     assert args.format == "csv"
     assert args.output == "exports/messages.csv"
+
+
+def test_bot_inventory_command_accepts_local_bots_json():
+    args = parse_args("bot-inventory", "--bots-json", "bots.json")
+
+    assert args.command == "bot-inventory"
+    assert args.bots_json == "bots.json"

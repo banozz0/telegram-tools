@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping
 
+from dotenv import load_dotenv
+
 
 class ConfigError(RuntimeError):
     pass
@@ -22,8 +24,10 @@ def load_config(
     *,
     cwd: Path | None = None,
 ) -> Config:
-    env = env or os.environ
     cwd = cwd or Path.cwd()
+    if env is None:
+        load_dotenv(dotenv_path=cwd / ".env", override=False)
+        env = os.environ
 
     raw_api_id = env.get("TELEGRAM_API_ID")
     if not raw_api_id:

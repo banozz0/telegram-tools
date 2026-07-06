@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from telegram_tools.discovery import classify_entity, dialog_to_chat_info, filter_chats
+from telegram_tools.discovery import classify_entity, dialog_to_chat_info, filter_chats, format_discovery_table
 from telegram_tools.models import TopicInfo
 
 
@@ -41,3 +41,24 @@ def test_filter_chats_returns_only_admin_chats_when_requested():
 
     assert filter_chats([admin_chat, regular_chat], admin_only=True) == [admin_chat]
     assert filter_chats([admin_chat, regular_chat], admin_only=False) == [admin_chat, regular_chat]
+
+
+def test_format_discovery_table_shows_human_readable_chats_and_topics():
+    info = dialog_to_chat_info(
+        SimpleNamespace(id=-1003930298580, title="Hermes", entity=SimpleNamespace(megagroup=True, forum=True)),
+        is_admin=True,
+        topics=[
+            TopicInfo(id=141, title="Harry", top_message=141),
+            TopicInfo(id=217, title="Dobby", top_message=217),
+        ],
+    )
+
+    text = format_discovery_table([info])
+
+    assert "Chat" in text
+    assert "Hermes" in text
+    assert "Chat ID: -1003930298580" in text
+    assert "Type: Forum Group" in text
+    assert "Topics" in text
+    assert "141  Harry" in text
+    assert "217  Dobby" in text

@@ -41,6 +41,43 @@ def filter_chats(chats: list[ChatInfo], *, admin_only: bool) -> list[ChatInfo]:
     return [chat for chat in chats if chat.is_admin]
 
 
+def _display_type(chat_type: str) -> str:
+    return chat_type.replace("_", " ").title()
+
+
+def format_discovery_table(chats: list[ChatInfo]) -> str:
+    if not chats:
+        return "No chats found."
+
+    sections: list[str] = []
+    for chat in chats:
+        lines = [
+            "Chat",
+            "--------------------------------------------",
+            chat.title or "(untitled)",
+            f"Chat ID: {chat.id}",
+            f"Type: {_display_type(chat.type)}",
+            f"Admin: {'yes' if chat.is_admin else 'no'}",
+        ]
+        if chat.username:
+            lines.append(f"Username: @{chat.username}")
+
+        if chat.topics:
+            width = max(len(str(topic.id)) for topic in chat.topics)
+            lines.extend(
+                [
+                    "",
+                    "Topics",
+                    "--------------------------------------------",
+                ]
+            )
+            lines.extend(f"{topic.id:<{width}}  {topic.title}" for topic in chat.topics)
+
+        sections.append("\n".join(lines))
+
+    return "\n\n".join(sections)
+
+
 async def is_admin(client, entity, user) -> bool:
     try:
         permissions = await client.get_permissions(entity, user)
