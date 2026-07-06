@@ -1,26 +1,30 @@
 # telegram-tools
 
-Private CLI tools for managing your own Telegram chats, groups, channels, forum topics, and bot tokens.
+Private Telegram tooling for your own chats, forum topics, exports, message clearing, and bot-token inventory.
 
 ## Project Overview
 
-`telegram-tools` is a local Telethon-based command line toolkit. It is built for your authenticated Telegram account and stores session data locally.
+`telegram-tools` is a local Python + Telethon CLI. It is designed to be usable from:
 
-This project distinguishes these operations deliberately:
+- `telegram-tools`, which opens an interactive menu
+- explicit argparse subcommands
+- clickable macOS `.command` launchers in `scripts/`
 
-| Operation | Destructive? | What it does |
+The toolkit deliberately separates safe read-only actions from destructive message clearing:
+
+| Area | Destructive? | Summary |
 | --- | --- | --- |
-| Discovery | No | Lists chats/channels/groups and forum topics. |
-| Search | No | Finds matching messages and prints metadata/text. |
+| Discovery | No | Lists managed chats, forum groups, channels, and topic IDs. |
+| Search | No | Searches message metadata/text and prints a readable table. |
 | Export | No | Writes message metadata/text to JSON or CSV. |
-| Clear Messages | Yes | Permanently removes messages inside selected forum topic(s). Topics remain. Topic IDs remain. |
-| Future Topic Deletion | Not implemented | This toolkit does not delete forum topics. |
+| Clear Messages | Yes | Deletes messages inside selected topic(s), preserving topics and topic IDs. |
+| Bot Inventory | No | Validates bot tokens via Bot API `getMe` and masks tokens. |
+| Bot Add | Writes local file | Validates a token and stores it in gitignored `bots.json`. |
+| Topic Deletion | Not implemented | This toolkit does not delete forum topics. |
 
-The clear-message workflow never deletes forum topics. It only clears/deletes messages inside topics.
+Clear-message workflows delete messages only. Forum topics are not deleted. Topic IDs do not change.
 
 ## Installation
-
-Create a Telegram API app at <https://my.telegram.org/apps>, then install locally:
 
 ```bash
 cd /Users/sven/code/telegram-tools
@@ -29,57 +33,84 @@ source .venv/bin/activate
 python -m pip install -e ".[dev]"
 ```
 
-Configure credentials with either `.env` or exported shell variables.
-
-`.env`:
+Create a Telegram API app at <https://my.telegram.org/apps>, then configure either `.env` or shell variables:
 
 ```bash
 cp .env.example .env
 $EDITOR .env
 ```
 
-Shell:
-
 ```bash
 export TELEGRAM_API_ID=123456
 export TELEGRAM_API_HASH=your_api_hash
 ```
 
-Exported shell variables take precedence over `.env`.
+Shell variables win over `.env`.
 
 ## First Login
 
-The first command that uses your Telegram user account starts Telethon's interactive login. The local session is stored in `.telegram-tools/`, which is gitignored because it contains reusable auth material.
-
-Example:
+The first command that uses your Telegram user account starts Telethon's interactive login:
 
 ```bash
 telegram-tools discover
 ```
+
+The session is stored under `.telegram-tools/`, which is gitignored.
+
+## Interactive Menu
+
+Run without a subcommand:
+
+```bash
+telegram-tools
+```
+
+Menu:
+
+```text
+1. Discover chats/topics
+2. Search messages
+3. Export messages
+4. Clear topic messages
+5. Clear multiple topics
+6. Clear all topic messages
+7. Bot inventory
+8. Add bot
+0. Exit
+```
+
+Use the menu when you want prompts instead of remembering flags. Existing subcommands still work.
 
 ## Discovery
 
 Read-only.
 
-Use discovery when you need chat IDs, usernames, chat types, admin status, or forum topic IDs.
-
-Required inputs: none.
-
-Examples:
+Default behavior shows admin/managed chats only.
 
 ```bash
 telegram-tools discover
-telegram-tools discover --admin-only
+```
+
+Show every chat:
+
+```bash
+telegram-tools discover --all
+```
+
+Write JSON while keeping the same default filter:
+
+```bash
 telegram-tools discover --json exports/chats.json
+telegram-tools discover --all --json exports/all-chats.json
 ```
 
 Example output:
 
 ```text
-Chat
---------------------------------------------
-Hermes
-Chat ID: -1003930298580
+Forum Groups
+============
+Example Forum
+Chat ID: -1001112223333
 Type: Forum Group
 Admin: yes
 
@@ -88,201 +119,154 @@ Topics
 141   Harry
 217   Dobby
 16    Professor
-4596  Bangis
-5027  Sentinel
 ```
 
-Safety notes:
-
-- Discovery does not modify Telegram.
-- Default output is human-readable.
-- Use `--json` when another tool needs structured output.
+Use discovery before clearing messages so you can copy exact chat IDs and topic IDs.
 
 ## Search
 
 Read-only.
 
-Use search when you want to inspect matching messages without writing a file.
+Search messages and print a readable table:
 
-Required inputs:
+```bash
+telegram-tools search --chat @my_group --contains deploy
+telegram-tools search --chat -1001112223333 --topic 141 --contains deploy
+```
 
-- `--chat`: numeric chat ID, `@username`, or `t.me` link.
+`--contains` and `--keyword` are aliases.
 
 Optional filters:
 
-- `--topic`: forum topic ID.
-- `--keyword`: case-insensitive text search.
-- `--from-user`: sender username, ID, or `me`.
-- `--since` / `--until`: ISO date or datetime.
-- `--limit`: maximum messages.
+- `--topic`
+- `--contains` / `--keyword`
+- `--from-user`
+- `--since`
+- `--until`
+- `--limit`
 
-Examples:
+Example output:
 
-```bash
-telegram-tools search --chat @my_group --keyword deploy
-telegram-tools search --chat -1003930298580 --topic 141 --keyword deploy --limit 50
-telegram-tools search --chat https://t.me/example_group --from-user @alice
+```text
+Messages
+--------------------------------------------
+1234  2026-07-06T12:30:00+00:00  topic=141  sender=alice  deploy finished
 ```
 
-Example output is JSON message metadata and text:
-
-```json
-[
-  {
-    "id": 1234,
-    "chat_id": -1003930298580,
-    "topic_id": 141,
-    "date": "2026-07-06T12:30:00+00:00",
-    "sender_id": 1001,
-    "sender_username": "alice",
-    "has_media": false,
-    "text": "deploy finished"
-  }
-]
-```
-
-Safety notes:
-
-- Search does not modify Telegram.
-- Topic-scoped search iterates that topic and filters locally because Telegram's API does not support every search filter inside replies/topics.
-- Media is not downloaded in v1.
+No media is downloaded.
 
 ## Export
 
 Read-only.
 
-Use export when you want JSON or CSV files containing metadata and text.
+Exports use the `search` command with `--output`.
 
-Required inputs:
-
-- `--chat`: numeric chat ID, `@username`, or `t.me` link.
-- `--output`: output path for CSV, recommended for JSON.
-
-Examples:
+JSON:
 
 ```bash
-telegram-tools search --chat @my_group --keyword deploy --format json --output exports/deploy.json
+telegram-tools search --chat @my_group --topic 141 --format json --output exports/topic-141.json
+```
+
+CSV:
+
+```bash
 telegram-tools search --chat @my_group --topic 141 --format csv --output exports/topic-141.csv
 ```
 
-Example CSV columns:
+Example JSON record:
 
-```text
-id,chat_id,topic_id,date,sender_id,sender_username,reply_to_msg_id,reply_to_top_id,has_media,text
+```json
+{
+  "id": 1234,
+  "chat_id": -1001112223333,
+  "topic_id": 141,
+  "date": "2026-07-06T12:30:00+00:00",
+  "sender_username": "alice",
+  "has_media": false,
+  "text": "deploy finished"
+}
 ```
 
-Safety notes:
-
-- Export does not modify Telegram.
-- Existing output files are overwritten.
-- No media is downloaded in v1.
+Existing output files are overwritten.
 
 ## Clear Topic Messages
 
-Destructive. Preserves forum topics and topic IDs.
+Destructive. Deletes messages permanently. Preserves forum topics and topic IDs.
 
-Use this when you want to clear messages from one forum topic.
-
-Required inputs:
-
-- `--chat`: numeric chat ID, `@username`, or `t.me` link.
-- `--topic`: topic ID.
-
-Dry-run example:
+Dry-run is default:
 
 ```bash
 telegram-tools clear-messages --chat @my_group --topic 141
 ```
 
-Execute example:
+Execute:
 
 ```bash
 telegram-tools clear-messages --chat @my_group --topic 141 --execute
 ```
 
-Example dry-run output:
+Execution still requires typing `DELETE` at the safety prompt:
 
 ```text
-Scanning topic 141 (Harry)
-Dry-run: 348 topic messages would be cleared
-{
-  "matched": 348,
-  "cleared": 0,
-  "dry_run": true,
-  "cancelled": false
-}
+====================================================
+WARNING: CLEAR TOPIC MESSAGES
+
+This will permanently delete ALL MESSAGES from the selected topic(s).
+
+OK: Forum topics will NOT be deleted.
+OK: Topic IDs will NOT change.
+OK: Only messages will be removed.
+====================================================
+Type DELETE to continue:
 ```
 
 Safety notes:
 
-- Dry-run is the default.
-- `--execute` is required before any Telegram delete API call.
-- Even with `--execute`, you must type `DELETE` at the safety prompt.
-- Forum topics are not deleted.
-- Topic IDs do not change.
+- `--execute` is required before Telegram deletion APIs are called.
+- The prompt says exactly what is preserved.
 - Topic starter messages are skipped.
+- FloodWait is handled automatically.
 
 ## Clear Multiple Topics
 
-Destructive. Preserves forum topics and topic IDs.
-
-Use repeated `--topic` flags when you want to clear messages from selected forum topics.
-
-Example:
+Destructive only with `--execute`.
 
 ```bash
 telegram-tools clear-messages --chat @my_group --topic 141 --topic 217 --topic 16
-```
-
-Execute example:
-
-```bash
 telegram-tools clear-messages --chat @my_group --topic 141 --topic 217 --topic 16 --execute
 ```
 
-Safety notes:
-
-- Same safeguards as single-topic clearing.
-- Each topic is scanned and only messages collected from that topic are cleared.
-- This does not delete topics.
+Each topic is scanned and only messages collected from that topic are cleared.
 
 ## Clear All Topic Messages
 
-Destructive. Preserves forum topics and topic IDs.
+Destructive only with `--execute`.
 
-Use this when every forum topic in a group should have its messages cleared.
+Preferred flag:
 
-Dry-run example:
+```bash
+telegram-tools clear-messages --chat @my_group --all-topics-in-chat
+```
+
+Backward-compatible alias:
 
 ```bash
 telegram-tools clear-messages --chat @my_group --all-topics
 ```
 
-Execute example:
+Execute:
 
 ```bash
-telegram-tools clear-messages --chat @my_group --all-topics --execute
+telegram-tools clear-messages --chat @my_group --all-topics-in-chat --execute
 ```
 
-Safety notes:
-
-- This can match many messages. Run dry-run first.
-- The command lists forum topics through Telegram, then clears messages inside them.
-- Forum topics are not deleted.
-- Topic IDs do not change.
+This clears messages inside every forum topic in the chat. It does not delete topics.
 
 ## Bot Inventory
 
-Read-only with respect to your Telegram account. It calls Telegram Bot API `getMe` for supplied bot tokens.
+Read-only with respect to Telegram chats.
 
-Use this when you want to verify which bot tokens are valid without printing full tokens.
-
-Token sources:
-
-- `.env`
-- Local `bots.json`, which is gitignored
-
-`.env` examples:
+Tokens can live in `.env`:
 
 ```bash
 TELEGRAM_BOT_TOKEN=<bot-token>
@@ -290,177 +274,126 @@ TELEGRAM_BOT_TOKENS=<bot-token>,<another-bot-token>
 TELEGRAM_BOT_TOKEN_HERMES=<bot-token>
 ```
 
-`bots.json` example:
+Or local gitignored `bots.json`:
 
 ```json
 [
-  {"name": "hermes", "token": "<bot-token>"}
+  {"name": "example", "token": "<bot-token>"}
 ]
 ```
 
-Commands:
+Run:
 
 ```bash
 telegram-tools bot-inventory
-telegram-tools bot-inventory --bots-json bots.json
 ```
 
 Example output:
 
 ```text
-ok	id	username	display_name	token	error
-yes	123456789	hermes_bot	Hermes Bot	123456789:***
+name	bot ID	username	masked token	status
+Example Bot	123456789	example_bot	123456789:***	ok
 ```
 
-Safety notes:
+Full tokens are never printed.
 
-- Full bot tokens are never printed.
-- `bots.json` is gitignored.
-- Never commit real bot tokens.
+## Bot Add
+
+Writes local gitignored `bots.json`.
+
+Use this when you receive a new bot token and want to validate/store it locally:
+
+```bash
+telegram-tools bot-add
+```
+
+The command prompts for the token, validates it through Bot API `getMe`, stores it in `bots.json`, and prints only a masked token.
 
 ## Launcher Scripts
 
-Clickable macOS `.command` launchers live in `scripts/`.
+Clickable macOS launchers live in `scripts/`.
 
 All launchers:
 
 - `cd /Users/sven/code/telegram-tools`
 - activate `.venv`
+- run `telegram-tools`
 - prompt for required values
-- keep Terminal open with `Press Enter to close`
-- avoid hardcoded chat IDs, topic IDs, and secrets
+- keep Terminal open afterwards
+- do not hardcode Example Forum/chat/topic IDs
 
-### `scripts/discover.command`
+| Launcher | Mode | What it does |
+| --- | --- | --- |
+| `telegram-tools.command` | mixed | Opens the interactive menu. |
+| `discover.command` | read-only | Runs discovery; optionally writes JSON. |
+| `search.command` | read-only | Prompts for chat/keyword/topic and searches. |
+| `export-topic.command` | read-only | Prompts for chat/topic/output and exports. |
+| `clear-topic-messages.command` | destructive only with opt-in | Clears messages in one topic. |
+| `clear-multiple-topics.command` | destructive only with opt-in | Clears messages in selected topics. |
+| `clear-all-topic-messages.command` | destructive only with opt-in | Clears messages in all topics in a chat. |
+| `bot-inventory.command` | read-only | Validates configured bot tokens. |
+| `bot-add.command` | local write | Prompts for and stores a validated bot token. |
 
-Read-only.
-
-What it does: runs human-readable discovery in Terminal. It optionally writes JSON to `exports/discovery.json`.
-
-When to use it: when you want to click once and inspect chats/topics.
-
-Inputs: optional JSON export confirmation.
-
-Example:
+Examples:
 
 ```bash
+open scripts/telegram-tools.command
 open scripts/discover.command
+open scripts/clear-topic-messages.command
+open scripts/bot-add.command
 ```
 
-### `scripts/search.command`
+Clear launchers default to dry-run. To pass `--execute`, type `DELETE` when the launcher asks; the CLI then asks for `DELETE` again at the safety prompt.
 
-Read-only.
+## Example Workflows
 
-What it does: prompts for chat, keyword, and optional topic ID, then prints JSON search results.
-
-When to use it: quick Terminal search.
-
-Required inputs: chat and keyword.
-
-Example:
+### Find a topic ID and export it
 
 ```bash
-open scripts/search.command
+telegram-tools discover
+telegram-tools search --chat -1001112223333 --topic 141 --format json --output exports/topic-141.json
 ```
 
-### `scripts/export-topic.command`
-
-Read-only.
-
-What it does: prompts for chat, topic ID, output path, and format, then exports topic messages.
-
-When to use it: saving topic messages to JSON or CSV.
-
-Required inputs: chat and topic ID.
-
-Example:
+### Search before clearing
 
 ```bash
-open scripts/export-topic.command
+telegram-tools search --chat @my_group --topic 141 --contains "old notice"
+telegram-tools clear-messages --chat @my_group --topic 141
 ```
 
-### `scripts/clear-topic-messages.command`
+Only add `--execute` after the dry-run count is what you expect.
 
-Destructive only if you explicitly opt into execution.
+### Add and inventory a bot
 
-What it does: prompts for chat and one topic ID, then runs `clear-messages`.
-
-When to use it: clearing messages inside one topic.
-
-Required inputs: chat and topic ID.
-
-Safety notes:
-
-- Defaults to dry-run.
-- To pass `--execute`, type `DELETE` when the launcher asks.
-- The CLI then shows the full clear-message safety prompt and asks for `DELETE` again.
-- Topics and topic IDs are preserved.
-
-### `scripts/clear-multiple-topics.command`
-
-Destructive only if you explicitly opt into execution.
-
-What it does: prompts for chat and multiple topic IDs, then runs `clear-messages`.
-
-When to use it: clearing messages inside selected topics.
-
-Required inputs: chat and topic IDs.
-
-Safety notes: same as `clear-topic-messages.command`.
-
-### `scripts/clear-all-topic-messages.command`
-
-Destructive only if you explicitly opt into execution.
-
-What it does: prompts for chat and runs `clear-messages --all-topics`.
-
-When to use it: clearing messages inside every forum topic in a group.
-
-Required inputs: chat.
-
-Safety notes:
-
-- Defaults to dry-run.
-- This can match many messages.
-- Topics and topic IDs are preserved.
-
-### `scripts/bot-inventory.command`
-
-Read-only.
-
-What it does: validates bot tokens from `.env` or `bots.json`.
-
-When to use it: checking which configured bot tokens are valid.
-
-Required inputs: `.env` or `bots.json` with bot token values.
-
-Safety notes:
-
-- Full tokens are never printed.
-- Do not commit `.env` or `bots.json`.
+```bash
+telegram-tools bot-add
+telegram-tools bot-inventory
+```
 
 ## Safety Features
 
-- `.env`, `bots.json`, `.telegram-tools/`, session files, and exports are gitignored.
-- Discovery, search, export, and bot inventory are read-only.
-- Clear-message commands default to dry-run.
-- `--execute` is required for destructive message clearing.
-- The execution prompt explicitly says forum topics will not be deleted and topic IDs will not change.
-- FloodWait responses are slept through before retrying a clear-message batch.
-- The toolkit does not implement topic deletion.
+- `.env`, `bots.json`, `.telegram-tools/`, session files, exports, and `.DS_Store` are gitignored.
+- `discover`, `search`, export, and `bot-inventory` are read-only.
+- `bot-add` writes only local `bots.json`.
+- `clear-messages` is destructive, but only for messages.
+- Forum topics are not deleted.
+- Topic IDs do not change.
+- `--execute` and a typed `DELETE` prompt are both required for message clearing.
+- No media download in v1.1.
 
 ## Project Structure
 
 ```text
 src/telegram_tools/
-  bot_inventory.py  Bot token loading, masking, and Bot API validation
-  cli.py            argparse CLI entry point
+  bot_inventory.py  Bot token loading, masking, validation, and local storage
+  cli.py            argparse CLI and interactive menu
   client.py         Telethon client creation
   config.py         .env and environment config loading
   delete.py         clear-message implementation and safety prompt
-  discovery.py      chat/topic discovery and table formatting
+  discovery.py      chat/topic discovery and grouped table formatting
   exporters.py      JSON/CSV writing
   resolver.py       shared chat/entity resolver
-  search.py         message search/export collection
+  search.py         message search and readable formatting
   topics.py         forum topic API helpers
 scripts/
   *.command         clickable macOS launchers
@@ -470,35 +403,40 @@ tests/
 
 ## Troubleshooting
 
+### Running `telegram-tools` opens a menu
+
+That is the v1.1 default. Use explicit subcommands for scripts:
+
+```bash
+telegram-tools discover
+telegram-tools search --chat @my_group --contains deploy
+```
+
 ### `Cannot find any entity corresponding to "-100..."`
 
 Run discovery first:
 
 ```bash
-telegram-tools discover
+telegram-tools discover --all
 ```
 
-Numeric IDs are resolved from the authenticated account's dialogs before falling back to Telethon entity lookup.
-
-### First login asks for phone/code
-
-That is Telethon creating the local session. The session is stored under `.telegram-tools/`.
+Numeric IDs are resolved from authenticated dialogs before falling back to Telethon entity lookup.
 
 ### CSV export without output path fails
 
-CSV needs an output file:
+CSV needs a file:
 
 ```bash
 telegram-tools search --chat @my_group --topic 141 --format csv --output exports/topic.csv
 ```
 
-### Clear-message command matched too many messages
+### Clear-message dry-run matches too many messages
 
-Do not pass `--execute`. Inspect the dry-run result and narrow the chat/topic selection.
+Do not pass `--execute`. Narrow the chat/topic selection and rerun dry-run.
 
-### Bot inventory shows `Unauthorized`
+### Bot inventory says `Unauthorized`
 
-The token is invalid, revoked, malformed, or belongs to a deleted bot. The output masks the token so it is safe to read in Terminal.
+The token is invalid, revoked, malformed, or belongs to a deleted bot. The printed token is masked.
 
 ## Validation
 
@@ -506,5 +444,10 @@ The token is invalid, revoked, malformed, or belongs to a deleted bot. The outpu
 .venv/bin/python -m pytest
 .venv/bin/python -m compileall -q src
 .venv/bin/telegram-tools --help
+.venv/bin/telegram-tools discover --help
+.venv/bin/telegram-tools clear-messages --help
+.venv/bin/telegram-tools search --help
+.venv/bin/telegram-tools bot-inventory --help
+.venv/bin/telegram-tools bot-add --help
 for f in scripts/*.command; do bash -n "$f"; done
 ```

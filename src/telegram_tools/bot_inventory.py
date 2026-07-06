@@ -101,6 +101,17 @@ def bot_tokens_from_json(path: Path) -> list[str]:
     return _dedupe(tokens)
 
 
+def _read_bot_json(path: Path) -> Any:
+    if not path.exists():
+        return []
+    return json.loads(path.read_text())
+
+
+def _write_bot_json(path: Path, data: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2) + "\n")
+
+
 def load_bot_tokens(
     *,
     env: Mapping[str, str] | None = None,
@@ -176,21 +187,56 @@ def validate_bots(
     return [validate_bot_token(token, transport=transport, timeout=timeout) for token in tokens]
 
 
+def add_bot_token(
+    token: str,
+    *,
+    bots_json: Path | str = Path("bots.json"),
+    transport: BotTransport = telegram_get_me,
+    timeout: int = 10,
+) -> BotInventoryItem:
+    item = validate_bot_token(token, transport=transport, timeout=timeout)
+    if not item.ok:
+        return item
+
+    path = Path(bots_json)
+    data = _read_bot_json(path)
+    if not isinstance(data, list):
+        data = [{"name": key, "token": value} for key, value in data.items()] if isinstance(data, dict) else []
+
+    existing_tokens = set()
+    for entry in data:
+        if isinstance(entry, str):
+            existing_tokens.add(entry)
+        elif isinstance(entry, dict) and isinstance(entry.get("token"), str):
+            existing_tokens.add(entry["token"])
+
+    if token not in existing_tokens:
+        data.append(
+            {
+                "name": item.display_name or item.username or str(item.bot_id or "bot"),
+                "token": token,
+            }
+        )
+        _write_bot_json(path, data)
+
+    return item
+
+
 def format_bot_inventory(items: list[BotInventoryItem]) -> str:
     if not items:
         return "No bot tokens found."
 
-    lines = ["ok\tid\tusername\tdisplay_name\ttoken\terror"]
+    lines = ["name\tbot ID\tusername\tmasked token\tstatus"]
     for item in items:
+        status = "ok" if item.ok else f"error: {item.error or 'unknown'}"
         lines.append(
             "\t".join(
                 [
-                    "yes" if item.ok else "no",
+                    item.display_name or "",
                     "" if item.bot_id is None else str(item.bot_id),
                     item.username or "",
-                    item.display_name or "",
                     item.masked_token,
-                    item.error or "",
+                    status,
                 ]
             )
         )

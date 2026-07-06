@@ -7,19 +7,25 @@ def parse_args(*args: str):
     return build_parser().parse_args(list(args))
 
 
+def test_no_subcommand_opens_interactive_menu_mode():
+    args = parse_args()
+
+    assert args.command is None
+
+
 def test_discover_command_accepts_json_output():
     args = parse_args("discover", "--json", "exports/chats.json")
 
     assert args.command == "discover"
     assert args.json_output == "exports/chats.json"
-    assert args.admin_only is False
+    assert args.all_chats is False
 
 
-def test_discover_command_accepts_admin_only_filter():
-    args = parse_args("discover", "--admin-only")
+def test_discover_command_accepts_all_chats_filter():
+    args = parse_args("discover", "--all")
 
     assert args.command == "discover"
-    assert args.admin_only is True
+    assert args.all_chats is True
 
 
 def test_clear_messages_defaults_to_dry_run_for_one_topic():
@@ -31,6 +37,13 @@ def test_clear_messages_defaults_to_dry_run_for_one_topic():
     assert args.all_topics is False
     assert args.execute is False
     assert args.batch_size == 100
+
+
+def test_clear_messages_accepts_all_topics_in_chat_alias():
+    args = parse_args("clear-messages", "--chat", "@group", "--all-topics-in-chat")
+
+    assert args.command == "clear-messages"
+    assert args.all_topics is True
 
 
 def test_clear_messages_requires_topic_or_all_topics():
@@ -80,8 +93,21 @@ def test_search_command_accepts_export_filters():
     assert args.output == "exports/messages.csv"
 
 
+def test_search_command_accepts_contains_alias():
+    args = parse_args("search", "--chat", "@group", "--contains", "deploy")
+
+    assert args.keyword == "deploy"
+
+
 def test_bot_inventory_command_accepts_local_bots_json():
     args = parse_args("bot-inventory", "--bots-json", "bots.json")
 
     assert args.command == "bot-inventory"
+    assert args.bots_json == "bots.json"
+
+
+def test_bot_add_command_accepts_local_bots_json():
+    args = parse_args("bot-add", "--bots-json", "bots.json")
+
+    assert args.command == "bot-add"
     assert args.bots_json == "bots.json"

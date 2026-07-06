@@ -45,7 +45,7 @@ def test_filter_chats_returns_only_admin_chats_when_requested():
 
 def test_format_discovery_table_shows_human_readable_chats_and_topics():
     info = dialog_to_chat_info(
-        SimpleNamespace(id=-1003930298580, title="Hermes", entity=SimpleNamespace(megagroup=True, forum=True)),
+        SimpleNamespace(id=-1001112223333, title="Example Forum", entity=SimpleNamespace(megagroup=True, forum=True)),
         is_admin=True,
         topics=[
             TopicInfo(id=141, title="Harry", top_message=141),
@@ -56,9 +56,34 @@ def test_format_discovery_table_shows_human_readable_chats_and_topics():
     text = format_discovery_table([info])
 
     assert "Chat" in text
-    assert "Hermes" in text
-    assert "Chat ID: -1003930298580" in text
+    assert "Example Forum" in text
+    assert "Chat ID: -1001112223333" in text
     assert "Type: Forum Group" in text
     assert "Topics" in text
     assert "141  Harry" in text
     assert "217  Dobby" in text
+
+
+def test_format_discovery_table_groups_managed_chats():
+    forum = dialog_to_chat_info(
+        SimpleNamespace(id=-1001, title="Forum", entity=SimpleNamespace(megagroup=True, forum=True)),
+        is_admin=True,
+        topics=[TopicInfo(id=10, title="General", top_message=10)],
+    )
+    channel = dialog_to_chat_info(
+        SimpleNamespace(id=-1002, title="Channel", entity=SimpleNamespace(broadcast=True)),
+        is_admin=True,
+    )
+    group = dialog_to_chat_info(
+        SimpleNamespace(id=-1003, title="Group", entity=SimpleNamespace(megagroup=True)),
+        is_admin=True,
+    )
+
+    text = format_discovery_table([forum, channel, group])
+
+    assert "Forum Groups" in text
+    assert "Channels" in text
+    assert "Other Admin Groups" in text
+    assert "Forum" in text
+    assert "Channel" in text
+    assert "Group" in text

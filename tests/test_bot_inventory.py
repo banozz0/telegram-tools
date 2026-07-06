@@ -2,7 +2,9 @@ import json
 from pathlib import Path
 
 from telegram_tools.bot_inventory import (
+    add_bot_token,
     bot_tokens_from_env,
+    format_bot_inventory,
     load_bot_tokens,
     mask_token,
     validate_bots,
@@ -37,7 +39,7 @@ def test_load_bot_tokens_reads_gitignored_bots_json_shapes(tmp_path, monkeypatch
         json.dumps(
             [
                 "111:aaa",
-                {"name": "hermes", "token": "222:bbb"},
+                {"name": "example", "token": "222:bbb"},
                 {"token": "111:aaa"},
             ]
         )
@@ -50,7 +52,7 @@ def test_load_bot_tokens_reads_gitignored_bots_json_shapes(tmp_path, monkeypatch
 
 def test_load_bot_tokens_combines_env_and_bots_json_with_env_first(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    Path("bots.json").write_text(json.dumps({"hermes": "222:bbb", "other": "333:ccc"}))
+    Path("bots.json").write_text(json.dumps({"example": "222:bbb", "other": "333:ccc"}))
 
     tokens = load_bot_tokens(
         env={"TELEGRAM_BOT_TOKENS": "111:aaa 222:bbb"},
@@ -69,8 +71,8 @@ def test_validate_bots_uses_get_me_and_never_returns_full_tokens():
             "ok": True,
             "result": {
                 "id": 123456789,
-                "username": "hermes_bot",
-                "first_name": "Hermes",
+                "username": "example_bot",
+                "first_name": "Example",
                 "last_name": "Bot",
             },
         }
@@ -80,8 +82,8 @@ def test_validate_bots_uses_get_me_and_never_returns_full_tokens():
     assert calls == [("123456789:ABCDEFSECRET", 10)]
     assert results[0].ok is True
     assert results[0].bot_id == 123456789
-    assert results[0].username == "hermes_bot"
-    assert results[0].display_name == "Hermes Bot"
+    assert results[0].username == "example_bot"
+    assert results[0].display_name == "Example Bot"
     assert results[0].masked_token == "123456789:***"
     assert "ABCDEFSECRET" not in repr(results[0])
 
@@ -96,3 +98,44 @@ def test_validate_bots_masks_tokens_on_invalid_response():
     assert results[0].masked_token == "123456789:***"
     assert results[0].error == "Unauthorized"
     assert "ABCDEFSECRET" not in repr(results[0])
+
+
+def test_format_bot_inventory_uses_clean_table_columns():
+    results = validate_bots(
+        ["123456789:ABCDEFSECRET"],
+        transport=lambda token, timeout: {
+            "ok": True,
+            "result": {"id": 123456789, "username": "example_bot", "first_name": "Example"},
+        },
+    )
+
+    text = format_bot_inventory(results)
+
+    assert "name\tbot ID\tusername\tmasked token\tstatus" in text
+    assert "Example" in text
+    assert "123456789" in text
+    assert "example_bot" in text
+    assert "123456789:***" in text
+    assert "ABCDEFSECRET" not in text
+
+
+def test_add_bot_token_validates_and_stores_token_in_bots_json(tmp_path):
+    path = tmp_path / "bots.json"
+
+    item = add_bot_token(
+        "123456789:ABCDEFSECRET",
+        bots_json=path,
+        transport=lambda token, timeout: {
+            "ok": True,
+            "result": {
+                "id": 123456789,
+                "username": "example_bot",
+                "first_name": "Example",
+            },
+        },
+    )
+
+    assert item.ok is True
+    assert item.masked_token == "123456789:***"
+    assert "ABCDEFSECRET" not in repr(item)
+    assert load_bot_tokens(env={}, bots_json=path, cwd=tmp_path) == ["123456789:ABCDEFSECRET"]

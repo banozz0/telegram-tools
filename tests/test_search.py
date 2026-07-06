@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 
 from telegram_tools.search import search_messages
+from telegram_tools.search import format_message_records
 
 
 class FakeClient:
@@ -76,3 +77,23 @@ def test_non_topic_search_uses_telethon_server_side_filters_then_local_dates():
     assert client.iter_calls[0][1]["from_user"] == "@alice"
     assert client.iter_calls[0][1]["limit"] == 50
     assert client.iter_calls[0][1]["offset_date"] == datetime(2026, 7, 6, 23, 59, 59, 999999, tzinfo=UTC)
+
+
+def test_format_message_records_outputs_human_readable_table():
+    text = format_message_records(
+        [
+            {
+                "id": 12,
+                "date": "2026-07-06T12:30:00+00:00",
+                "topic_id": 141,
+                "sender_username": "alice",
+                "text": "deploy finished",
+            }
+        ]
+    )
+
+    assert "Messages" in text
+    assert "12" in text
+    assert "141" in text
+    assert "alice" in text
+    assert "deploy finished" in text

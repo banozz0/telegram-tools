@@ -45,35 +45,65 @@ def _display_type(chat_type: str) -> str:
     return chat_type.replace("_", " ").title()
 
 
+def _group_discovery_chats(chats: list[ChatInfo]) -> list[tuple[str, list[ChatInfo]]]:
+    forum_groups = [chat for chat in chats if chat.type == "forum_group"]
+    channels = [chat for chat in chats if chat.type == "channel"]
+    other_admin_groups = [
+        chat
+        for chat in chats
+        if chat.type in {"group", "supergroup"} and chat.is_admin and chat not in forum_groups
+    ]
+    other_chats = [
+        chat
+        for chat in chats
+        if chat not in forum_groups and chat not in channels and chat not in other_admin_groups
+    ]
+
+    groups = [
+        ("Forum Groups", forum_groups),
+        ("Channels", channels),
+        ("Other Admin Groups", other_admin_groups),
+    ]
+    if other_chats:
+        groups.append(("Other Chats", other_chats))
+    return groups
+
+
+def _format_chat(chat: ChatInfo) -> str:
+    lines = [
+        chat.title or "(untitled)",
+        f"Chat ID: {chat.id}",
+        f"Type: {_display_type(chat.type)}",
+        f"Admin: {'yes' if chat.is_admin else 'no'}",
+    ]
+    if chat.username:
+        lines.append(f"Username: @{chat.username}")
+
+    if chat.topics:
+        width = max(len(str(topic.id)) for topic in chat.topics)
+        lines.extend(
+            [
+                "",
+                "Topics",
+                "--------------------------------------------",
+            ]
+        )
+        lines.extend(f"{topic.id:<{width}}  {topic.title}" for topic in chat.topics)
+
+    return "\n".join(lines)
+
+
 def format_discovery_table(chats: list[ChatInfo]) -> str:
     if not chats:
         return "No chats found."
 
     sections: list[str] = []
-    for chat in chats:
-        lines = [
-            "Chat",
-            "--------------------------------------------",
-            chat.title or "(untitled)",
-            f"Chat ID: {chat.id}",
-            f"Type: {_display_type(chat.type)}",
-            f"Admin: {'yes' if chat.is_admin else 'no'}",
-        ]
-        if chat.username:
-            lines.append(f"Username: @{chat.username}")
-
-        if chat.topics:
-            width = max(len(str(topic.id)) for topic in chat.topics)
-            lines.extend(
-                [
-                    "",
-                    "Topics",
-                    "--------------------------------------------",
-                ]
-            )
-            lines.extend(f"{topic.id:<{width}}  {topic.title}" for topic in chat.topics)
-
-        sections.append("\n".join(lines))
+    for title, group in _group_discovery_chats(chats):
+        if not group:
+            continue
+        lines = [title, "=" * len(title)]
+        lines.extend(_format_chat(chat) for chat in group)
+        sections.append("\n\n".join(lines))
 
     return "\n\n".join(sections)
 

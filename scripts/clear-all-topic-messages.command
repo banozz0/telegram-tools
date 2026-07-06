@@ -20,7 +20,7 @@ if [ -z "$CHAT" ]; then
   exit 2
 fi
 
-ARGS=(clear-messages --chat "$CHAT" --all-topics)
+ARGS=(clear-messages --chat "$CHAT" --all-topics-in-chat)
 if [ "$EXECUTE_CONFIRM" = "DELETE" ]; then
   ARGS+=(--execute)
 else

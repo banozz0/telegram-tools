@@ -5,6 +5,29 @@ from typing import Any
 from telegram_tools.records import message_matches_filters, message_to_record, parse_date_bound
 
 
+def _truncate(value: str, max_length: int = 80) -> str:
+    value = " ".join(value.split())
+    if len(value) <= max_length:
+        return value
+    return value[: max_length - 1] + "..."
+
+
+def format_message_records(records: list[dict[str, Any]]) -> str:
+    if not records:
+        return "No messages found."
+
+    lines = ["Messages", "--------------------------------------------"]
+    for record in records:
+        sender = record.get("sender_username") or record.get("sender_id") or ""
+        topic = record.get("topic_id") or ""
+        date = record.get("date") or ""
+        text = _truncate(str(record.get("text") or ""))
+        lines.append(
+            f"{record.get('id')}\t{date}\ttopic={topic}\tsender={sender}\t{text}"
+        )
+    return "\n".join(lines)
+
+
 async def _resolve_from_user_id(client, from_user: str | int | None) -> int | None:
     if from_user is None:
         return None

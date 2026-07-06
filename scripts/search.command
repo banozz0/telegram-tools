@@ -21,7 +21,7 @@ if [ -z "$CHAT" ] || [ -z "$KEYWORD" ]; then
   exit 2
 fi
 
-ARGS=(search --chat "$CHAT" --keyword "$KEYWORD" --format json)
+ARGS=(search --chat "$CHAT" --contains "$KEYWORD" --format json)
 if [ -n "$TOPIC" ]; then
   ARGS+=(--topic "$TOPIC")
 fi
