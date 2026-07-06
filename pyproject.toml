@@ -1,0 +1,28 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "telegram-tools"
+version = "0.1.0"
+description = "Private Telethon CLI tools for managing Telegram chats, groups, channels, and forum topics."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "Telethon>=1.44,<2",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+]
+
+[project.scripts]
+telegram-tools = "telegram_tools.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/telegram_tools"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
