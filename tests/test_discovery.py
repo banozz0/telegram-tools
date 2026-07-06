@@ -45,11 +45,11 @@ def test_filter_chats_returns_only_admin_chats_when_requested():
 
 def test_format_discovery_table_shows_human_readable_chats_and_topics():
     info = dialog_to_chat_info(
-        SimpleNamespace(id=-1001112223333, title="Example Forum", entity=SimpleNamespace(megagroup=True, forum=True)),
+        SimpleNamespace(id=-1001234567890, title="Example Forum", entity=SimpleNamespace(megagroup=True, forum=True)),
         is_admin=True,
         topics=[
-            TopicInfo(id=141, title="Harry", top_message=141),
-            TopicInfo(id=217, title="Dobby", top_message=217),
+            TopicInfo(id=141, title="Deploys", top_message=141),
+            TopicInfo(id=217, title="Support", top_message=217),
         ],
     )
 
@@ -57,11 +57,11 @@ def test_format_discovery_table_shows_human_readable_chats_and_topics():
 
     assert "Chat" in text
     assert "Example Forum" in text
-    assert "Chat ID: -1001112223333" in text
+    assert "Chat ID: -1001234567890" in text
     assert "Type: Forum Group" in text
     assert "Topics" in text
-    assert "141  Harry" in text
-    assert "217  Dobby" in text
+    assert "141  Deploys" in text
+    assert "217  Support" in text
 
 
 def test_format_discovery_table_groups_managed_chats():

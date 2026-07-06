@@ -12,12 +12,12 @@ from telegram_tools.bot_inventory import (
 
 
 def test_mask_token_never_exposes_secret_suffix():
-    token = "123456789:ABCDEFSECRET"
+    token = "123456789:secret"
 
     masked = mask_token(token)
 
     assert masked == "123456789:***"
-    assert "ABCDEFSECRET" not in masked
+    assert "secret" not in masked
     assert token not in masked
 
 
@@ -26,7 +26,7 @@ def test_bot_tokens_from_env_supports_singular_list_and_named_tokens():
         {
             "TELEGRAM_BOT_TOKEN": "111:aaa",
             "TELEGRAM_BOT_TOKENS": "222:bbb, 333:ccc\n444:ddd",
-            "TELEGRAM_BOT_TOKEN_HERMES": "555:eee",
+            "TELEGRAM_BOT_TOKEN_WORKER": "555:eee",
         }
     )
 
@@ -77,32 +77,32 @@ def test_validate_bots_uses_get_me_and_never_returns_full_tokens():
             },
         }
 
-    results = validate_bots(["123456789:ABCDEFSECRET"], transport=fake_transport)
+    results = validate_bots(["123456789:secret"], transport=fake_transport)
 
-    assert calls == [("123456789:ABCDEFSECRET", 10)]
+    assert calls == [("123456789:secret", 10)]
     assert results[0].ok is True
     assert results[0].bot_id == 123456789
     assert results[0].username == "example_bot"
     assert results[0].display_name == "Example Bot"
     assert results[0].masked_token == "123456789:***"
-    assert "ABCDEFSECRET" not in repr(results[0])
+    assert "secret" not in repr(results[0])
 
 
 def test_validate_bots_masks_tokens_on_invalid_response():
     def fake_transport(token, timeout):
         return {"ok": False, "description": "Unauthorized"}
 
-    results = validate_bots(["123456789:ABCDEFSECRET"], transport=fake_transport)
+    results = validate_bots(["123456789:secret"], transport=fake_transport)
 
     assert results[0].ok is False
     assert results[0].masked_token == "123456789:***"
     assert results[0].error == "Unauthorized"
-    assert "ABCDEFSECRET" not in repr(results[0])
+    assert "secret" not in repr(results[0])
 
 
 def test_format_bot_inventory_uses_clean_table_columns():
     results = validate_bots(
-        ["123456789:ABCDEFSECRET"],
+        ["123456789:secret"],
         transport=lambda token, timeout: {
             "ok": True,
             "result": {"id": 123456789, "username": "example_bot", "first_name": "Example"},
@@ -116,14 +116,14 @@ def test_format_bot_inventory_uses_clean_table_columns():
     assert "123456789" in text
     assert "example_bot" in text
     assert "123456789:***" in text
-    assert "ABCDEFSECRET" not in text
+    assert "secret" not in text
 
 
 def test_add_bot_token_validates_and_stores_token_in_bots_json(tmp_path):
     path = tmp_path / "bots.json"
 
     item = add_bot_token(
-        "123456789:ABCDEFSECRET",
+        "123456789:secret",
         bots_json=path,
         transport=lambda token, timeout: {
             "ok": True,
@@ -137,5 +137,5 @@ def test_add_bot_token_validates_and_stores_token_in_bots_json(tmp_path):
 
     assert item.ok is True
     assert item.masked_token == "123456789:***"
-    assert "ABCDEFSECRET" not in repr(item)
-    assert load_bot_tokens(env={}, bots_json=path, cwd=tmp_path) == ["123456789:ABCDEFSECRET"]
+    assert "secret" not in repr(item)
+    assert load_bot_tokens(env={}, bots_json=path, cwd=tmp_path) == ["123456789:secret"]

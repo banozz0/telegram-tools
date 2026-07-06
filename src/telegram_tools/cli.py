@@ -13,6 +13,7 @@ from telegram_tools.client import create_client
 from telegram_tools.config import ConfigError, load_config
 from telegram_tools.delete import confirm_clear_topic_messages, delete_topic_messages
 from telegram_tools.discovery import discover_chats, filter_chats, format_discovery_table
+from telegram_tools.doctor import run_doctor
 from telegram_tools.exporters import write_records
 from telegram_tools.resolver import EntityResolutionError, resolve_chat
 from telegram_tools.search import format_message_records, search_messages
@@ -59,6 +60,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     bot_add = subparsers.add_parser("bot-add", help="Validate and store a bot token in local bots.json")
     bot_add.add_argument("--bots-json", default="bots.json", help="Local gitignored bot token inventory file")
+
+    doctor = subparsers.add_parser("doctor", help="Check local setup without printing secrets")
+    doctor.add_argument("--bots-json", default="bots.json", help="Local gitignored bot token inventory file")
 
     return parser
 
@@ -207,6 +211,8 @@ async def run(args) -> int:
         item = add_bot_token(token, bots_json=args.bots_json)
         print(format_bot_inventory([item]))
         return 0 if item.ok else 1
+    if args.command == "doctor":
+        return run_doctor(bots_json=args.bots_json)
 
     config = load_config()
     client = create_client(config)

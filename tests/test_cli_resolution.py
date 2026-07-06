@@ -24,7 +24,7 @@ def test_clear_messages_command_uses_shared_chat_resolver(monkeypatch):
 
     async def fake_resolve_chat(client, reference):
         calls["reference"] = reference
-        return ResolvedChat(id=-1001112223333, entity=SimpleNamespace(), input_entity=resolved_peer)
+        return ResolvedChat(id=-1001234567890, entity=SimpleNamespace(), input_entity=resolved_peer)
 
     async def fake_get_topics(client, peer, topic_ids):
         calls["topics_peer"] = peer
@@ -43,12 +43,12 @@ def test_clear_messages_command_uses_shared_chat_resolver(monkeypatch):
     status = asyncio.run(
         cli._run_clear_messages(
             FakeClient(),
-            argparse.Namespace(chat="-1001112223333", all_topics=False, topics=[123], execute=False, batch_size=100),
+            argparse.Namespace(chat="-1001234567890", all_topics=False, topics=[123], execute=False, batch_size=100),
         )
     )
 
     assert status == 0
-    assert calls["reference"] == "-1001112223333"
+    assert calls["reference"] == "-1001234567890"
     assert calls["topics_peer"] is resolved_peer
     assert calls["delete_chat"] is resolved_peer
     assert calls["topics"][0].id == 123
@@ -61,7 +61,7 @@ def test_search_command_uses_shared_chat_resolver(monkeypatch):
 
     async def fake_resolve_chat(client, reference):
         calls["reference"] = reference
-        return ResolvedChat(id=-1001112223333, entity=SimpleNamespace(), input_entity=resolved_peer)
+        return ResolvedChat(id=-1001234567890, entity=SimpleNamespace(), input_entity=resolved_peer)
 
     async def fake_search_messages(client, chat, **kwargs):
         calls["search_chat"] = chat
@@ -75,7 +75,7 @@ def test_search_command_uses_shared_chat_resolver(monkeypatch):
         cli._run_search(
             FakeClient(),
             argparse.Namespace(
-                chat="-1001112223333",
+                chat="-1001234567890",
                 topic=None,
                 keyword=None,
                 from_user=None,
@@ -89,6 +89,6 @@ def test_search_command_uses_shared_chat_resolver(monkeypatch):
     )
 
     assert status == 0
-    assert calls["reference"] == "-1001112223333"
+    assert calls["reference"] == "-1001234567890"
     assert calls["search_chat"] is resolved_peer
-    assert calls["kwargs"]["chat_id"] == -1001112223333
+    assert calls["kwargs"]["chat_id"] == -1001234567890
