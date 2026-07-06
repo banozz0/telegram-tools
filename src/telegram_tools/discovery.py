@@ -35,6 +35,12 @@ def dialog_to_chat_info(
     )
 
 
+def filter_chats(chats: list[ChatInfo], *, admin_only: bool) -> list[ChatInfo]:
+    if not admin_only:
+        return chats
+    return [chat for chat in chats if chat.is_admin]
+
+
 async def is_admin(client, entity, user) -> bool:
     try:
         permissions = await client.get_permissions(entity, user)

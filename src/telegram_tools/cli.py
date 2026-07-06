@@ -10,7 +10,7 @@ from typing import Sequence
 from telegram_tools.client import create_client
 from telegram_tools.config import ConfigError, load_config
 from telegram_tools.delete import delete_topic_messages
-from telegram_tools.discovery import discover_chats
+from telegram_tools.discovery import discover_chats, filter_chats
 from telegram_tools.exporters import write_records
 from telegram_tools.search import search_messages
 from telegram_tools.topics import get_forum_topics, get_forum_topics_by_ids
@@ -29,6 +29,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     discover = subparsers.add_parser("discover", help="List dialogs and forum topics")
     discover.add_argument("--json", dest="json_output", help="Write discovery output to this JSON file")
+    discover.add_argument("--admin-only", action="store_true", help="Only show chats where the current user is admin or creator")
 
     delete = subparsers.add_parser("delete", help="Delete messages from forum topic(s), dry-run by default")
     delete.add_argument("--chat", required=True, help="Chat/channel username, link, or ID")
@@ -60,7 +61,7 @@ async def _require_delete_permission(client, chat) -> None:
 
 
 async def _run_discover(client, args) -> int:
-    chats = await discover_chats(client)
+    chats = filter_chats(await discover_chats(client), admin_only=args.admin_only)
     payload = [chat.to_dict() for chat in chats]
     if args.json_output:
         output = Path(args.json_output)

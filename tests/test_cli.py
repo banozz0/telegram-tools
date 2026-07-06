@@ -12,6 +12,14 @@ def test_discover_command_accepts_json_output():
 
     assert args.command == "discover"
     assert args.json_output == "exports/chats.json"
+    assert args.admin_only is False
+
+
+def test_discover_command_accepts_admin_only_filter():
+    args = parse_args("discover", "--admin-only")
+
+    assert args.command == "discover"
+    assert args.admin_only is True
 
 
 def test_delete_defaults_to_dry_run_for_one_topic():
