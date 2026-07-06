@@ -42,13 +42,13 @@ def test_resolve_numeric_chat_id_from_dialogs_before_get_entity():
     client = FakeClient(
         dialogs=[
             SimpleNamespace(id=-100111, entity=SimpleNamespace(title="Other"), input_entity=SimpleNamespace()),
-            SimpleNamespace(id=-1001112223333, entity=entity, input_entity=input_entity),
+            SimpleNamespace(id=-1001234567890, entity=entity, input_entity=input_entity),
         ]
     )
 
-    resolved = asyncio.run(resolve_chat(client, "-1001112223333"))
+    resolved = asyncio.run(resolve_chat(client, "-1001234567890"))
 
-    assert resolved.id == -1001112223333
+    assert resolved.id == -1001234567890
     assert resolved.entity is entity
     assert resolved.input_entity is input_entity
     assert client.get_entity_calls == []

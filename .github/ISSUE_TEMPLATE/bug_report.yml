@@ -1,0 +1,47 @@
+name: Bug report
+description: Report a reproducible problem.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not include Telegram API hashes, bot tokens, phone numbers, session files, `.env`, `bots.json`, private exports, or screenshots with private chat data.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What went wrong?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction
+      description: Commands and sanitized inputs that reproduce the issue.
+      placeholder: |
+        telegram-tools search --chat @example_group --contains deploy
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      placeholder: "0.1.0 or commit SHA"
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation output
+      description: Paste sanitized `python -m pytest` or `telegram-tools doctor` output if relevant.

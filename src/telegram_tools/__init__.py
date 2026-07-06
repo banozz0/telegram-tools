@@ -1,4 +1,4 @@
-"""Private Telethon CLI tools."""
+"""Local Telethon CLI tools."""
 
 __all__ = ["__version__"]
 

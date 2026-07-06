@@ -5,9 +5,24 @@ build-backend = "hatchling.build"
 [project]
 name = "telegram-tools"
 version = "0.1.0"
-description = "Private Telethon CLI tools for managing Telegram chats, groups, channels, and forum topics."
+description = "Local Telethon CLI tools for Telegram chat discovery, message search/export, topic message clearing, and bot-token inventory."
 readme = "README.md"
 requires-python = ">=3.11"
+license = { file = "LICENSE" }
+keywords = ["telegram", "telethon", "cli", "forum-topics", "export"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: Console",
+  "Intended Audience :: End Users/Desktop",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Topic :: Communications :: Chat",
+  "Topic :: Utilities",
+]
 dependencies = [
   "Telethon>=1.44,<2",
   "python-dotenv>=1.0,<2",
@@ -20,6 +35,12 @@ dev = [
 
 [project.scripts]
 telegram-tools = "telegram_tools.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/banozz0/telegram-tools"
+Repository = "https://github.com/banozz0/telegram-tools"
+Issues = "https://github.com/banozz0/telegram-tools/issues"
+Changelog = "https://github.com/banozz0/telegram-tools/blob/main/CHANGELOG.md"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/telegram_tools"]
