@@ -133,7 +133,7 @@ def load_bot_tokens(
 def telegram_get_me(token: str, timeout: int = 10) -> dict[str, Any]:
     request = urllib.request.Request(
         f"https://api.telegram.org/bot{token}/getMe",
-        headers={"User-Agent": "telegram-tools/0.1"},
+        headers={"User-Agent": "telegram-tools/2.0.1"},
     )
     with urllib.request.urlopen(request, timeout=timeout) as response:
         return json.loads(response.read().decode("utf-8"))

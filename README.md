@@ -20,9 +20,19 @@ Clear-message workflows delete messages only. Forum topics are not deleted. Topi
 
 ## Installation
 
+For normal use from a local checkout:
+
 ```bash
 git clone https://github.com/banozz0/telegram-tools.git
 cd telegram-tools
+python3.11 -m venv .venv
+source .venv/bin/activate
+python -m pip install .
+```
+
+For development:
+
+```bash
 python3.11 -m venv .venv
 source .venv/bin/activate
 python -m pip install -e ".[dev]"

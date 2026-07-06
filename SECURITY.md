@@ -24,4 +24,9 @@ If you accidentally expose a secret, revoke or rotate it before reporting.
 
 ## Supported Versions
 
-Until the first public release, security fixes target the default branch.
+Security fixes target the latest public release line.
+
+| Version | Supported |
+| --- | --- |
+| 2.x | Yes |
+| Earlier private/pre-public snapshots | No |
