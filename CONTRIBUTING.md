@@ -9,7 +9,6 @@ Do not include any real Telegram credentials or private chat data in issues, pul
 Never commit:
 
 - `.env`
-- `bots.json`
 - `.telegram-tools/`
 - `*.session*`
 - phone numbers
@@ -36,10 +35,7 @@ telegram-tools --help
 telegram-tools discover --help
 telegram-tools clear-messages --help
 telegram-tools search --help
-telegram-tools bot-inventory --help
-telegram-tools bot-add --help
 telegram-tools doctor --help
-for f in scripts/*.command; do bash -n "$f"; done
 ```
 
 If you have local Telegram config and session storage, also run:

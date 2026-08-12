@@ -20,29 +20,10 @@ def test_interactive_menu_prints_expected_options():
     assert "2. Search messages" in text
     assert "3. Export messages" in text
     assert "4. Clear topic messages" in text
-    assert "8. Add bot" in text
+    assert "6. Clear all topic messages" in text
+    assert "Add bot" not in text
+    assert "Bot inventory" not in text
     assert "0. Exit" in text
-
-
-def test_interactive_menu_routes_bot_inventory_without_telegram_login(monkeypatch):
-    calls = {}
-
-    async def fake_run(args):
-        calls["command"] = args.command
-        return 0
-
-    monkeypatch.setattr(cli, "run", fake_run)
-
-    responses = iter(["7"])
-    result = asyncio.run(
-        cli.run_interactive_menu(
-            read=lambda _prompt: next(responses),
-            write=lambda _message: None,
-        )
-    )
-
-    assert result == 0
-    assert calls["command"] == "bot-inventory"
 
 
 def test_interactive_menu_builds_clear_all_topic_messages_args(monkeypatch):

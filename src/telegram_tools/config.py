@@ -12,6 +12,10 @@ class ConfigError(RuntimeError):
     pass
 
 
+def config_dir(home: Path | None = None) -> Path:
+    return (home or Path.home()) / ".telegram-tools"
+
+
 @dataclass(frozen=True)
 class Config:
     api_id: int
@@ -23,10 +27,12 @@ def load_config(
     env: Mapping[str, str] | None = None,
     *,
     cwd: Path | None = None,
+    home: Path | None = None,
 ) -> Config:
     cwd = cwd or Path.cwd()
     if env is None:
         load_dotenv(dotenv_path=cwd / ".env", override=False)
+        load_dotenv(dotenv_path=config_dir(home) / ".env", override=False)
         env = os.environ
 
     raw_api_id = env.get("TELEGRAM_API_ID")
@@ -42,5 +48,5 @@ def load_config(
     if not api_hash:
         raise ConfigError("TELEGRAM_API_HASH is required.")
 
-    session_path = Path(env.get("TELEGRAM_TOOLS_SESSION", cwd / ".telegram-tools" / "telegram-tools"))
+    session_path = Path(env.get("TELEGRAM_TOOLS_SESSION", config_dir(home) / "telegram-tools"))
     return Config(api_id=api_id, api_hash=api_hash, session_path=session_path)

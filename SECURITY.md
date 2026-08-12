@@ -14,7 +14,6 @@ Do not include:
 - bot tokens
 - phone numbers
 - `.env`
-- `bots.json`
 - `.telegram-tools/`
 - `*.session*`
 - exported private chat data
@@ -28,5 +27,5 @@ Security fixes target the latest public release line.
 
 | Version | Supported |
 | --- | --- |
-| 2.x | Yes |
+| 3.x | Yes |
 | Earlier private/pre-public snapshots | No |

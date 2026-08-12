@@ -2,13 +2,11 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import getpass
 import json
 import sys
 from pathlib import Path
 from typing import Sequence
 
-from telegram_tools.bot_inventory import add_bot_token, format_bot_inventory, load_bot_tokens, validate_bots
 from telegram_tools.client import create_client
 from telegram_tools.config import ConfigError, load_config
 from telegram_tools.delete import confirm_clear_topic_messages, delete_topic_messages
@@ -55,14 +53,7 @@ def build_parser() -> argparse.ArgumentParser:
     search.add_argument("--format", choices=("json", "csv"), default="json", help="Export format")
     search.add_argument("--output", help="Output path; prints a readable table when omitted")
 
-    bot_inventory = subparsers.add_parser("bot-inventory", help="Validate configured Telegram bot tokens")
-    bot_inventory.add_argument("--bots-json", default="bots.json", help="Local gitignored bot token inventory file")
-
-    bot_add = subparsers.add_parser("bot-add", help="Validate and store a bot token in local bots.json")
-    bot_add.add_argument("--bots-json", default="bots.json", help="Local gitignored bot token inventory file")
-
-    doctor = subparsers.add_parser("doctor", help="Check local setup without printing secrets")
-    doctor.add_argument("--bots-json", default="bots.json", help="Local gitignored bot token inventory file")
+    subparsers.add_parser("doctor", help="Check local setup without printing secrets")
 
     return parser
 
@@ -153,8 +144,6 @@ async def run_interactive_menu(*, read=input, write=print) -> int:
                 "4. Clear topic messages",
                 "5. Clear multiple topics",
                 "6. Clear all topic messages",
-                "7. Bot inventory",
-                "8. Add bot",
                 "0. Exit",
             ]
         )
@@ -192,27 +181,14 @@ async def run_interactive_menu(*, read=input, write=print) -> int:
     if choice == "6":
         chat = read("Chat (@username, t.me link, or numeric ID): ")
         return await run(_namespace(command="clear-messages", chat=chat, topics=None, all_topics=True, execute=_read_execute(read), batch_size=100))
-    if choice == "7":
-        return await run(_namespace(command="bot-inventory", bots_json="bots.json"))
-    if choice == "8":
-        return await run(_namespace(command="bot-add", bots_json="bots.json"))
 
     write("Unknown choice.")
     return 2
 
 
 async def run(args) -> int:
-    if args.command == "bot-inventory":
-        tokens = load_bot_tokens(bots_json=args.bots_json)
-        print(format_bot_inventory(validate_bots(tokens)))
-        return 0
-    if args.command == "bot-add":
-        token = getpass.getpass("Bot token: ")
-        item = add_bot_token(token, bots_json=args.bots_json)
-        print(format_bot_inventory([item]))
-        return 0 if item.ok else 1
     if args.command == "doctor":
-        return run_doctor(bots_json=args.bots_json)
+        return run_doctor()
 
     config = load_config()
     client = create_client(config)

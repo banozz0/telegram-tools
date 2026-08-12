@@ -99,22 +99,7 @@ def test_search_command_accepts_contains_alias():
     assert args.keyword == "deploy"
 
 
-def test_bot_inventory_command_accepts_local_bots_json():
-    args = parse_args("bot-inventory", "--bots-json", "bots.json")
-
-    assert args.command == "bot-inventory"
-    assert args.bots_json == "bots.json"
-
-
-def test_bot_add_command_accepts_local_bots_json():
-    args = parse_args("bot-add", "--bots-json", "bots.json")
-
-    assert args.command == "bot-add"
-    assert args.bots_json == "bots.json"
-
-
-def test_doctor_command_accepts_local_paths():
-    args = parse_args("doctor", "--bots-json", "bots.json")
+def test_doctor_command_parses():
+    args = parse_args("doctor")
 
     assert args.command == "doctor"
-    assert args.bots_json == "bots.json"

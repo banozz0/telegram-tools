@@ -13,7 +13,6 @@ build/
 !.env.example
 
 .telegram-tools/
-bots.json
 *.session
 *.session-journal
 *.session-shm
