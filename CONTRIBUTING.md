@@ -35,6 +35,7 @@ telegram-tools --help
 telegram-tools discover --help
 telegram-tools clear-messages --help
 telegram-tools search --help
+telegram-tools bots --help
 telegram-tools doctor --help
 ```
 

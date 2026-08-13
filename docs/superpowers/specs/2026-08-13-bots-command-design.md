@@ -69,7 +69,17 @@ TELEGRAM_BOT_TOKENS=harry:12345:AAExample,alerts:67890:BBExample
   Malformed means: no colon, an empty nickname, or a token half that does not start with a
   numeric bot id — the last case is what catches a bare token pasted in with no nickname,
   and it avoids inventing a rule about which characters a nickname may contain.
-- Lookup for `--bot X` matches nickname, `@username`, bare username, or numeric bot ID.
+- Lookup for `--bot X` matches a nickname key or the bot id inside the token's own
+  `12345:AA…` prefix; the id wins when a nickname disagrees with it, because a nickname is
+  a label a human typed and the prefix is the bot the token actually opens. A `@username`
+  matches only when that username was also used as the nickname — the token map holds no
+  usernames, so there is nothing else to match it against. A matched token replaces the
+  reference with its own bot id, which is what makes a nickname resolvable at all.
+  `config.resolve_bot_token` owns that whole policy; `cli.py` does not re-derive it.
+- After the bot resolves, the edit is refused unless the token's own bot id equals the
+  resolved bot's id. Without that check, a token filed under a nickname that names a
+  *different* bot could write to the bot the nickname named while the result JSON reported
+  the intended one. The refusal compares ids only and never prints any part of a token.
 - Loaded from the same places as the API credentials: shell env, `./.env`,
   `~/.telegram-tools/.env`.
 - Absent or non-matching token is not an error until a Rail 2 field is actually
@@ -129,13 +139,17 @@ typed `DELETE` ceremony `clear-messages` uses for destruction.
 
 1. Read the current profile.
 2. Drop no-op edits (new value equals current) and say so.
-3. Print `field: old → new` per remaining change; long text is truncated for display
-   with the full value still sent.
+3. Print one line naming the bot — `Editing @harrybot (12345)`, or `Editing bot 12345`
+   when it has no username — so a `y` is never answered blind. Then `field: old → new`
+   per remaining change; long text is truncated for display with the full value still sent.
 4. Prompt `Apply these changes? [y/N]`. Anything but `y` exits 1 with `cancelled`.
    `--yes` skips the prompt.
 5. Apply — Rail 1 first, then Rail 2 if a token is needed and present.
 6. Print a JSON result: `{"bot_id":…, "username":…, "applied":[…], "skipped":[…],
    "cancelled": false}`.
+
+Paths are checked before anything is sent: a missing `--commands` or `--photo` file exits
+2 with a usage error rather than a traceback, and never after a partial write.
 
 If a later write fails after an earlier one succeeded, the tool reports which fields
 applied before the error and exits non-zero. No rollback is attempted; the diff plus the
@@ -168,7 +182,9 @@ Changed:
   group_rights, channel_rights, has_photo) and `BotCommandInfo` (command, description),
   each with `to_dict()`, matching `ChatInfo`'s shape.
 - `config.py` — `parse_bot_tokens(raw)` pure function plus a `bot_tokens: dict[str, str]`
-  field on `Config`. Never logged, never in `repr` output used by the CLI.
+  field on `Config`, and `lookup_bot_token` / `resolve_bot_token`, which own the entire
+  nickname-or-bot-id lookup so no caller reimplements it. `bot_tokens` and `api_hash` are
+  `field(repr=False)`, so no generated `repr` can carry them. Never logged.
 - `cli.py` — parser, `_run_bots`, dispatch, and interactive menu entries "7. List my
   bots" and "8. Edit a bot".
 - `doctor.py` — a line reporting how many bot tokens loaded, and nothing else about them.
@@ -177,8 +193,8 @@ Changed:
 
 - Tokens are never written to disk, never printed, never included in `--json` output,
   error messages, or the confirm diff.
-- `Config.__repr__` is not used for user-facing output; any token-adjacent error message
-  refers to the nickname only.
+- `Config` hides `api_hash` and `bot_tokens` from its generated `repr`; any token-adjacent
+  error message refers to a nickname or a bot id only.
 - A test asserts that a formatted error for a bad `TELEGRAM_BOT_TOKENS` value contains
   no substring of the token.
 
@@ -196,7 +212,14 @@ Mirrors the existing suite: `SimpleNamespace` fakes, no network, no session file
   without a token produce the explanatory error.
 - `format_bot_table` / `format_bot_profile`: expected columns and the "not owned by you"
   marker.
-- Confirm flow: `n` cancels and applies nothing, `--yes` bypasses the prompt.
+- Confirm flow: `n` cancels and applies nothing, `--yes` bypasses the prompt, and the
+  prompt names the bot before the diff.
+- `resolve_bot_token`: nickname hit, numeric-bot-id hit, and a `@username` that is not a
+  nickname falling through to no token. At the CLI: a token whose bot id is not the
+  resolved bot's is refused, and a token nicknamed after another bot's username never
+  reaches the bot rail.
+- Failure reporting: an owner edit that landed before the bot rail raised still shows up
+  in `applied` on the way out.
 - CLI resolution: edit flags without `--bot` errors; `--bot` alone shows.
 
 ## Docs to update in the same change

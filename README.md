@@ -119,7 +119,7 @@ Topics
 | Command | Destructive? |
 | --- | --- |
 | `discover`, `search`, `doctor` | No — read-only |
-| `bots` | No — changes settings on bots you own, after a diff and a `y/N` unless you pass `--yes`; nothing is permanently lost and every change can be set back from @BotFather |
+| `bots` | No — changes settings on bots you own, after a diff and a `y/N` unless you pass `--yes`; reversible if you still have the old values, but `--remove-photo` and `--clear-commands` discard data Telegram will not hand back |
 | `clear-messages` | Yes — but only with `--execute` **and** a typed `DELETE`, only messages, never topics |
 
 `clear-messages` also verifies you actually hold the delete-messages permission in the chat before doing anything, skips topic starter messages, and handles Telegram flood-wait limits automatically.
