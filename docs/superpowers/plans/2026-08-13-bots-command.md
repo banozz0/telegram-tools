@@ -608,7 +608,7 @@ class FakeClient:
         self.requests.append(request)
         name = type(request).__name__
         if name == "GetAdminedBotsRequest":
-            return list(self.admined)
+            return self.admined  # returned as-is: one test passes a boxed SimpleNamespace(users=[...])
         if name == "GetFullUserRequest":
             return self.full
         raise AssertionError(f"unexpected request {name}")
