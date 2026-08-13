@@ -63,8 +63,10 @@ TELEGRAM_BOT_TOKENS=harry:12345:AAExample,alerts:67890:BBExample
 - Entries are comma-separated; each is `nickname:token`, split on the **first** colon so
   the token keeps its own `12345:AAE…` shape.
 - Whitespace around entries is stripped; empty entries are ignored.
-- A malformed entry (no colon, or empty nickname/token) raises `ConfigError` naming the
-  entry's position, never its contents.
+- A malformed entry raises `ConfigError` naming the entry's position, never its contents.
+  Malformed means: no colon, an empty nickname, or a token half that does not start with a
+  numeric bot id — the last case is what catches a bare token pasted in with no nickname,
+  and it avoids inventing a rule about which characters a nickname may contain.
 - Lookup for `--bot X` matches nickname, `@username`, bare username, or numeric bot ID.
 - Loaded from the same places as the API credentials: shell env, `./.env`,
   `~/.telegram-tools/.env`.

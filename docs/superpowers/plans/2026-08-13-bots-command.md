@@ -84,6 +84,10 @@ def test_parse_bot_tokens_rejects_an_entry_without_a_nickname():
         parse_bot_tokens("harry:12345:AAOne,12345:AAOne")
 
 
+def test_parse_bot_tokens_accepts_a_numeric_nickname():
+    assert parse_bot_tokens("007:12345:AAOne") == {"007": "12345:AAOne"}
+
+
 def test_parse_bot_tokens_error_never_echoes_the_token():
     with pytest.raises(ConfigError) as excinfo:
         parse_bot_tokens("harry:12345:AAOne,broken-entry")
@@ -126,7 +130,7 @@ def test_load_config_defaults_bot_tokens_to_empty(tmp_path, monkeypatch):
 
 
 def test_check_bot_tokens_counts_without_printing_tokens(tmp_path):
-    check = check_bot_tokens(tmp_path, {"TELEGRAM_BOT_TOKENS": "harry:12345:AAOne,alerts:67890:BBTwo"})
+    check = check_bot_tokens(tmp_path, {"TELEGRAM_BOT_TOKENS": "harry:12345:AAOne,alerts:67890:BBTwo"}, home=tmp_path / "home")
 
     assert check.status == "OK"
     assert "2 bot token" in check.message
@@ -134,14 +138,14 @@ def test_check_bot_tokens_counts_without_printing_tokens(tmp_path):
 
 
 def test_check_bot_tokens_warns_when_none_are_set(tmp_path):
-    check = check_bot_tokens(tmp_path, {})
+    check = check_bot_tokens(tmp_path, {}, home=tmp_path / "home")
 
     assert check.status == "WARN"
     assert check.failed is False
 
 
 def test_check_bot_tokens_fails_on_malformed_value(tmp_path):
-    check = check_bot_tokens(tmp_path, {"TELEGRAM_BOT_TOKENS": "broken"})
+    check = check_bot_tokens(tmp_path, {"TELEGRAM_BOT_TOKENS": "broken"}, home=tmp_path / "home")
 
     assert check.status == "FAIL"
 
@@ -191,7 +195,7 @@ def parse_bot_tokens(raw: str | None) -> dict[str, str]:
         nickname, separator, token = entry.partition(":")
         nickname = nickname.strip().lower()
         token = token.strip()
-        if not separator or not nickname or not token:
+        if not separator or not nickname or bot_id_from_token(token) is None:
             raise ConfigError(f"TELEGRAM_BOT_TOKENS entry {position} must look like nickname:token.")
         tokens[nickname] = token
     return tokens
@@ -211,6 +215,8 @@ def bot_id_from_token(token: str) -> int | None:
     prefix, _, _ = token.partition(":")
     return int(prefix) if prefix.isdigit() else None
 ```
+
+`parse_bot_tokens` calls `bot_id_from_token`, which is defined below it in the same module — the name resolves at call time, so the order above is fine. Validating the token half (it must start with a numeric bot id) is what rejects a bare `12345:AAOne` entry that has no nickname, without inventing a rule about which characters a nickname may contain.
 
 At the end of `load_config`, pass the tokens through:
 
