@@ -30,8 +30,9 @@ async def _remove_photo(client) -> bool:
     photos = list(getattr(result, "photos", []) or [])
     if not photos:
         return False
-    await client(functions.photos.DeletePhotosRequest(id=[utils.get_input_photo(photos[0])]))
-    return True
+    # deletePhotos answers with the ids it actually deleted; an empty vector removed nothing.
+    deleted = await client(functions.photos.DeletePhotosRequest(id=[utils.get_input_photo(photos[0])]))
+    return bool(deleted)
 
 
 async def apply_bot_edits(client, changes: list[EditChange], applied: list[str] | None = None) -> list[str]:

@@ -5,7 +5,15 @@ from types import SimpleNamespace
 import pytest
 
 from telegram_tools.bots import parse_commands_file, parse_rights, right_names, rights_to_names
-from telegram_tools.bots import ResolvedBot, format_bot_profile, format_bot_table, get_bot_profile, list_bots, resolve_bot
+from telegram_tools.bots import (
+    ResolvedBot,
+    format_bot_profile,
+    format_bot_table,
+    format_edit_heading,
+    get_bot_profile,
+    list_bots,
+    resolve_bot,
+)
 from telegram_tools.models import BotCommandInfo, BotInfo
 from telegram_tools.resolver import EntityResolutionError
 
@@ -255,6 +263,14 @@ def test_format_bot_table_lists_ids_and_usernames():
 
 def test_format_bot_table_handles_no_bots():
     assert format_bot_table([]) == "No bots found."
+
+
+def test_format_edit_heading_names_the_bot_and_falls_back_to_the_id():
+    named = BotInfo(id=12345, username="harrybot", name="Harry", bio=None, description=None, is_owned=True)
+    unnamed = BotInfo(id=12345, username=None, name="Harry", bio=None, description=None, is_owned=True)
+
+    assert format_edit_heading(named) == "Editing @harrybot (12345)"
+    assert format_edit_heading(unnamed) == "Editing bot 12345"
 
 
 def test_format_bot_profile_marks_a_bot_you_do_not_own():

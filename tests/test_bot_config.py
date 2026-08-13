@@ -2,7 +2,15 @@ from pathlib import Path
 
 import pytest
 
-from telegram_tools.config import ConfigError, bot_id_from_token, load_config, lookup_bot_token, parse_bot_tokens
+from telegram_tools.config import (
+    Config,
+    ConfigError,
+    bot_id_from_token,
+    load_config,
+    lookup_bot_token,
+    parse_bot_tokens,
+    resolve_bot_token,
+)
 from telegram_tools.doctor import check_bot_tokens
 
 
@@ -44,12 +52,53 @@ def test_parse_bot_tokens_error_never_echoes_the_token():
     assert "AAOne" not in str(excinfo.value)
 
 
-def test_lookup_bot_token_matches_nickname_username_or_id():
+def test_lookup_bot_token_matches_a_nickname_ignoring_case_and_the_at_sign():
     tokens = {"harry": "12345:AAOne"}
 
     assert lookup_bot_token(tokens, "@Harry") == "12345:AAOne"
     assert lookup_bot_token(tokens, None, "harry") == "12345:AAOne"
     assert lookup_bot_token(tokens, "alerts") is None
+
+
+def test_lookup_bot_token_matches_the_bot_id_inside_the_token():
+    tokens = {"mybot": "12345:AAsecret"}
+
+    assert lookup_bot_token(tokens, 12345) == "12345:AAsecret"
+    assert lookup_bot_token(tokens, "12345") == "12345:AAsecret"
+
+
+def test_lookup_bot_token_ignores_a_username_that_is_not_a_nickname():
+    tokens = {"mybot": "12345:AAsecret"}
+
+    assert lookup_bot_token(tokens, "@alertsbot") is None
+
+
+def test_lookup_bot_token_prefers_the_token_id_over_a_nickname_that_disagrees():
+    tokens = {"111": "999:BBother", "real": "111:AAmine"}
+
+    assert lookup_bot_token(tokens, "111") == "111:AAmine"
+
+
+def test_resolve_bot_token_swaps_a_nickname_for_the_tokens_own_bot_id():
+    assert resolve_bot_token({"harry": "12345:AAOne"}, "harry") == ("12345:AAOne", 12345)
+
+
+def test_resolve_bot_token_finds_a_token_by_numeric_id():
+    assert resolve_bot_token({"harry": "12345:AAOne"}, "12345") == ("12345:AAOne", 12345)
+
+
+def test_resolve_bot_token_keeps_the_reference_when_nothing_matches():
+    assert resolve_bot_token({"harry": "12345:AAOne"}, "@alertsbot") == (None, "@alertsbot")
+
+
+def test_config_repr_hides_the_api_hash_and_the_bot_tokens():
+    config = Config(api_id=1, api_hash="hash-abc123", session_path=Path("unused"), bot_tokens={"harry": "12345:AAOne"})
+
+    text = repr(config)
+
+    assert "hash-abc123" not in text
+    assert "AAOne" not in text
+    assert "harry" not in text
 
 
 def test_bot_id_from_token_reads_the_leading_digits():

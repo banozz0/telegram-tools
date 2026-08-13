@@ -10,14 +10,19 @@ from telegram_tools.models import BotCommandInfo
 
 
 class FakeBotClient:
-    def __init__(self, *, photos=()):
+    def __init__(self, *, photos=(), deleted=None):
         self.requests = []
         self.photos = list(photos)
+        # deletePhotos answers with the ids it really deleted; default to "all of them".
+        self.deleted = [getattr(photo, "id", 0) for photo in self.photos] if deleted is None else list(deleted)
 
     async def __call__(self, request):
         self.requests.append(request)
-        if type(request).__name__ == "GetUserPhotosRequest":
+        name = type(request).__name__
+        if name == "GetUserPhotosRequest":
             return SimpleNamespace(photos=self.photos)
+        if name == "DeletePhotosRequest":
+            return self.deleted
         return SimpleNamespace()
 
 
@@ -110,6 +115,16 @@ def test_apply_bot_edits_removes_the_current_photo():
     assert type(delete_request).__name__ == "DeletePhotosRequest"
     assert delete_request.id[0].id == 7
     assert delete_request.id[0].access_hash == 8
+
+
+def test_apply_bot_edits_does_not_claim_a_photo_removal_telegram_refused():
+    photo = types.Photo(id=7, access_hash=8, file_reference=b"ref", date=None, sizes=[], dc_id=2)
+    client = FakeBotClient(photos=[photo], deleted=[])
+
+    applied = asyncio.run(apply_bot_edits(client, [change("remove_photo", True)]))
+
+    assert applied == []
+    assert [type(request).__name__ for request in client.requests] == ["GetUserPhotosRequest", "DeletePhotosRequest"]
 
 
 def test_apply_bot_edits_is_a_no_op_when_there_is_no_photo_to_remove():

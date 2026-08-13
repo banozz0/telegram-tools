@@ -274,6 +274,11 @@ def build_edit_plan(current: BotInfo, requested: Mapping[str, Any]) -> EditPlan:
     return EditPlan(changes=changes, skipped=skipped)
 
 
+def format_edit_heading(bot: BotInfo) -> str:
+    """Name the bot the diff belongs to, so a y/N is never answered blind."""
+    return f"Editing @{bot.username} ({bot.id})" if bot.username else f"Editing bot {bot.id}"
+
+
 def format_edit_plan(plan: EditPlan) -> str:
     lines = ["Changes", "--------------------------------------------"]
     lines.extend(f"{change.field}: {_truncate(change.old)} -> {_truncate(change.new)}" for change in plan.changes)

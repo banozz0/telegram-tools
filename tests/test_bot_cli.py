@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from telegram_tools.bots import ResolvedBot, format_edit_plan
-from telegram_tools.cli import _run_bots, bot_edit_requests
+from telegram_tools.cli import _run_bots, bot_edit_requests, main
 from telegram_tools.config import Config
 from telegram_tools.models import BotCommandInfo, BotInfo
 
@@ -53,7 +53,12 @@ def fake_config(**tokens):
 
 
 def patch_bot_reads(monkeypatch, profile):
-    async def fake_resolve_bot(_client, _reference):
+    """Fake both network reads. Returns the recorded calls, including the reference
+    resolution was asked for - which is what decides *which* bot gets edited."""
+    calls = {}
+
+    async def fake_resolve_bot(_client, reference):
+        calls["reference"] = reference
         return ResolvedBot(user=SimpleNamespace(id=profile.id), input_user=SimpleNamespace(user_id=profile.id), is_owned=profile.is_owned)
 
     async def fake_get_bot_profile(_client, _resolved):
@@ -61,6 +66,7 @@ def patch_bot_reads(monkeypatch, profile):
 
     monkeypatch.setattr("telegram_tools.cli.resolve_bot", fake_resolve_bot)
     monkeypatch.setattr("telegram_tools.cli.get_bot_profile", fake_get_bot_profile)
+    return calls
 
 
 def owned_profile(**overrides):
@@ -211,3 +217,134 @@ def test_mixed_plan_without_a_token_raises_before_applying_owner_changes(monkeyp
 
 def _run_and_capture(args, config):
     return asyncio.run(_run_bots(object(), args, config))
+
+
+@asynccontextmanager
+async def refusing_bot_client(_config, _token):
+    raise AssertionError("the bot rail must not be opened")
+    yield  # pragma: no cover - unreachable, keeps this an async generator
+
+
+def test_run_bots_resolves_a_nickname_by_the_tokens_own_bot_id(monkeypatch):
+    calls = patch_bot_reads(monkeypatch, owned_profile())
+
+    asyncio.run(_run_bots(object(), namespace(bot="harry"), fake_config(harry=BOT_TOKEN_SECRET)))
+
+    assert calls["reference"] == 12345
+
+
+def test_run_bots_finds_a_token_by_the_numeric_bot_id(monkeypatch):
+    patch_bot_reads(monkeypatch, owned_profile(commands=[BotCommandInfo(command="start", description="Start")]))
+    received = {}
+
+    @asynccontextmanager
+    async def fake_bot_client(_config, token):
+        received["token"] = token
+        yield object()
+
+    async def fake_apply_bot_edits(_bot, changes, applied):
+        applied.extend(change.field for change in changes)
+        return applied
+
+    monkeypatch.setattr("telegram_tools.cli.bot_client", fake_bot_client)
+    monkeypatch.setattr("telegram_tools.cli.apply_bot_edits", fake_apply_bot_edits)
+
+    # The token is filed under "mybot", but --bot names the bot by its numeric id.
+    exit_code = _run_and_capture(namespace(bot="12345", clear_commands=True, yes=True), fake_config(mybot=BOT_TOKEN_SECRET))
+
+    assert exit_code == 0
+    assert received["token"] == BOT_TOKEN_SECRET
+
+
+def test_run_bots_refuses_a_token_that_belongs_to_another_bot(monkeypatch):
+    other_bot_token = "999:BBotherbot"
+    patch_bot_reads(monkeypatch, owned_profile(commands=[BotCommandInfo(command="start", description="Start")]))
+    monkeypatch.setattr("telegram_tools.cli.bot_client", refusing_bot_client)
+
+    with pytest.raises(ValueError) as excinfo:
+        _run_and_capture(namespace(bot="harry", clear_commands=True, yes=True), fake_config(harry=other_bot_token))
+
+    message = str(excinfo.value)
+    assert "999" in message and "12345" in message
+    assert "BBotherbot" not in message
+
+
+def test_a_token_nicknamed_after_another_bot_never_edits_the_bot_it_names(monkeypatch):
+    # TELEGRAM_BOT_TOKENS=harrybot:999:BB... - the nickname is @harrybot's username,
+    # but the token opens bot 999. Editing @harrybot must not touch bot 999.
+    patch_bot_reads(monkeypatch, owned_profile(id=111, commands=[BotCommandInfo(command="start", description="Start")]))
+    monkeypatch.setattr("telegram_tools.cli.bot_client", refusing_bot_client)
+
+    with pytest.raises(ValueError) as excinfo:
+        _run_and_capture(namespace(bot="111", clear_commands=True, yes=True), fake_config(harrybot="999:BBotherbot"))
+
+    message = str(excinfo.value)
+    assert "TELEGRAM_BOT_TOKENS" in message
+    assert "BBotherbot" not in message
+
+
+def test_the_confirm_prompt_names_the_bot_before_the_diff(monkeypatch, capsys):
+    patch_bot_reads(monkeypatch, owned_profile())
+    monkeypatch.setattr("telegram_tools.cli.confirm_bot_edits", lambda plan: print(format_edit_plan(plan)) or False)
+
+    exit_code = _run_and_capture(namespace(bot="harry", name="Harry Two"), fake_config())
+
+    out = capsys.readouterr().out
+    assert exit_code == 1
+    assert out.index("Editing @harrybot (12345)") < out.index("Changes")
+
+
+def test_run_bots_refuses_a_missing_photo_before_prompting_or_writing(monkeypatch, tmp_path):
+    patch_bot_reads(monkeypatch, owned_profile())
+
+    async def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("nothing may be sent when the photo file is missing")
+
+    monkeypatch.setattr("telegram_tools.cli.apply_owner_edits", fail_if_called)
+    monkeypatch.setattr("telegram_tools.cli.confirm_bot_edits", lambda _plan: pytest.fail("must fail before the prompt"))
+
+    args = namespace(bot="harry", name="Harry Two", photo=str(tmp_path / "nope.png"))
+    with pytest.raises(FileNotFoundError, match="No photo file"):
+        _run_and_capture(args, fake_config())
+
+
+def test_main_turns_a_missing_file_into_a_usage_error(monkeypatch, capsys):
+    async def fake_run(_args):
+        raise FileNotFoundError(2, "No such file or directory", "/nope.json")
+
+    monkeypatch.setattr("telegram_tools.cli.run", fake_run)
+
+    with pytest.raises(SystemExit) as excinfo:
+        main(["bots", "--bot", "harry", "--commands", "/nope.json"])
+
+    assert excinfo.value.code == 2
+    error_output = capsys.readouterr().err
+    assert "/nope.json" in error_output
+    assert "Traceback" not in error_output
+
+
+def test_run_bots_reports_the_owner_edit_that_landed_before_the_bot_rail_failed(monkeypatch, capsys):
+    patch_bot_reads(monkeypatch, owned_profile())
+
+    async def fake_apply_owner_edits(_client, _input_user, changes, applied):
+        applied.extend(change.field for change in changes)
+        return applied
+
+    @asynccontextmanager
+    async def fake_bot_client(_config, _token):
+        yield object()
+
+    async def failing_apply_bot_edits(_bot, _changes, _applied):
+        raise RuntimeError("rights failed")
+
+    monkeypatch.setattr("telegram_tools.cli.apply_owner_edits", fake_apply_owner_edits)
+    monkeypatch.setattr("telegram_tools.cli.bot_client", fake_bot_client)
+    monkeypatch.setattr("telegram_tools.cli.apply_bot_edits", failing_apply_bot_edits)
+
+    args = namespace(bot="harry", name="Harry Two", group_rights="ban_users", yes=True)
+    with pytest.raises(RuntimeError, match="rights failed"):
+        _run_and_capture(args, fake_config(harry=BOT_TOKEN_SECRET))
+
+    result = json.loads(capsys.readouterr().out)
+    assert result["applied"] == ["name"]
+    assert result["bot_id"] == 12345

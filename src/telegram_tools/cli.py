@@ -14,14 +14,16 @@ from telegram_tools.bots import (
     confirm_bot_edits,
     format_bot_profile,
     format_bot_table,
+    format_edit_heading,
     get_bot_profile,
     list_bots,
     parse_commands_file,
     parse_rights,
     resolve_bot,
+    right_names,
 )
 from telegram_tools.client import create_client
-from telegram_tools.config import ConfigError, bot_id_from_token, load_config, lookup_bot_token
+from telegram_tools.config import ConfigError, bot_id_from_token, load_config, lookup_bot_token, resolve_bot_token
 from telegram_tools.delete import confirm_clear_topic_messages, delete_topic_messages
 from telegram_tools.discovery import discover_chats, filter_chats, format_discovery_table
 from telegram_tools.doctor import run_doctor
@@ -78,8 +80,9 @@ def build_parser() -> argparse.ArgumentParser:
     photo_group = bots_parser.add_mutually_exclusive_group()
     photo_group.add_argument("--photo", help="Path to a new profile photo")
     photo_group.add_argument("--remove-photo", action="store_true", help="Remove the current profile photo (needs a bot token)")
-    bots_parser.add_argument("--group-rights", help="Default admin rights for groups: comma-separated names, or none (needs a bot token)")
-    bots_parser.add_argument("--channel-rights", help="Default admin rights for channels: comma-separated names, or none (needs a bot token)")
+    valid_rights = ", ".join(right_names())
+    bots_parser.add_argument("--group-rights", help=f"Default admin rights for groups, comma-separated, or none (needs a bot token). Valid names: {valid_rights}")
+    bots_parser.add_argument("--channel-rights", help=f"Default admin rights for channels, comma-separated, or none (needs a bot token). Valid names: {valid_rights}")
     bots_parser.add_argument("--yes", action="store_true", help="Skip the confirmation prompt")
 
     subparsers.add_parser("doctor", help="Check local setup without printing secrets")
@@ -200,14 +203,18 @@ async def _run_bots(client, args, config) -> int:
             print(format_bot_table(bots))
         return 0
 
-    token = lookup_bot_token(config.bot_tokens, args.bot)
-    reference = args.bot
-    if token is not None:
-        reference = bot_id_from_token(token) or args.bot
+    token, reference = resolve_bot_token(config.bot_tokens, args.bot)
 
     resolved = await resolve_bot(client, reference)
     profile = await get_bot_profile(client, resolved)
-    token = token or lookup_bot_token(config.bot_tokens, profile.username, profile.id)
+    # A nickname can name the wrong bot, so the token is only kept if its own bot id
+    # is the bot that was resolved. Ids only - never any part of a token in an error.
+    if token is None:
+        token = lookup_bot_token(config.bot_tokens, profile.id)
+    if token is not None and bot_id_from_token(token) != profile.id:
+        raise ValueError(
+            f"The stored token is for bot {bot_id_from_token(token)}, not {profile.id}. Check TELEGRAM_BOT_TOKENS."
+        )
 
     if not requested:
         if args.json_output:
@@ -221,6 +228,9 @@ async def _run_bots(client, args, config) -> int:
 
     if "commands" in requested:
         requested["commands"] = parse_commands_file(requested["commands"])
+    if "photo" in requested and not Path(requested["photo"]).is_file():
+        # Checked here so a missing file fails before the confirm, not mid-apply.
+        raise FileNotFoundError(f"No photo file at {requested['photo']}.")
     for field in ("group_rights", "channel_rights"):
         if field in requested:
             requested[field] = parse_rights(requested[field])
@@ -237,9 +247,11 @@ async def _run_bots(client, args, config) -> int:
             "Set TELEGRAM_BOT_TOKENS=nickname:token[,nickname:token] in ~/.telegram-tools/.env."
         )
 
-    if not args.yes and not confirm_bot_edits(plan):
-        _emit_bot_result(_bot_result(profile, plan, [], cancelled=True), args.json_output)
-        return 1
+    if not args.yes:
+        print(format_edit_heading(profile))
+        if not confirm_bot_edits(plan):
+            _emit_bot_result(_bot_result(profile, plan, [], cancelled=True), args.json_output)
+            return 1
 
     applied: list[str] = []
     try:
@@ -361,6 +373,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     except PermissionError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
+    except OSError as exc:
+        # A missing or unreadable path is a usage mistake, not a crash. Must stay
+        # below PermissionError, which is an OSError subclass with its own exit.
+        parser.error(str(exc))
 
 
 if __name__ == "__main__":

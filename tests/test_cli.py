@@ -139,6 +139,15 @@ def test_bots_command_accepts_every_edit_flag():
     assert args.yes is True
 
 
+def test_bots_rights_help_lists_the_valid_right_names(capsys):
+    with pytest.raises(SystemExit):
+        parse_args("bots", "--help")
+
+    help_text = capsys.readouterr().out
+    assert "ban_users" in help_text
+    assert "delete_messages" in help_text
+
+
 def test_bots_command_rejects_commands_with_clear_commands():
     with pytest.raises(SystemExit):
         parse_args("bots", "--bot", "harry", "--commands", "cmds.json", "--clear-commands")
