@@ -2,7 +2,6 @@ import asyncio
 from types import SimpleNamespace
 
 from telegram_tools.bots import (
-    EditChange,
     apply_owner_edits,
     build_edit_plan,
     confirm_bot_edits,
@@ -90,6 +89,19 @@ def test_build_edit_plan_always_treats_a_new_photo_as_a_change():
 
 def test_build_edit_plan_skips_rights_that_already_match():
     plan = build_edit_plan(current_bot(), {"group_rights": parse_rights("delete_messages")})
+
+    assert plan.is_empty is True
+
+
+def test_build_edit_plan_treats_clearing_a_set_field_as_a_change():
+    plan = build_edit_plan(current_bot(), {"bio": ""})
+
+    assert [change.field for change in plan.changes] == ["bio"]
+    assert plan.skipped == []
+
+
+def test_build_edit_plan_skips_clearing_a_field_that_is_already_unset():
+    plan = build_edit_plan(current_bot(bio=None), {"bio": ""})
 
     assert plan.is_empty is True
 

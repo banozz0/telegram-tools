@@ -189,8 +189,6 @@ def format_bot_profile(bot: BotInfo) -> str:
     return "\n".join(lines)
 
 
-OWNER_FIELDS = ("name", "bio", "description", "photo")
-BOT_FIELDS = ("commands", "clear_commands", "group_rights", "channel_rights", "remove_photo")
 _DISPLAY_WIDTH = 60
 
 
