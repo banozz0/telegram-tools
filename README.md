@@ -90,6 +90,9 @@ telegram-tools bots --bot @mybot
 
 # Rename it and update the text people see before pressing Start
 telegram-tools bots --bot @mybot --name "My Bot" --description "Does the thing"
+
+# Set a new profile photo (no token needed) — removing one does need the bot's token
+telegram-tools bots --bot @mybot --photo avatar.png
 ```
 
 Running `telegram-tools` with no arguments opens an interactive menu with the same operations.
@@ -116,12 +119,12 @@ Topics
 | Command | Destructive? |
 | --- | --- |
 | `discover`, `search`, `doctor` | No — read-only |
-| `bots` | No — changes settings on bots you own, always after a diff and a `y/N`; nothing is deleted and every change is reversible from @BotFather |
+| `bots` | No — changes settings on bots you own, after a diff and a `y/N` unless you pass `--yes`; nothing is permanently lost and every change can be set back from @BotFather |
 | `clear-messages` | Yes — but only with `--execute` **and** a typed `DELETE`, only messages, never topics |
 
 `clear-messages` also verifies you actually hold the delete-messages permission in the chat before doing anything, skips topic starter messages, and handles Telegram flood-wait limits automatically.
 
-`bots` refuses to edit a bot you do not own, and it never reads or exports a bot token — the three token-only edits simply fail with a message naming the fields they need one for.
+`bots` refuses to edit a bot you do not own, and it never fetches or exports a bot token from Telegram — the three token-only edits simply fail with a message naming the fields they need one for.
 
 ## Status
 
