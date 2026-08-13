@@ -3,6 +3,7 @@ from __future__ import annotations
 import inspect
 import json
 import re
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -186,3 +187,128 @@ def format_bot_profile(bot: BotInfo) -> str:
     else:
         lines.append("(none)")
     return "\n".join(lines)
+
+
+OWNER_FIELDS = ("name", "bio", "description", "photo")
+BOT_FIELDS = ("commands", "clear_commands", "group_rights", "channel_rights", "remove_photo")
+_DISPLAY_WIDTH = 60
+
+
+@dataclass(frozen=True)
+class EditChange:
+    field: str
+    rail: str
+    old: str
+    new: str
+    value: Any
+
+
+@dataclass(frozen=True)
+class EditPlan:
+    changes: list[EditChange]
+    skipped: list[str]
+
+    @property
+    def owner_changes(self) -> list[EditChange]:
+        return [change for change in self.changes if change.rail == "owner"]
+
+    @property
+    def bot_changes(self) -> list[EditChange]:
+        return [change for change in self.changes if change.rail == "bot"]
+
+    @property
+    def is_empty(self) -> bool:
+        return not self.changes
+
+
+def _truncate(value: str) -> str:
+    return value if len(value) <= _DISPLAY_WIDTH else f"{value[:_DISPLAY_WIDTH]}..."
+
+
+def _commands_display(commands: list[BotCommandInfo]) -> str:
+    return ", ".join(f"/{command.command}" for command in commands) or "(none)"
+
+
+def build_edit_plan(current: BotInfo, requested: Mapping[str, Any]) -> EditPlan:
+    changes: list[EditChange] = []
+    skipped: list[str] = []
+
+    def add(field: str, rail: str, old: str, new: str, value: Any, *, changed: bool) -> None:
+        if changed:
+            changes.append(EditChange(field=field, rail=rail, old=old, new=new, value=value))
+        else:
+            skipped.append(field)
+
+    for field_name, existing in (("name", current.name), ("bio", current.bio), ("description", current.description)):
+        if field_name in requested:
+            new_value = str(requested[field_name])
+            add(field_name, "owner", _or_not_set(existing), new_value, new_value, changed=new_value != (existing or ""))
+
+    if "photo" in requested:
+        add("photo", "owner", "set" if current.has_photo else "not set", str(requested["photo"]), requested["photo"], changed=True)
+
+    if requested.get("remove_photo"):
+        add("remove_photo", "bot", "set" if current.has_photo else "not set", "not set", True, changed=current.has_photo)
+
+    if "commands" in requested:
+        new_commands = list(requested["commands"])
+        changed = [(command.command, command.description) for command in new_commands] != [
+            (command.command, command.description) for command in current.commands
+        ]
+        add("commands", "bot", _commands_display(current.commands), _commands_display(new_commands), new_commands, changed=changed)
+
+    if requested.get("clear_commands"):
+        add("clear_commands", "bot", _commands_display(current.commands), "(none)", True, changed=bool(current.commands))
+
+    for field_name, existing_names in (("group_rights", current.group_rights), ("channel_rights", current.channel_rights)):
+        if field_name in requested:
+            rights = requested[field_name]
+            new_names = rights_to_names(rights)
+            add(
+                field_name,
+                "bot",
+                ", ".join(existing_names) or "(none)",
+                ", ".join(new_names) or "(none)",
+                rights,
+                changed=sorted(new_names) != sorted(existing_names),
+            )
+
+    return EditPlan(changes=changes, skipped=skipped)
+
+
+def format_edit_plan(plan: EditPlan) -> str:
+    lines = ["Changes", "--------------------------------------------"]
+    lines.extend(f"{change.field}: {_truncate(change.old)} -> {_truncate(change.new)}" for change in plan.changes)
+    if plan.skipped:
+        lines.append(f"Unchanged (skipped): {', '.join(plan.skipped)}")
+    return "\n".join(lines)
+
+
+def confirm_bot_edits(plan: EditPlan, *, read: Callable[[str], str] = input, write: Callable[[str], None] = print) -> bool:
+    write(format_edit_plan(plan))
+    return read("Apply these changes? [y/N]: ").strip().lower() == "y"
+
+
+async def apply_owner_edits(client, input_user, changes: list[EditChange]) -> list[str]:
+    applied: list[str] = []
+    info_fields = {change.field: change.value for change in changes if change.field in {"name", "bio", "description"}}
+    if info_fields:
+        await client(
+            functions.bots.SetBotInfoRequest(
+                bot=input_user,
+                lang_code=DEFAULT_LANG_CODE,
+                name=info_fields.get("name"),
+                about=info_fields.get("bio"),
+                description=info_fields.get("description"),
+            )
+        )
+        applied.extend(sorted(info_fields))
+
+    for change in changes:
+        if change.field != "photo":
+            continue
+        uploaded = await client.upload_file(change.value)
+        await client(functions.photos.UploadProfilePhotoRequest(bot=input_user, file=uploaded))
+        applied.append("photo")
+
+    return applied
