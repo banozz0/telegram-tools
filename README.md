@@ -9,13 +9,15 @@ Built on [Telethon](https://github.com/LonamiWebs/Telethon). Everything runs on 
 - **`discover`** — lists your chats, channels, and forum groups with their exact numeric IDs and every forum topic ID. The fastest way to answer "what is this chat's `-100…` ID and what are its topic IDs?"
 - **`search`** — searches messages by text, sender, date range, or topic, and prints a table or exports JSON/CSV.
 - **`clear-messages`** — deletes all messages inside selected forum topic(s) while preserving the topics and their IDs. Dry-run by default; deleting requires both `--execute` *and* typing `DELETE` at a prompt.
+- **`bots`** — lists the bots you own with their numeric IDs, and edits what @BotFather edits: display name, bio, description, commands, profile photo, and default admin rights.
 - **`doctor`** — checks your local setup without printing any secrets.
 
 ## What it doesn't do (on purpose)
 
 - No deleting or creating forum topics — topic IDs never change.
 - No media downloads.
-- No sending messages, no bots, no automation loops.
+- No sending messages and no automation loops. The `bots` command edits bot *settings*; it never runs a bot.
+- No changing a bot's `@username`, creating or deleting bots, or reading/revoking bot tokens — those stay with @BotFather.
 - No cloud anything — credentials and session files stay in `~/.telegram-tools/`.
 
 ## Install
@@ -51,6 +53,17 @@ Shell environment variables and a `.env` in the current directory also work, and
 
 Treat the api_hash like a password. The first command you run starts Telethon's interactive login (phone number + code from Telegram); the resulting session file is stored in `~/.telegram-tools/` and reused afterwards. Log out anytime by deleting the session file in that directory (your `.env` can stay) — the session also shows under Telegram's *Settings → Devices*.
 
+### Optional: bot tokens
+
+Most of `bots` runs on your normal login. Three edits — commands, profile photo removal, and default admin rights — must be sent by the bot itself, so they need that bot's token:
+
+```bash
+# in ~/.telegram-tools/.env
+TELEGRAM_BOT_TOKENS=mybot:12345:AAExampleToken,alerts:67890:BBExampleToken
+```
+
+Nicknames are yours to choose and can be used as `--bot mybot`. The tool only ever reads this variable — it never writes a token anywhere, and never prints one.
+
 ## 30 seconds of usage
 
 ```bash
@@ -68,6 +81,15 @@ telegram-tools search --chat @mygroup --topic 141 --output topic-141.json
 telegram-tools clear-messages --chat @mygroup --topic 141
 # Actually delete: needs --execute AND typing DELETE at the prompt
 telegram-tools clear-messages --chat @mygroup --topic 141 --execute
+
+# Which bots do I own, and what are their IDs?
+telegram-tools bots
+
+# Show one bot's full profile
+telegram-tools bots --bot @mybot
+
+# Rename it and update the text people see before pressing Start
+telegram-tools bots --bot @mybot --name "My Bot" --description "Does the thing"
 ```
 
 Running `telegram-tools` with no arguments opens an interactive menu with the same operations.
@@ -100,7 +122,7 @@ Topics
 
 ## Status
 
-Stable for its three jobs; used regularly by its author. This is a solo project whose code was written by AI agents under review — issues are welcome, fixes are best-effort, and there is no support promise.
+Stable for its four jobs; used regularly by its author. This is a solo project whose code was written by AI agents under review — issues are welcome, fixes are best-effort, and there is no support promise.
 
 ## License
 
