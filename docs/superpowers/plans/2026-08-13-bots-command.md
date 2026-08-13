@@ -893,8 +893,6 @@ git commit -m "feat: list owned bots and read a bot profile"
 **Interfaces:**
 - Consumes: `BotInfo`, `BotCommandInfo`, `parse_rights`, `rights_to_names`, `DEFAULT_LANG_CODE` (Tasks 2–3).
 - Produces:
-  - `OWNER_FIELDS = ("name", "bio", "description", "photo")`
-  - `BOT_FIELDS = ("commands", "clear_commands", "group_rights", "channel_rights", "remove_photo")`
   - `EditChange(field: str, rail: str, old: str, new: str, value: Any)`
   - `EditPlan(changes: list[EditChange], skipped: list[str])` with `.owner_changes`, `.bot_changes`, `.is_empty`
   - `build_edit_plan(current: BotInfo, requested: Mapping[str, Any]) -> EditPlan`
@@ -913,7 +911,6 @@ import asyncio
 from types import SimpleNamespace
 
 from telegram_tools.bots import (
-    EditChange,
     apply_owner_edits,
     build_edit_plan,
     confirm_bot_edits,
@@ -959,6 +956,19 @@ def test_build_edit_plan_keeps_only_real_changes():
 
     assert [change.field for change in plan.changes] == ["bio"]
     assert plan.skipped == ["name"]
+
+
+def test_build_edit_plan_treats_clearing_a_set_field_as_a_change():
+    plan = build_edit_plan(current_bot(), {"bio": ""})
+
+    assert [change.field for change in plan.changes] == ["bio"]
+    assert plan.skipped == []
+
+
+def test_build_edit_plan_skips_clearing_a_field_that_is_already_unset():
+    plan = build_edit_plan(current_bot(bio=None), {"bio": ""})
+
+    assert plan.is_empty is True
 
 
 def test_build_edit_plan_splits_rails():
@@ -1060,8 +1070,6 @@ Expected: FAIL — `ImportError: cannot import name 'EditChange'`
 Append to `src/telegram_tools/bots.py` (add `from collections.abc import Callable, Mapping` to the imports):
 
 ```python
-OWNER_FIELDS = ("name", "bio", "description", "photo")
-BOT_FIELDS = ("commands", "clear_commands", "group_rights", "channel_rights", "remove_photo")
 _DISPLAY_WIDTH = 60
 
 
@@ -1188,7 +1196,7 @@ async def apply_owner_edits(client, input_user, changes: list[EditChange]) -> li
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `.venv/bin/pytest tests/test_bot_edits.py -v`
-Expected: PASS — 11 tests.
+Expected: PASS — 13 tests.
 
 - [ ] **Step 5: Commit**
 
