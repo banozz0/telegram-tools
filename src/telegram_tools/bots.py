@@ -3,12 +3,14 @@ from __future__ import annotations
 import inspect
 import json
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from telethon.tl import types
+from telethon.tl import functions, types
 
 from telegram_tools.models import BotCommandInfo, BotInfo
+from telegram_tools.resolver import EntityResolutionError, resolve_chat
 
 DEFAULT_LANG_CODE = ""
 MAX_COMMANDS = 100
@@ -62,3 +64,125 @@ def parse_commands_file(path: str | Path) -> list[BotCommandInfo]:
         seen.add(command)
         commands.append(BotCommandInfo(command=command, description=description))
     return commands
+
+
+@dataclass(frozen=True)
+class ResolvedBot:
+    user: Any
+    input_user: Any
+    is_owned: bool
+
+
+def _users_from_result(result: Any) -> list[Any]:
+    if isinstance(result, list):
+        return list(result)
+    return list(getattr(result, "users", []) or [])
+
+
+def _bot_keys(user: Any) -> set[str]:
+    keys = {str(int(getattr(user, "id")))}
+    username = getattr(user, "username", None)
+    if username:
+        keys.add(str(username).lower())
+    for extra in getattr(user, "usernames", None) or []:
+        name = getattr(extra, "username", None)
+        if name:
+            keys.add(str(name).lower())
+    return keys
+
+
+def bot_info_from_user(user: Any, *, is_owned: bool, **fields: Any) -> BotInfo:
+    return BotInfo(
+        id=int(getattr(user, "id")),
+        username=getattr(user, "username", None),
+        name=str(getattr(user, "first_name", "") or ""),
+        bio=fields.get("bio"),
+        description=fields.get("description"),
+        is_owned=is_owned,
+        has_photo=bool(fields.get("has_photo", getattr(user, "photo", None) is not None)),
+        commands=list(fields.get("commands") or []),
+        group_rights=list(fields.get("group_rights") or []),
+        channel_rights=list(fields.get("channel_rights") or []),
+    )
+
+
+async def list_admined_bots(client) -> list[Any]:
+    return _users_from_result(await client(functions.bots.GetAdminedBotsRequest()))
+
+
+async def list_bots(client) -> list[BotInfo]:
+    return [bot_info_from_user(user, is_owned=True) for user in await list_admined_bots(client)]
+
+
+async def resolve_bot(client, reference: str | int) -> ResolvedBot:
+    key = str(reference).strip().lstrip("@").lower()
+    for user in await list_admined_bots(client):
+        if key in _bot_keys(user):
+            return ResolvedBot(user=user, input_user=await client.get_input_entity(user), is_owned=True)
+
+    resolved = await resolve_chat(client, reference)
+    if not getattr(resolved.entity, "bot", False):
+        raise EntityResolutionError(f"{reference!r} is not a bot.")
+    return ResolvedBot(user=resolved.entity, input_user=resolved.input_entity, is_owned=False)
+
+
+async def get_bot_profile(client, resolved: ResolvedBot) -> BotInfo:
+    result = await client(functions.users.GetFullUserRequest(id=resolved.input_user))
+    full_user = getattr(result, "full_user", None)
+    bot_info = getattr(full_user, "bot_info", None)
+    commands = [
+        BotCommandInfo(
+            command=str(getattr(command, "command", "")),
+            description=str(getattr(command, "description", "")),
+        )
+        for command in (getattr(bot_info, "commands", None) or [])
+    ]
+    return bot_info_from_user(
+        resolved.user,
+        is_owned=resolved.is_owned,
+        bio=getattr(full_user, "about", None),
+        description=getattr(bot_info, "description", None),
+        commands=commands,
+        group_rights=rights_to_names(getattr(full_user, "bot_group_admin_rights", None)),
+        channel_rights=rights_to_names(getattr(full_user, "bot_broadcast_admin_rights", None)),
+        has_photo=getattr(full_user, "profile_photo", None) is not None or getattr(resolved.user, "photo", None) is not None,
+    )
+
+
+def _or_not_set(value: str | None) -> str:
+    return value if value else "(not set)"
+
+
+def format_bot_table(bots: list[BotInfo]) -> str:
+    if not bots:
+        return "No bots found."
+
+    width = max(len(str(bot.id)) for bot in bots)
+    lines = ["My Bots", "=" * len("My Bots")]
+    for bot in bots:
+        username = f"@{bot.username}" if bot.username else "(no username)"
+        lines.append(f"{bot.id:<{width}}  {username}  {bot.name}")
+    return "\n".join(lines)
+
+
+def format_bot_profile(bot: BotInfo) -> str:
+    lines = [
+        bot.name or "(unnamed)",
+        f"Bot ID: {bot.id}",
+        f"Username: @{bot.username}" if bot.username else "Username: (none)",
+        f"Bio: {_or_not_set(bot.bio)}",
+        f"Description: {_or_not_set(bot.description)}",
+        f"Profile photo: {'set' if bot.has_photo else 'not set'}",
+        f"Default group rights: {', '.join(bot.group_rights) or '(none)'}",
+        f"Default channel rights: {', '.join(bot.channel_rights) or '(none)'}",
+    ]
+    if not bot.is_owned:
+        lines.append("Note: not owned by you - read-only.")
+
+    lines.extend(["", "Commands", "--------------------------------------------"])
+    if bot.commands:
+        width = max(len(command.command) for command in bot.commands)
+        lines.extend(f"/{command.command:<{width}}  {command.description}" for command in bot.commands)
+    else:
+        lines.append("(none)")
+    return "\n".join(lines)
