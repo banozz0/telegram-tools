@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 
-from telethon import TelegramClient
+from telethon import TelegramClient, utils
 from telethon.sessions import MemorySession
 from telethon.tl import functions, types
 
@@ -29,13 +29,7 @@ async def _remove_photo(client) -> bool:
     photos = list(getattr(result, "photos", []) or [])
     if not photos:
         return False
-    photo = photos[0]
-    input_photo = types.InputPhoto(
-        id=getattr(photo, "id"),
-        access_hash=getattr(photo, "access_hash"),
-        file_reference=getattr(photo, "file_reference"),
-    )
-    await client(functions.photos.DeletePhotosRequest(id=[input_photo]))
+    await client(functions.photos.DeletePhotosRequest(id=[utils.get_input_photo(photos[0])]))
     return True
 
 

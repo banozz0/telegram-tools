@@ -1,6 +1,8 @@
 import asyncio
 from types import SimpleNamespace
 
+from telethon.tl import types
+
 from telegram_tools.bots import EditChange, parse_rights
 from telegram_tools.bot_session import apply_bot_edits
 from telegram_tools.models import BotCommandInfo
@@ -56,14 +58,17 @@ def test_apply_bot_edits_sets_group_and_channel_rights():
 
 
 def test_apply_bot_edits_removes_the_current_photo():
-    photo = SimpleNamespace(id=7, access_hash=8, file_reference=b"ref")
+    photo = types.Photo(id=7, access_hash=8, file_reference=b"ref", date=None, sizes=[], dc_id=2)
     client = FakeBotClient(photos=[photo])
 
     applied = asyncio.run(apply_bot_edits(client, [change("remove_photo", True)]))
 
     assert applied == ["remove_photo"]
     assert type(client.requests[0]).__name__ == "GetUserPhotosRequest"
-    assert type(client.requests[1]).__name__ == "DeletePhotosRequest"
+    delete_request = client.requests[1]
+    assert type(delete_request).__name__ == "DeletePhotosRequest"
+    assert delete_request.id[0].id == 7
+    assert delete_request.id[0].access_hash == 8
 
 
 def test_apply_bot_edits_is_a_no_op_when_there_is_no_photo_to_remove():
