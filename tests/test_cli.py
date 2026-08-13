@@ -103,3 +103,47 @@ def test_doctor_command_parses():
     args = parse_args("doctor")
 
     assert args.command == "doctor"
+
+
+def test_bots_command_defaults_to_listing():
+    args = parse_args("bots")
+
+    assert args.command == "bots"
+    assert args.bot is None
+    assert args.json_output is None
+    assert args.yes is False
+
+
+def test_bots_command_accepts_every_edit_flag():
+    args = parse_args(
+        "bots",
+        "--bot", "harry",
+        "--name", "Harry",
+        "--bio", "Assistant",
+        "--description", "Does things",
+        "--commands", "cmds.json",
+        "--photo", "face.png",
+        "--group-rights", "delete_messages",
+        "--channel-rights", "none",
+        "--yes",
+    )
+
+    assert args.bot == "harry"
+    assert args.name == "Harry"
+    assert args.bio == "Assistant"
+    assert args.description == "Does things"
+    assert args.commands == "cmds.json"
+    assert args.photo == "face.png"
+    assert args.group_rights == "delete_messages"
+    assert args.channel_rights == "none"
+    assert args.yes is True
+
+
+def test_bots_command_rejects_commands_with_clear_commands():
+    with pytest.raises(SystemExit):
+        parse_args("bots", "--bot", "harry", "--commands", "cmds.json", "--clear-commands")
+
+
+def test_bots_command_rejects_photo_with_remove_photo():
+    with pytest.raises(SystemExit):
+        parse_args("bots", "--bot", "harry", "--photo", "face.png", "--remove-photo")

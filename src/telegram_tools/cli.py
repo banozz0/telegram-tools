@@ -7,8 +7,21 @@ import sys
 from pathlib import Path
 from typing import Sequence
 
+from telegram_tools.bot_session import apply_bot_edits, bot_client
+from telegram_tools.bots import (
+    apply_owner_edits,
+    build_edit_plan,
+    confirm_bot_edits,
+    format_bot_profile,
+    format_bot_table,
+    get_bot_profile,
+    list_bots,
+    parse_commands_file,
+    parse_rights,
+    resolve_bot,
+)
 from telegram_tools.client import create_client
-from telegram_tools.config import ConfigError, load_config
+from telegram_tools.config import ConfigError, bot_id_from_token, load_config, lookup_bot_token
 from telegram_tools.delete import confirm_clear_topic_messages, delete_topic_messages
 from telegram_tools.discovery import discover_chats, filter_chats, format_discovery_table
 from telegram_tools.doctor import run_doctor
@@ -52,6 +65,22 @@ def build_parser() -> argparse.ArgumentParser:
     search.add_argument("--limit", type=positive_int, help="Maximum exported messages")
     search.add_argument("--format", choices=("json", "csv"), default="json", help="Export format")
     search.add_argument("--output", help="Output path; prints a readable table when omitted")
+
+    bots_parser = subparsers.add_parser("bots", help="List the bots you own and edit their BotFather settings")
+    bots_parser.add_argument("--bot", help="Bot nickname from TELEGRAM_BOT_TOKENS, @username, or numeric ID")
+    bots_parser.add_argument("--json", dest="json_output", help="Write bot output to this JSON file")
+    bots_parser.add_argument("--name", help="Set the display name shown in chat lists")
+    bots_parser.add_argument("--bio", help="Set the short bio shown under the bot profile")
+    bots_parser.add_argument("--description", help="Set the 'what can this bot do?' text shown before Start")
+    commands_group = bots_parser.add_mutually_exclusive_group()
+    commands_group.add_argument("--commands", help="Path to a JSON file of {command, description} objects (needs a bot token)")
+    commands_group.add_argument("--clear-commands", action="store_true", help="Remove every command (needs a bot token)")
+    photo_group = bots_parser.add_mutually_exclusive_group()
+    photo_group.add_argument("--photo", help="Path to a new profile photo")
+    photo_group.add_argument("--remove-photo", action="store_true", help="Remove the current profile photo (needs a bot token)")
+    bots_parser.add_argument("--group-rights", help="Default admin rights for groups: comma-separated names, or none (needs a bot token)")
+    bots_parser.add_argument("--channel-rights", help="Default admin rights for channels: comma-separated names, or none (needs a bot token)")
+    bots_parser.add_argument("--yes", action="store_true", help="Skip the confirmation prompt")
 
     subparsers.add_parser("doctor", help="Check local setup without printing secrets")
 
@@ -124,6 +153,90 @@ async def _run_search(client, args) -> int:
     return 0
 
 
+EDIT_FLAGS = ("name", "bio", "description", "commands", "clear_commands", "photo", "remove_photo", "group_rights", "channel_rights")
+
+
+def bot_edit_requests(args) -> dict:
+    requested = {}
+    for flag in EDIT_FLAGS:
+        value = getattr(args, flag, None)
+        if value is None or value is False:
+            continue
+        requested[flag] = value
+    return requested
+
+
+def _write_json(payload, path: str | None) -> None:
+    output = Path(path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(payload, indent=2, default=str) + "\n")
+
+
+async def _run_bots(client, args, config) -> int:
+    requested = bot_edit_requests(args)
+    if requested and not args.bot:
+        raise ValueError("--bot is required when editing a bot.")
+
+    if not args.bot:
+        bots = await list_bots(client)
+        if args.json_output:
+            _write_json([bot.to_dict() for bot in bots], args.json_output)
+        else:
+            print(format_bot_table(bots))
+        return 0
+
+    token = lookup_bot_token(config.bot_tokens, args.bot)
+    reference = args.bot
+    if token is not None:
+        reference = bot_id_from_token(token) or args.bot
+
+    resolved = await resolve_bot(client, reference)
+    profile = await get_bot_profile(client, resolved)
+    token = token or lookup_bot_token(config.bot_tokens, profile.username, profile.id)
+
+    if not requested:
+        if args.json_output:
+            _write_json(profile.to_dict(), args.json_output)
+        else:
+            print(format_bot_profile(profile))
+        return 0
+
+    if not resolved.is_owned:
+        raise PermissionError(f"You do not own @{profile.username or profile.id}; only its owner can edit it.")
+
+    if "commands" in requested:
+        requested["commands"] = parse_commands_file(requested["commands"])
+    for field in ("group_rights", "channel_rights"):
+        if field in requested:
+            requested[field] = parse_rights(requested[field])
+
+    plan = build_edit_plan(profile, requested)
+    if plan.is_empty:
+        print(json.dumps({"bot_id": profile.id, "username": profile.username, "applied": [], "skipped": plan.skipped, "cancelled": False}, indent=2))
+        return 0
+
+    if plan.bot_changes and token is None:
+        fields = ", ".join(change.field for change in plan.bot_changes)
+        raise ValueError(
+            f"{fields} can only be changed with that bot's token. "
+            "Set TELEGRAM_BOT_TOKENS=nickname:token[,nickname:token] in ~/.telegram-tools/.env."
+        )
+
+    if not args.yes and not confirm_bot_edits(plan):
+        print(json.dumps({"bot_id": profile.id, "username": profile.username, "applied": [], "skipped": plan.skipped, "cancelled": True}, indent=2))
+        return 1
+
+    applied = []
+    try:
+        applied.extend(await apply_owner_edits(client, resolved.input_user, plan.owner_changes))
+        if plan.bot_changes:
+            async with bot_client(config, token) as bot:
+                applied.extend(await apply_bot_edits(bot, plan.bot_changes))
+    finally:
+        print(json.dumps({"bot_id": profile.id, "username": profile.username, "applied": applied, "skipped": plan.skipped, "cancelled": False}, indent=2))
+    return 0
+
+
 def _namespace(**kwargs):
     return argparse.Namespace(**kwargs)
 
@@ -144,6 +257,8 @@ async def run_interactive_menu(*, read=input, write=print) -> int:
                 "4. Clear topic messages",
                 "5. Clear multiple topics",
                 "6. Clear all topic messages",
+                "7. List my bots",
+                "8. Edit a bot",
                 "0. Exit",
             ]
         )
@@ -181,6 +296,14 @@ async def run_interactive_menu(*, read=input, write=print) -> int:
     if choice == "6":
         chat = read("Chat (@username, t.me link, or numeric ID): ")
         return await run(_namespace(command="clear-messages", chat=chat, topics=None, all_topics=True, execute=_read_execute(read), batch_size=100))
+    if choice == "7":
+        return await run(_namespace(command="bots", bot=None, json_output=None, name=None, bio=None, description=None, commands=None, clear_commands=False, photo=None, remove_photo=False, group_rights=None, channel_rights=None, yes=False))
+    if choice == "8":
+        bot = read("Bot (nickname, @username, or numeric ID): ")
+        name = read("New display name (blank to keep): ").strip() or None
+        bio = read("New bio (blank to keep): ").strip() or None
+        description = read("New description (blank to keep): ").strip() or None
+        return await run(_namespace(command="bots", bot=bot, json_output=None, name=name, bio=bio, description=description, commands=None, clear_commands=False, photo=None, remove_photo=False, group_rights=None, channel_rights=None, yes=False))
 
     write("Unknown choice.")
     return 2
@@ -200,6 +323,8 @@ async def run(args) -> int:
             return await _run_clear_messages(client, args)
         if args.command == "search":
             return await _run_search(client, args)
+        if args.command == "bots":
+            return await _run_bots(client, args, config)
         raise ValueError(f"Unknown command: {args.command}")
     finally:
         await client.disconnect()
