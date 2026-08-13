@@ -106,7 +106,8 @@ telegram-tools bots --bot @harrybot --name "Harry" --yes    # skip the confirm p
   the bot is then shown read-only with an explicit "not owned by you" note.
 - No `--bot` and no edit flags → the list. `--bot` with no edit flags → show. `--bot`
   plus any edit flag → edit. Edit flags without `--bot` is an argparse error.
-- `--json PATH` applies to list and show, matching `discover --json`.
+- `--json PATH` applies to list, show, and the edit result, matching `discover --json`. A
+  flag that takes a path always writes that path; it is never silently ignored.
 - Rights values are comma-separated `ChatAdminRights` field names, taken from the
   installed Telethon's constructor signature rather than a hardcoded list, so the set
   cannot drift (`change_info`, `post_messages`, `edit_messages`, `delete_messages`,
@@ -137,6 +138,12 @@ typed `DELETE` ceremony `clear-messages` uses for destruction.
 If a later write fails after an earlier one succeeded, the tool reports which fields
 applied before the error and exits non-zero. No rollback is attempted; the diff plus the
 `applied` list is enough to redo it by hand.
+
+For that report to be true, the `applied` list must be **owned by the caller and appended
+to as each field lands** — not returned from the apply functions. A returned list is lost
+with the frame when the call raises, which would print `applied: []` after edits had
+already reached Telegram. A report that understates what changed is worse than no report,
+because its only purpose is recovery after a failure.
 
 ## Modules
 

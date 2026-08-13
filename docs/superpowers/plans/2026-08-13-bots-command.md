@@ -1168,8 +1168,11 @@ def confirm_bot_edits(plan: EditPlan, *, read: Callable[[str], str] = input, wri
     return read("Apply these changes? [y/N]: ").strip().lower() == "y"
 
 
-async def apply_owner_edits(client, input_user, changes: list[EditChange]) -> list[str]:
-    applied: list[str] = []
+async def apply_owner_edits(client, input_user, changes: list[EditChange], applied: list[str] | None = None) -> list[str]:
+    # `applied` is caller-owned on purpose: a returned list is lost with the frame when a
+    # later write raises, and the CLI prints this list as the record of what reached
+    # Telegram before the failure.
+    applied = [] if applied is None else applied
     info_fields = {change.field: change.value for change in changes if change.field in {"name", "bio", "description"}}
     if info_fields:
         await client(
@@ -1438,8 +1441,9 @@ async def _remove_photo(client) -> bool:
     return True
 
 
-async def apply_bot_edits(client, changes: list[EditChange]) -> list[str]:
-    applied: list[str] = []
+async def apply_bot_edits(client, changes: list[EditChange], applied: list[str] | None = None) -> list[str]:
+    # Caller-owned for the same reason as apply_owner_edits: see that function's note.
+    applied = [] if applied is None else applied
     for change in changes:
         if change.field == "commands":
             await client(
@@ -1741,7 +1745,7 @@ def bot_edit_requests(args) -> dict:
     return requested
 
 
-def _write_json(payload, path: str | None) -> None:
+def _write_json(payload, path: str) -> None:
     output = Path(path)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(payload, indent=2, default=str) + "\n")
@@ -1787,7 +1791,7 @@ async def _run_bots(client, args, config) -> int:
 
     plan = build_edit_plan(profile, requested)
     if plan.is_empty:
-        print(json.dumps({"bot_id": profile.id, "username": profile.username, "applied": [], "skipped": plan.skipped, "cancelled": False}, indent=2))
+        _emit_bot_result(_bot_result(profile, plan, [], cancelled=False), args.json_output)
         return 0
 
     if plan.bot_changes and token is None:
@@ -1798,21 +1802,41 @@ async def _run_bots(client, args, config) -> int:
         )
 
     if not args.yes and not confirm_bot_edits(plan):
-        print(json.dumps({"bot_id": profile.id, "username": profile.username, "applied": [], "skipped": plan.skipped, "cancelled": True}, indent=2))
+        _emit_bot_result(_bot_result(profile, plan, [], cancelled=True), args.json_output)
         return 1
 
-    applied = []
+    applied: list[str] = []
     try:
-        applied.extend(await apply_owner_edits(client, resolved.input_user, plan.owner_changes))
+        await apply_owner_edits(client, resolved.input_user, plan.owner_changes, applied)
         if plan.bot_changes:
             async with bot_client(config, token) as bot:
-                applied.extend(await apply_bot_edits(bot, plan.bot_changes))
+                await apply_bot_edits(bot, plan.bot_changes, applied)
     finally:
-        print(json.dumps({"bot_id": profile.id, "username": profile.username, "applied": applied, "skipped": plan.skipped, "cancelled": False}, indent=2))
+        _emit_bot_result(_bot_result(profile, plan, applied, cancelled=False), args.json_output)
     return 0
 ```
 
-The `finally` guarantees the applied list is reported even when a later write raises, so a partial edit is never silent.
+with two small helpers beside `_write_json`:
+
+```python
+def _bot_result(profile, plan, applied, *, cancelled: bool) -> dict:
+    return {
+        "bot_id": profile.id,
+        "username": profile.username,
+        "applied": list(applied),
+        "skipped": list(plan.skipped),
+        "cancelled": cancelled,
+    }
+
+
+def _emit_bot_result(result: dict, json_output: str | None) -> None:
+    if json_output:
+        _write_json(result, json_output)
+    else:
+        print(json.dumps(result, indent=2))
+```
+
+Two things this shape gets right. The `applied` list is **owned here and passed in**, so a failure part-way through either rail still reports what reached Telegram — a list returned from the apply function would be lost with the frame and print `applied: []` after edits had already landed. And `--json` writes the edit result too: a flag that takes a path always writes that path.
 
 - [ ] **Step 5: Wire the dispatch and the menu**
 
