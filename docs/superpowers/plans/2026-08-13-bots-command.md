@@ -551,7 +551,7 @@ def parse_commands_file(path: str | Path) -> list[BotCommandInfo]:
 - [ ] **Step 5: Run the tests to verify they pass**
 
 Run: `.venv/bin/pytest tests/test_bots.py -v`
-Expected: PASS — 13 tests.
+Expected: PASS — 12 tests.
 
 - [ ] **Step 6: Commit**
 
@@ -873,7 +873,7 @@ def format_bot_profile(bot: BotInfo) -> str:
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `.venv/bin/pytest tests/test_bots.py -v`
-Expected: PASS — the 10 new tests plus the 13 from Task 2.
+Expected: PASS — the 10 new tests plus the 12 from Task 2.
 
 - [ ] **Step 5: Commit**
 
@@ -1188,7 +1188,7 @@ async def apply_owner_edits(client, input_user, changes: list[EditChange]) -> li
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `.venv/bin/pytest tests/test_bot_edits.py -v`
-Expected: PASS — 12 tests.
+Expected: PASS — 11 tests.
 
 - [ ] **Step 5: Commit**
 
