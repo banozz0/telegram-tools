@@ -1225,12 +1225,15 @@ Create `tests/test_bot_session.py`:
 
 ```python
 import asyncio
+from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 from telethon.tl import types
 
 from telegram_tools.bots import EditChange, parse_rights
-from telegram_tools.bot_session import apply_bot_edits
+from telegram_tools.bot_session import apply_bot_edits, bot_client
+from telegram_tools.config import Config
 from telegram_tools.models import BotCommandInfo
 
 
@@ -1306,7 +1309,85 @@ def test_apply_bot_edits_is_a_no_op_when_there_is_no_photo_to_remove():
 
     assert applied == []
     assert [type(request).__name__ for request in client.requests] == ["GetUserPhotosRequest"]
+
+
+class FakeTelegramClient:
+    """Stands in for TelegramClient so bot_client can be tested without a network."""
+
+    def __init__(self, session, api_id, api_hash):
+        self.session = session
+        self.flood_sleep_threshold = None
+        self.started_with = None
+        self.disconnected = False
+        self.start_error = None
+
+    async def start(self, bot_token=None):
+        self.started_with = bot_token
+        if self.start_error:
+            raise self.start_error
+
+    async def disconnect(self):
+        self.disconnected = True
+
+
+def patch_client(monkeypatch, *, start_error=None):
+    created = []
+
+    def factory(session, api_id, api_hash):
+        client = FakeTelegramClient(session, api_id, api_hash)
+        client.start_error = start_error
+        created.append(client)
+        return client
+
+    monkeypatch.setattr("telegram_tools.bot_session.TelegramClient", factory)
+    return created
+
+
+def fake_config():
+    return Config(api_id=1, api_hash="hash", session_path=Path("unused"))
+
+
+def test_bot_client_disconnects_after_a_normal_exit(monkeypatch):
+    created = patch_client(monkeypatch)
+
+    async def run():
+        async with bot_client(fake_config(), "12345:AAOne") as client:
+            assert client.started_with == "12345:AAOne"
+
+    asyncio.run(run())
+
+    assert created[0].disconnected is True
+
+
+def test_bot_client_disconnects_when_start_fails(monkeypatch):
+    created = patch_client(monkeypatch, start_error=RuntimeError("bad token"))
+
+    async def run():
+        async with bot_client(fake_config(), "12345:AAOne"):
+            raise AssertionError("body must not run when start fails")
+
+    with pytest.raises(RuntimeError, match="bad token"):
+        asyncio.run(run())
+
+    assert created[0].disconnected is True
+
+
+def test_bot_client_keeps_the_token_out_of_the_session(monkeypatch):
+    created = patch_client(monkeypatch)
+
+    async def run():
+        async with bot_client(fake_config(), "12345:AAOne"):
+            pass
+
+    asyncio.run(run())
+
+    assert type(created[0].session).__name__ == "MemorySession"
 ```
+
+The last three cover `bot_client` itself: it opens a real connection, so it is tested by
+substituting the client class in the module namespace. They pin the two things that
+matter — the connection is always closed, including when a bad token makes `start()`
+raise before the body runs, and the session is never file-backed.
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
@@ -1320,6 +1401,7 @@ Create `src/telegram_tools/bot_session.py`:
 ```python
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from telethon import TelegramClient, utils
@@ -1331,12 +1413,15 @@ from telegram_tools.config import Config
 
 
 @asynccontextmanager
-async def bot_client(config: Config, token: str):
+async def bot_client(config: Config, token: str) -> AsyncIterator[TelegramClient]:
     """Connect as the bot itself. MemorySession keeps the token off disk."""
     client = TelegramClient(MemorySession(), config.api_id, config.api_hash)
     client.flood_sleep_threshold = 24 * 60 * 60
-    await client.start(bot_token=token)
     try:
+        # start() must be inside the try: Telethon connects before it signs in, so a
+        # bad token raises with the transport already open, and an asynccontextmanager
+        # never runs its finally when the generator raises before yield.
+        await client.start(bot_token=token)
         yield client
     finally:
         await client.disconnect()
@@ -1392,7 +1477,7 @@ async def apply_bot_edits(client, changes: list[EditChange]) -> list[str]:
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `.venv/bin/pytest tests/test_bot_session.py -v`
-Expected: PASS — 5 tests.
+Expected: PASS — 8 tests.
 
 - [ ] **Step 5: Commit**
 
