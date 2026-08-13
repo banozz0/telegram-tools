@@ -1965,7 +1965,7 @@ Insert above the `## 3.0.0` section:
 - Bot editing runs on your existing login. Commands, photo removal, and default admin rights are sent by the bot itself and need that bot's token in the new optional `TELEGRAM_BOT_TOKENS` variable (`nickname:token`, comma separated). Tokens are read only — never written to disk, printed, or exported. This is not a return of the 3.0.0 `bots.json` store.
 - Edits print an old → new diff and ask for confirmation; `--yes` skips the prompt.
 - `doctor` reports how many bot tokens are loaded, and nothing else about them.
-- Changing a bot's `@username`, creating or deleting bots, and revoking tokens stay with @BotFather — no API exists for them.
+- Changing a bot's `@username` and creating or deleting bots have no API at all and stay with @BotFather. Revoking a token does have one (`bots.exportBotToken`), but this tool never calls it — fetching or exporting a bot token is deliberately out of scope.
 ```
 
 - [ ] **Step 5: Bump the version**

@@ -20,8 +20,10 @@ These have no API and stay a manual @BotFather job. The tool names them in help 
 rather than pretending:
 
 - Changing a bot's `@username`, or creating/deleting bots.
-- Revoking or reading bot tokens. `bots.exportBotToken` is never called, with or
-  without its `revoke` flag.
+- Fetching, exporting, or revoking bot tokens. `bots.exportBotToken` does exist and would
+  do all three, but it is never called, with or without its `revoke` flag. Note for any
+  doc written from this spec: an API for revocation *does* exist — the tool declines to
+  use it. Saying "no API exists" would be false.
 - Transferring ownership, inline mode, privacy mode, payments, web app settings.
 - Anything about bots the user does not own, beyond public read-only info.
 
