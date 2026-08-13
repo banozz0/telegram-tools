@@ -24,6 +24,11 @@ class Config:
     bot_tokens: dict[str, str] = field(default_factory=dict)
 
 
+def bot_id_from_token(token: str) -> int | None:
+    prefix, _, _ = token.partition(":")
+    return int(prefix) if prefix.isdigit() else None
+
+
 def parse_bot_tokens(raw: str | None) -> dict[str, str]:
     tokens: dict[str, str] = {}
     if not raw:
@@ -36,7 +41,7 @@ def parse_bot_tokens(raw: str | None) -> dict[str, str]:
         nickname, separator, token = entry.partition(":")
         nickname = nickname.strip().lower()
         token = token.strip()
-        if not separator or not nickname or not token or not any(c.isalpha() for c in nickname):
+        if not separator or not nickname or not token or bot_id_from_token(token) is None:
             raise ConfigError(f"TELEGRAM_BOT_TOKENS entry {position} must look like nickname:token.")
         tokens[nickname] = token
     return tokens
@@ -50,11 +55,6 @@ def lookup_bot_token(tokens: Mapping[str, str], *references: Any) -> str | None:
         if key in tokens:
             return tokens[key]
     return None
-
-
-def bot_id_from_token(token: str) -> int | None:
-    prefix, _, _ = token.partition(":")
-    return int(prefix) if prefix.isdigit() else None
 
 
 def load_config(
