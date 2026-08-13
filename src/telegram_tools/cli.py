@@ -98,9 +98,7 @@ async def _run_discover(client, args) -> int:
     chats = filter_chats(await discover_chats(client), admin_only=not args.all_chats)
     payload = [chat.to_dict() for chat in chats]
     if args.json_output:
-        output = Path(args.json_output)
-        output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(json.dumps(payload, indent=2, default=str) + "\n")
+        _write_json(payload, args.json_output)
     else:
         print(format_discovery_table(chats))
     return 0
@@ -166,10 +164,27 @@ def bot_edit_requests(args) -> dict:
     return requested
 
 
-def _write_json(payload, path: str | None) -> None:
+def _write_json(payload, path: str) -> None:
     output = Path(path)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(payload, indent=2, default=str) + "\n")
+
+
+def _bot_result(profile, plan, applied, *, cancelled: bool) -> dict:
+    return {
+        "bot_id": profile.id,
+        "username": profile.username,
+        "applied": list(applied),
+        "skipped": list(plan.skipped),
+        "cancelled": cancelled,
+    }
+
+
+def _emit_bot_result(result: dict, json_output: str | None) -> None:
+    if json_output:
+        _write_json(result, json_output)
+    else:
+        print(json.dumps(result, indent=2))
 
 
 async def _run_bots(client, args, config) -> int:
@@ -212,7 +227,7 @@ async def _run_bots(client, args, config) -> int:
 
     plan = build_edit_plan(profile, requested)
     if plan.is_empty:
-        print(json.dumps({"bot_id": profile.id, "username": profile.username, "applied": [], "skipped": plan.skipped, "cancelled": False}, indent=2))
+        _emit_bot_result(_bot_result(profile, plan, [], cancelled=False), args.json_output)
         return 0
 
     if plan.bot_changes and token is None:
@@ -223,17 +238,17 @@ async def _run_bots(client, args, config) -> int:
         )
 
     if not args.yes and not confirm_bot_edits(plan):
-        print(json.dumps({"bot_id": profile.id, "username": profile.username, "applied": [], "skipped": plan.skipped, "cancelled": True}, indent=2))
+        _emit_bot_result(_bot_result(profile, plan, [], cancelled=True), args.json_output)
         return 1
 
-    applied = []
+    applied: list[str] = []
     try:
-        applied.extend(await apply_owner_edits(client, resolved.input_user, plan.owner_changes))
+        await apply_owner_edits(client, resolved.input_user, plan.owner_changes, applied)
         if plan.bot_changes:
             async with bot_client(config, token) as bot:
-                applied.extend(await apply_bot_edits(bot, plan.bot_changes))
+                await apply_bot_edits(bot, plan.bot_changes, applied)
     finally:
-        print(json.dumps({"bot_id": profile.id, "username": profile.username, "applied": applied, "skipped": plan.skipped, "cancelled": False}, indent=2))
+        _emit_bot_result(_bot_result(profile, plan, applied, cancelled=False), args.json_output)
     return 0
 
 

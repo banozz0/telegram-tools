@@ -121,6 +121,24 @@ def test_apply_bot_edits_is_a_no_op_when_there_is_no_photo_to_remove():
     assert [type(request).__name__ for request in client.requests] == ["GetUserPhotosRequest"]
 
 
+def test_apply_bot_edits_keeps_progress_made_before_a_later_failure():
+    class RaisingClient(FakeBotClient):
+        async def __call__(self, request):
+            if type(request).__name__ == "SetBotGroupDefaultAdminRightsRequest":
+                raise RuntimeError("rights failed")
+            return await super().__call__(request)
+
+    client = RaisingClient()
+    commands = [BotCommandInfo(command="start", description="Start the bot")]
+    changes = [change("commands", commands), change("group_rights", parse_rights("ban_users"))]
+    applied: list[str] = []
+
+    with pytest.raises(RuntimeError, match="rights failed"):
+        asyncio.run(apply_bot_edits(client, changes, applied))
+
+    assert applied == ["commands"]
+
+
 def test_bot_client_disconnects_after_a_normal_exit(monkeypatch):
     created = patch_client(monkeypatch)
 

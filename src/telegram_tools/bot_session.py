@@ -34,8 +34,9 @@ async def _remove_photo(client) -> bool:
     return True
 
 
-async def apply_bot_edits(client, changes: list[EditChange]) -> list[str]:
-    applied: list[str] = []
+async def apply_bot_edits(client, changes: list[EditChange], applied: list[str] | None = None) -> list[str]:
+    # Caller-owned for the same reason as apply_owner_edits: see that function's note.
+    applied = [] if applied is None else applied
     for change in changes:
         if change.field == "commands":
             await client(

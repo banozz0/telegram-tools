@@ -1,6 +1,8 @@
 import asyncio
 from types import SimpleNamespace
 
+import pytest
+
 from telegram_tools.bots import (
     apply_owner_edits,
     build_edit_plan,
@@ -149,3 +151,19 @@ def test_apply_owner_edits_uploads_and_sets_a_photo():
     assert applied == ["photo"]
     assert client.uploaded == ["face.png"]
     assert type(client.requests[0]).__name__ == "UploadProfilePhotoRequest"
+
+
+def test_apply_owner_edits_keeps_progress_made_before_a_later_failure():
+    plan = build_edit_plan(current_bot(), {"name": "Harry Two", "photo": "face.png"})
+    client = RecordingClient()
+
+    async def failing_upload_file(_path):
+        raise RuntimeError("upload failed")
+
+    client.upload_file = failing_upload_file
+    applied: list[str] = []
+
+    with pytest.raises(RuntimeError, match="upload failed"):
+        asyncio.run(apply_owner_edits(client, SimpleNamespace(user_id=12345), plan.owner_changes, applied))
+
+    assert applied == ["name"]

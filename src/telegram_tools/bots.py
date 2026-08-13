@@ -287,8 +287,11 @@ def confirm_bot_edits(plan: EditPlan, *, read: Callable[[str], str] = input, wri
     return read("Apply these changes? [y/N]: ").strip().lower() == "y"
 
 
-async def apply_owner_edits(client, input_user, changes: list[EditChange]) -> list[str]:
-    applied: list[str] = []
+async def apply_owner_edits(client, input_user, changes: list[EditChange], applied: list[str] | None = None) -> list[str]:
+    # `applied` is caller-owned on purpose: a returned list is lost with the frame when a
+    # later write raises, and the CLI prints this list as the record of what reached
+    # Telegram before the failure.
+    applied = [] if applied is None else applied
     info_fields = {change.field: change.value for change in changes if change.field in {"name", "bio", "description"}}
     if info_fields:
         await client(
