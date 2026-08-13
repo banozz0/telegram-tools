@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from telethon import TelegramClient, utils
@@ -11,12 +12,12 @@ from telegram_tools.config import Config
 
 
 @asynccontextmanager
-async def bot_client(config: Config, token: str):
+async def bot_client(config: Config, token: str) -> AsyncIterator[TelegramClient]:
     """Connect as the bot itself. MemorySession keeps the token off disk."""
     client = TelegramClient(MemorySession(), config.api_id, config.api_hash)
     client.flood_sleep_threshold = 24 * 60 * 60
-    await client.start(bot_token=token)
     try:
+        await client.start(bot_token=token)
         yield client
     finally:
         await client.disconnect()
