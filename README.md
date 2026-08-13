@@ -116,9 +116,12 @@ Topics
 | Command | Destructive? |
 | --- | --- |
 | `discover`, `search`, `doctor` | No — read-only |
+| `bots` | No — changes settings on bots you own, always after a diff and a `y/N`; nothing is deleted and every change is reversible from @BotFather |
 | `clear-messages` | Yes — but only with `--execute` **and** a typed `DELETE`, only messages, never topics |
 
 `clear-messages` also verifies you actually hold the delete-messages permission in the chat before doing anything, skips topic starter messages, and handles Telegram flood-wait limits automatically.
+
+`bots` refuses to edit a bot you do not own, and it never reads or exports a bot token — the three token-only edits simply fail with a message naming the fields they need one for.
 
 ## Status
 

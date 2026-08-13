@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "telegram-tools"
 version = "3.1.0"
-description = "Local Telethon CLI for Telegram chat/topic ID discovery, message search/export, and topic message clearing."
+description = "Local Telethon CLI for Telegram chat/topic ID discovery, message search/export, topic message clearing, and bot settings editing."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { file = "LICENSE" }
