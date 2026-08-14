@@ -338,13 +338,25 @@ async def run_interactive_menu(*, read=input, write=print) -> int:
     return 2
 
 
-async def run(args) -> int:
+async def run(args, *, client=None, config=None) -> int:
+    """Run one command.
+
+    The menu passes its own already-started client so a whole menu session is one
+    connection: two Telethon clients against one SQLite session file is a lock
+    error waiting to happen. A caller that passes a client owns it, so it is not
+    disconnected here.
+    """
     if args.command == "doctor":
         return run_doctor()
 
-    config = load_config()
-    client = create_client(config)
-    await client.start()
+    if config is None:
+        config = load_config()
+
+    owns_client = client is None
+    if owns_client:
+        client = create_client(config)
+        await client.start()
+
     try:
         if args.command == "discover":
             return await _run_discover(client, args)
@@ -356,7 +368,8 @@ async def run(args) -> int:
             return await _run_bots(client, args, config)
         raise ValueError(f"Unknown command: {args.command}")
     finally:
-        await client.disconnect()
+        if owns_client:
+            await client.disconnect()
 
 
 def main(argv: Sequence[str] | None = None) -> int:
