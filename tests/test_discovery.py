@@ -139,3 +139,20 @@ def test_list_dialog_choices_falls_back_to_the_dialog_name():
     choices = asyncio.run(discovery.list_dialog_choices(client))
 
     assert choices[0].title == "Saved"
+
+
+def test_list_dialog_choices_returns_empty_list_for_no_dialogs():
+    client = FakeDialogClient([])
+
+    choices = asyncio.run(discovery.list_dialog_choices(client))
+
+    assert choices == []
+
+
+def test_list_dialog_choices_empty_string_when_neither_title_nor_name():
+    entity = SimpleNamespace(megagroup=True, forum=False, username=None)
+    client = FakeDialogClient([SimpleNamespace(id=42, title=None, name=None, entity=entity)])
+
+    choices = asyncio.run(discovery.list_dialog_choices(client))
+
+    assert choices[0].title == ""

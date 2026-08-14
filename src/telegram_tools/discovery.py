@@ -18,6 +18,10 @@ def classify_entity(entity: Any) -> str:
     return "group"
 
 
+def _dialog_title(dialog: Any) -> str:
+    return str(getattr(dialog, "title", None) or getattr(dialog, "name", None) or "")
+
+
 def dialog_to_chat_info(
     dialog: Any,
     *,
@@ -27,7 +31,7 @@ def dialog_to_chat_info(
     entity = dialog.entity
     return ChatInfo(
         id=int(dialog.id),
-        title=str(getattr(dialog, "title", None) or getattr(dialog, "name", None) or ""),
+        title=_dialog_title(dialog),
         username=getattr(entity, "username", None),
         type=classify_entity(entity),
         is_admin=is_admin,
@@ -150,7 +154,7 @@ async def list_dialog_choices(client) -> list[ChatChoice]:
         choices.append(
             ChatChoice(
                 id=int(dialog.id),
-                title=str(getattr(dialog, "title", None) or getattr(dialog, "name", None) or ""),
+                title=_dialog_title(dialog),
                 username=getattr(entity, "username", None),
                 type=classify_entity(entity),
             )
