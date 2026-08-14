@@ -1,6 +1,7 @@
 import asyncio
 
 from telegram_tools import menu
+from telegram_tools.config import ConfigError
 from telegram_tools.models import BotCommandInfo, BotInfo, ChatChoice, TopicInfo
 
 
@@ -176,6 +177,22 @@ def test_an_action_error_prints_and_returns_to_the_menu():
 
     assert code == 0
     assert "error: Cannot resolve chat 'nope'." in screens(output)
+    assert screens(output).count("0. Exit") == 2
+
+
+def test_a_session_acquisition_error_is_caught_and_returns_to_the_menu():
+    # client() raising before the runner is ever called must still print and
+    # loop, not escape run_menu — this covers _call's try around session.client()
+    # and session.config, not just around the runner call.
+    class BrokenSession(FakeSession):
+        async def client(self):
+            raise ConfigError("TELEGRAM_API_ID is required.")
+
+    code, calls, output = run_menu(["1", "1", "1", "", "0"], session=BrokenSession())
+
+    assert code == 0
+    assert calls == []
+    assert "error: TELEGRAM_API_ID is required." in screens(output)
     assert screens(output).count("0. Exit") == 2
 
 

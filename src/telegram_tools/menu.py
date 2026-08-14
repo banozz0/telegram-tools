@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 from typing import Any
 
-from telethon.errors import RPCError
+from telethon.errors import ChannelForumMissingError, RPCError
 
 from telegram_tools import cli
 from telegram_tools.bots import get_bot_profile, list_bots, resolve_bot
@@ -66,9 +66,10 @@ class MenuSession:
         resolved = await resolve_chat(client, reference)
         try:
             return await get_forum_topics(client, resolved.input_entity)
-        except RPCError:
+        except ChannelForumMissingError:
             # "This chat has no topics" is an answer, not a failure: Telegram
-            # rejects the request outright for a non-forum chat.
+            # rejects the request outright for a non-forum chat. Anything else
+            # is a real error and must surface.
             return []
 
     async def bots(self):
@@ -92,9 +93,9 @@ def _namespace(**kwargs) -> argparse.Namespace:
 
 async def _call(args, *, session, runner, write) -> bool:
     """Run one action. False means it errored and the message is already printed."""
-    client = await session.client() if session is not None else None
-    config = session.config if session is not None else None
     try:
+        client = await session.client() if session is not None else None
+        config = session.config if session is not None else None
         await runner(args, client=client, config=config)
         return True
     except MENU_ERRORS as exc:
