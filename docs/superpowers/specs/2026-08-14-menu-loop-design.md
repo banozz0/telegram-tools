@@ -127,12 +127,18 @@ typed-`DELETE` prompt in `delete.py`, unchanged. Two deliberate consequences:
 - It costs a second message scan. Accepted — this is the one irreversible action in the
   tool.
 
-"Select all" maps to `--all-topics`; ticked topics map to repeated `--topic`.
+Ticking every topic maps to `--all-topics`; a partial selection maps to repeated
+`--topic`. "Select all" ticks everything, so it lands on the same branch — the mapping
+follows what is ticked, not which row did the ticking.
 
 ### 4. My bots
 
-`list_bots` (one API call) → numbered bots → picking one runs `bots --bot <id>`, which
-prints the profile through the existing formatter. Then:
+`list_bots` (one API call) → numbered bots → picking one fetches that bot's full
+profile and prints it with the same `format_bot_profile` the command uses. This is the
+one read the menu performs itself rather than through `run()`: the edit screen needs
+those current values anyway (rule 4), and going through the command path would fetch
+the identical profile a second time to print the identical text. Every *edit* still
+goes through `run()`. Then:
 
 ```
 1. Edit this bot
@@ -184,11 +190,21 @@ Runs `doctor`. Needs no credentials and no connection, which is the point of it.
 
 ## Architecture
 
-### New module
+### New modules
 
-`src/telegram_tools/menu.py`. `cli.py` is 385 lines and the menu is larger than the
-whole of what it replaces; leaving it there would make the file the tool's biggest by a
-wide margin. `cli.py` keeps `build_parser`, `run`, `main`.
+Two, not one. `cli.py` is 385 lines and the menu is larger than the whole of what it
+replaces; leaving it there would make the file the tool's biggest by a wide margin.
+`cli.py` keeps `build_parser`, `run`, `main`.
+
+- **`src/telegram_tools/prompts.py`** — the screen primitives. No Telegram, no domain
+  types, no I/O beyond the injected `read`/`write`. Tested on its own, in a file that
+  never imports the rest of the tool.
+- **`src/telegram_tools/menu.py`** — `MenuSession`, the five flows, `run_menu`. Knows
+  the domain; knows nothing about terminal mechanics beyond calling `prompts`.
+
+The chat picker (`_pick_chat`) lives in `menu.py`, not `prompts.py`: it knows what a
+`ChatChoice` is and which kinds group together, which is domain knowledge. Only the
+paging, filtering, and toggling underneath it are primitives.
 
 `run_interactive_menu` and its `_read_execute` helper are deleted, not deprecated —
 nothing outside `tests/test_menu.py` calls them.
@@ -268,12 +284,17 @@ unit-testable without stdin:
 
 | Helper | Job |
 | --- | --- |
-| `choose(items, *, title, read, write)` | numbered list → index, or `BACK` |
-| `pick_chat(...)` | group screen → paged list, with filter and manual entry |
-| `pick_many(items, ...)` | the toggle list used for topics and admin rights |
-| `edit_field(label, current, *, allow_clear, ...)` | keep / change / clear |
-| `staging_screen(...)` | field rows with current values + terminal actions |
+| `choose(labels, *, title, read, write)` | numbered list → index, or `BACK` |
+| `pick(items, *, label, extras, ...)` | paged list → an item, an extra's key, or `BACK` |
+| `pick_many(items, *, preselected, ...)` | the toggle list used for topics and admin rights |
+| `ask_text` / `ask_int` | free text and positive integers; blank cancels |
+| `edit_field(title, current, *, ask, allow_clear)` | keep / change / clear |
 | `after_action(read, write) -> bool` | "Enter = menu, 0 = exit" |
+
+There is no `staging_screen` helper. The two staging screens (search filters, bot
+fields) each build their own rows from their own field list and call `choose` — the
+shapes rhyme but their rows, gates, and terminal actions differ enough that one
+parameterised helper would take more arguments than it saves.
 
 Paged list layout (page size 9, extras numbered after the page):
 
