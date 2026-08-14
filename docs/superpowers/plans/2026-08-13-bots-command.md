@@ -2049,6 +2049,21 @@ With `TELEGRAM_BOT_TOKENS` unset:
 Run: `.venv/bin/python -m telegram_tools.cli bots --bot @<yourbot> --clear-commands`
 Expected: exit code 2 and a message naming `clear_commands` and the env var format — no traceback, no partial write.
 
+- [ ] **Step 6b: Probe whether photo removal can leave the token rail**
+
+`photos.updateProfilePhoto` also takes a `bot` parameter in Telethon 1.44, and
+`utils.get_input_photo(types.InputPhotoEmpty())` converts cleanly. If clearing a bot's
+photo works from the owner session, one of the three token-only operations disappears and
+the design gets simpler:
+
+```python
+await client(functions.photos.UpdateProfilePhotoRequest(bot=input_user, id=types.InputPhotoEmpty()))
+```
+
+Run it once against a test bot that has a photo. If the photo clears, move `remove_photo`
+to the owner rail and update the spec's Auth model table; if it errors, record the error
+and leave the design as built.
+
 - [ ] **Step 7: Commit any corrections**
 
 ```bash
