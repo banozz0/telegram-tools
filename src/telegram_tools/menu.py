@@ -7,9 +7,9 @@ from typing import Any
 from telethon.errors import ChannelForumMissingError, RPCError
 
 from telegram_tools import cli
-from telegram_tools.bots import get_bot_profile, list_bots, resolve_bot
+from telegram_tools.bots import IMPLICIT_OTHER_RIGHT, format_bot_profile, get_bot_profile, list_bots, resolve_bot, right_names
 from telegram_tools.client import create_client
-from telegram_tools.config import ConfigError, load_config
+from telegram_tools.config import ConfigError, load_config, lookup_bot_token
 from telegram_tools.discovery import list_dialog_choices
 from telegram_tools.prompts import BACK, CLEAR, Extra, after_action, ask_int, ask_text, choose, edit_field, pick, pick_many
 from telegram_tools.resolver import resolve_chat
@@ -418,8 +418,200 @@ async def _flow_clear(*, session, runner, read, write) -> bool:
     return await _act(for_real, session=session, runner=runner, read=read, write=write)
 
 
+BOT_FIELDS = (
+    ("name", "Name", False, False),
+    ("bio", "Bio", True, False),
+    ("description", "Description", True, False),
+    ("commands", "Commands", True, True),
+    ("photo", "Profile photo", True, True),
+    ("group_rights", "Group rights", True, True),
+    ("channel_rights", "Channel rights", True, True),
+)
+
+_NEEDS_TOKEN = "Set TELEGRAM_BOT_TOKENS=nickname:token in ~/.telegram-tools/.env to change this."
+
+_BOTS_DEFAULTS = {
+    "command": "bots",
+    "bot": None,
+    "json_output": None,
+    "name": None,
+    "bio": None,
+    "description": None,
+    "commands": None,
+    "clear_commands": False,
+    "photo": None,
+    "remove_photo": False,
+    "group_rights": None,
+    "channel_rights": None,
+    "yes": False,
+}
+
+
+def _bots_namespace(**overrides) -> argparse.Namespace:
+    """A bots namespace with every flag defaulted, so no field is ever missing."""
+    return _namespace(**{**_BOTS_DEFAULTS, **overrides})
+
+
+def _current_bot_value(profile, key: str) -> str:
+    if key == "commands":
+        return ", ".join(f"/{command.command}" for command in profile.commands) or "(none)"
+    if key == "photo":
+        return "set" if profile.has_photo else "not set"
+    if key in ("group_rights", "channel_rights"):
+        return ", ".join(getattr(profile, key)) or "(none)"
+    return _shown(getattr(profile, key), "(not set)")
+
+
+def _staged_bot_value(key: str, staged: dict) -> str | None:
+    """How a staged edit reads on the field list, or None when nothing is staged."""
+    if key == "commands":
+        if staged.get("clear_commands"):
+            return "(cleared)"
+        return staged.get("commands")
+    if key == "photo":
+        if staged.get("remove_photo"):
+            return "(cleared)"
+        return staged.get("photo")
+    value = staged.get(key)
+    if value is None:
+        return None
+    if value in ("", "none"):
+        return "(cleared)"
+    return value
+
+
+def _ask_rights(title: str, current: list[str], *, read, write) -> Any:
+    names = [name for name in right_names() if name != IMPLICIT_OTHER_RIGHT]
+    chosen = pick_many(
+        names,
+        title=title,
+        label=str,
+        read=read,
+        write=write,
+        preselected=[name for name in names if name in current],
+    )
+    if chosen is BACK:
+        return BACK
+    return ",".join(chosen)
+
+
+async def _flow_bot_edit(profile, *, session, runner, read, write) -> bool:
+    token = lookup_bot_token(session.config.bot_tokens, profile.id)
+    staged: dict[str, Any] = {}
+
+    while True:
+        rows: list[tuple[str, str]] = []
+        for key, title, _allow_clear, needs_token in BOT_FIELDS:
+            current = _current_bot_value(profile, key)
+            pending = _staged_bot_value(key, staged)
+            value = current if pending is None else f"{current} -> {pending}"
+            gate = "  (needs this bot's token)" if needs_token and token is None else ""
+            rows.append((key, f"{title:<16} [{value}]{gate}"))
+        rows.append(("apply", "Review & apply"))
+
+        heading = f"Editing @{profile.username} ({profile.id})" if profile.username else f"Editing bot {profile.id}"
+        choice = choose([label for _key, label in rows], title=heading, read=read, write=write, back_label="Back (discards)")
+
+        if choice is BACK:
+            if staged:
+                count = len(staged)
+                write(f"Discarded {count} staged change{'s' if count > 1 else ''}.")
+            return True
+
+        key = rows[choice][0]
+
+        if key == "apply":
+            if not staged:
+                write("Nothing staged yet.")
+                continue
+            args = _bots_namespace(bot=str(profile.id), **staged)
+            return await _act(args, session=session, runner=runner, read=read, write=write)
+
+        field = next(entry for entry in BOT_FIELDS if entry[0] == key)
+        _key, title, allow_clear, needs_token = field
+        if needs_token and token is None:
+            # Photo is the odd one: setting it runs on the user session, only
+            # removing it needs the token, so it is refused only for clearing.
+            if key != "photo":
+                write(f"{title} can only be changed with that bot's token. {_NEEDS_TOKEN}")
+                continue
+
+        if key in ("group_rights", "channel_rights"):
+            ask = lambda: _ask_rights(title, getattr(profile, key), read=read, write=write)
+        elif key in ("commands", "photo"):
+            ask = lambda: ask_text(f"{title} file path", read=read, write=write)
+        else:
+            ask = lambda: ask_text(title, read=read, write=write)
+
+        answer = edit_field(
+            title,
+            _current_bot_value(profile, key),
+            read=read,
+            write=write,
+            ask=ask,
+            allow_clear=allow_clear and not (needs_token and token is None),
+        )
+        if answer is BACK:
+            continue
+
+        if answer is CLEAR:
+            if key == "commands":
+                staged["clear_commands"] = True
+                staged.pop("commands", None)
+            elif key == "photo":
+                staged["remove_photo"] = True
+                staged.pop("photo", None)
+            elif key in ("group_rights", "channel_rights"):
+                staged[key] = "none"
+            else:
+                staged[key] = ""
+            continue
+
+        staged[key] = answer
+        if key == "commands":
+            staged.pop("clear_commands", None)
+        if key == "photo":
+            staged.pop("remove_photo", None)
+
+
 async def _flow_bots(*, session, runner, read, write) -> bool:
-    raise NotImplementedError("Task 8")
+    bots = await session.bots()
+    if not bots:
+        write("No bots found.")
+        return True
+
+    chosen = pick(
+        bots,
+        title="My bots",
+        label=lambda bot: f"@{bot.username or bot.id}  {bot.name}",
+        read=read,
+        write=write,
+    )
+    if chosen is BACK:
+        return True
+
+    profile = await session.bot_profile(str(chosen.id))
+    # Printed here rather than through run(): the edit screen needs these values
+    # anyway, and fetching the same profile twice to print it would be two more
+    # API calls for the same text. Every edit still goes through run().
+    write(format_bot_profile(profile))
+
+    while True:
+        choice = choose(
+            ["Edit this bot", "Save this profile to a JSON file"],
+            title=f"@{profile.username or profile.id}",
+            read=read,
+            write=write,
+        )
+        if choice is BACK:
+            return True
+        if choice == 1:
+            path = ask_text("JSON file path", read=read, write=write)
+            if path is BACK:
+                continue
+            args = _bots_namespace(bot=str(profile.id), json_output=path)
+            return await _act(args, session=session, runner=runner, read=read, write=write)
+        return await _flow_bot_edit(profile, session=session, runner=runner, read=read, write=write)
 
 
 async def run_menu(*, read=input, write=print, session=None, runner=None) -> int:

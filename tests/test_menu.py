@@ -459,3 +459,90 @@ def test_clear_says_when_a_chat_has_no_topics():
     assert code == 0
     assert calls == []
     assert "No topics in that chat." in screens(output)
+
+
+def test_bots_lists_and_prints_a_profile():
+    # 4 = my bots, 1 = harrybot, then 0 out of the bot screen, 0 = exit
+    code, calls, output = run_menu(["4", "1", "0", "0"])
+
+    text = screens(output)
+    assert code == 0
+    assert calls == []
+    assert "1. @harrybot  Harry" in text
+    assert "Bio: Runs the agency" in text
+    assert "1. Edit this bot" in text
+
+
+def test_bots_saves_a_profile_to_json():
+    code, calls, _output = run_menu(["4", "1", "2", "/tmp/bot.json", "0"])
+
+    assert calls[0].command == "bots"
+    assert calls[0].bot == "12345"
+    assert calls[0].json_output == "/tmp/bot.json"
+
+
+def test_bot_edit_stages_a_name_and_applies_without_yes():
+    # 4, 1 = bot, 1 = edit, 1 = Name, 2 = change, text, 8 = review & apply
+    answers = ["4", "1", "1", "1", "2", "Harry Two", "8", "", "0"]
+    code, calls, _output = run_menu(answers)
+
+    args = calls[0]
+    assert args.command == "bots"
+    assert args.bot == "12345"
+    assert args.name == "Harry Two"
+    assert args.bio is None
+    assert args.yes is False
+
+
+def test_bot_edit_clears_a_bio_with_an_empty_string():
+    answers = ["4", "1", "1", "2", "3", "8", "", "0"]
+    code, calls, _output = run_menu(answers)
+
+    assert calls[0].bio == ""
+
+
+def test_bot_edit_shows_current_values_and_staged_changes():
+    answers = ["4", "1", "1", "1", "2", "Harry Two", "0", "0"]
+    _code, _calls, output = run_menu(answers)
+
+    text = screens(output)
+    # The bracketed value, not the column padding.
+    assert "[Harry]" in text
+    assert "[Harry -> Harry Two]" in text
+    assert "Discarded 1 staged change." in text
+
+
+def test_bot_edit_refuses_token_fields_without_a_token():
+    answers = ["4", "1", "1", "4", "0", "0"]
+    _code, calls, output = run_menu(answers)
+
+    text = screens(output)
+    assert calls == []
+    assert "[/start]  (needs this bot's token)" in text
+    assert "Set TELEGRAM_BOT_TOKENS" in text
+
+
+def test_bot_edit_rights_toggle_with_a_token():
+    session = FakeSession(bot_tokens={"harry": "12345:AAtoken"})
+    # 6 = group rights, 2 = change, then the toggle: post_messages is preselected
+    # (row 2 of page 1), tick change_info (row 1), continue is the last row.
+    answers = ["4", "1", "1", "6", "2", "1", "12", "8", "", "0"]
+    _code, calls, _output = run_menu(answers, session=session)
+
+    assert calls[0].group_rights == "change_info,post_messages"
+
+
+def test_bot_edit_clears_rights_with_none():
+    session = FakeSession(bot_tokens={"harry": "12345:AAtoken"})
+    answers = ["4", "1", "1", "6", "3", "8", "", "0"]
+    _code, calls, _output = run_menu(answers, session=session)
+
+    assert calls[0].group_rights == "none"
+
+
+def test_bot_edit_apply_with_nothing_staged_says_so():
+    answers = ["4", "1", "1", "8", "0", "0"]
+    _code, calls, output = run_menu(answers)
+
+    assert calls == []
+    assert "Nothing staged yet." in screens(output)
