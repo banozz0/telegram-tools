@@ -327,7 +327,7 @@ def test_search_stages_every_filter_then_runs():
         "6", "2", "50",         # Limit > change
         "7", "0",               # Run it, then exit
     ]
-    code, calls, _output = run_menu(answers)
+    code, calls, output = run_menu(answers)
 
     assert code == 0
     args = calls[0]
@@ -337,6 +337,8 @@ def test_search_stages_every_filter_then_runs():
     assert args.since == "2026-08-01"
     assert args.until == "2026-08-14"
     assert args.limit == 50
+    # The Topic row shows the title too, not just the raw id.
+    assert "[141 Deploys]" in screens(output)
 
 
 def test_search_shows_staged_values_and_clears_one():
@@ -385,3 +387,75 @@ def test_search_topic_picker_offers_all_topics():
 
     assert code == 0
     assert calls[0].topic is None
+
+
+def test_search_topic_picker_says_the_chat_has_no_topics():
+    session = FakeSession(topics=[])
+    # 2 = search, 1 = forum groups, 1 = Hermes, 1 = Topic row (no topics), 0 = back, 0 = exit
+    answers = ["2", "1", "1", "1", "0", "0"]
+    code, calls, output = run_menu(answers, session=session)
+
+    assert code == 0
+    assert calls == []
+    text = screens(output)
+    assert "That chat has no topics." in text
+    # It returned to the staging screen rather than crashing or exiting: the
+    # screen renders once before the Topic row is chosen, once again after.
+    assert text.count("Search in Hermes") == 2
+
+
+def test_clear_dry_runs_first_then_executes():
+    # 3 = clear, 1 = Hermes, 1 = tick Deploys, 4 = continue, 1 = for real, Enter, 0
+    answers = ["3", "1", "1", "4", "1", "", "0"]
+    code, calls, _output = run_menu(answers)
+
+    assert code == 0
+    assert len(calls) == 2
+    assert calls[0].command == "clear-messages"
+    assert calls[0].chat == "-100111"
+    assert calls[0].topics == [141]
+    assert calls[0].all_topics is False
+    assert calls[0].execute is False
+    assert calls[0].batch_size == 100
+    assert calls[1].execute is True
+    assert calls[1].topics == [141]
+
+
+def test_clear_stops_at_the_dry_run_when_you_go_back():
+    answers = ["3", "1", "1", "4", "0", "0"]
+    code, calls, _output = run_menu(answers)
+
+    assert code == 0
+    assert len(calls) == 1
+    assert calls[0].execute is False
+
+
+def test_clear_every_topic_uses_all_topics():
+    # 3 = select all (two topics + select all), 4 = continue
+    answers = ["3", "1", "3", "4", "1", "", "0"]
+    code, calls, _output = run_menu(answers)
+
+    assert calls[0].all_topics is True
+    assert calls[0].topics is None
+    assert calls[1].all_topics is True
+
+
+def test_clear_does_not_offer_the_real_pass_when_the_dry_run_errors():
+    _calls, runner = recorder(error=PermissionError("Current user lacks Telegram delete_messages permission in this chat."))
+    answers = ["3", "1", "1", "4", "0"]
+    code, _unused, output = run_menu(answers, runner=runner)
+
+    assert code == 0
+    text = screens(output)
+    assert "error: Current user lacks Telegram delete_messages permission in this chat." in text
+    assert "Clear them for real" not in text
+
+
+def test_clear_says_when_a_chat_has_no_topics():
+    session = FakeSession(topics=[])
+    answers = ["3", "1", "0"]
+    code, calls, output = run_menu(answers, session=session)
+
+    assert code == 0
+    assert calls == []
+    assert "No topics in that chat." in screens(output)
