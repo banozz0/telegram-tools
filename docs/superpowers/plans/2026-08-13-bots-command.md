@@ -2015,6 +2015,19 @@ git commit -m "docs: document the bots command and bump to 3.1.0"
 
 Everything so far is tested against fakes. These five calls are read from Telethon's TL definitions and have never been run against Telegram. **Do not report the feature as working until this task is done.** Run these against a bot Sven owns, and stop and report if any step behaves differently.
 
+> **Result, 2026-08-14 (Sven ran it against `@bottalerttbot`):** steps 1–3, 5 and 6 all
+> passed — the bot list, the profile read, a `setBotInfo` write, `lang_code=""`, the
+> memory-session bot client, `setBotCommands`, `resetBotCommands`, and
+> `setBotGroupDefaultAdminRights`. Step 4 and the photo half of step 5
+> (`photos.uploadProfilePhoto(bot=)` and `photos.deletePhotos`) were **skipped**: testing
+> them costs the bot's current photo, which cannot be restored without the original file.
+> They remain the only unverified calls in the feature.
+>
+> One finding no fake could have produced: **Telegram implicitly sets the `other` right**
+> on any non-empty admin-rights set, so a read-back never equals what was requested and
+> re-running the same command showed a phantom diff. Fixed by excluding `other` from the
+> rights display and comparison.
+
 - [ ] **Step 1: Confirm the bot list**
 
 Run: `.venv/bin/python -m telegram_tools.cli bots`
