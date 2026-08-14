@@ -4,6 +4,15 @@ All notable changes to this project will be documented here.
 
 This project follows a practical changelog style: user-visible changes, safety changes, and release notes belong here; active task tracking belongs outside the repo.
 
+## 3.1.0 - 2026-08-14
+
+- Add `bots`: list the bots you own with their numeric IDs, show one bot's full profile, and edit its display name, bio, description, commands, profile photo, and default group/channel admin rights.
+- Bot editing runs on your existing login. Commands, photo removal, and default admin rights are sent by the bot itself and need that bot's token in the new optional `TELEGRAM_BOT_TOKENS` variable (`nickname:token`, comma separated). Tokens are read only — never written to disk, printed, or exported. This is not a return of the 3.0.0 `bots.json` store.
+- Edits print an old → new diff and ask for confirmation; `--yes` skips the prompt. Every edit run names the bot first (`Editing @yourbot (12345)`), including under `--yes`, so a mistyped nickname can never act on a different bot unseen. A blank answer at the prompt says so rather than looking like it ignored you.
+- Default admin rights ignore Telegram's implicit `other` flag, which it adds to any non-empty rights set. Without that, re-running the same `--group-rights` command showed a change that was not one and re-sent the write.
+- `doctor` reports how many bot tokens are loaded, and nothing else about them.
+- Changing a bot's `@username` and creating or deleting bots have no API at all and stay with @BotFather. Revoking a token does have one (`bots.exportBotToken`), but this tool never calls it — fetching or exporting a bot token is deliberately out of scope.
+
 ## 3.0.0 - 2026-08-12
 
 First PyPI release. Curated to three tools: discovery, search/export, and clear-messages.

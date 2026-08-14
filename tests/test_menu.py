@@ -48,3 +48,51 @@ def test_interactive_menu_builds_clear_all_topic_messages_args(monkeypatch):
     assert calls["args"].chat == "@group"
     assert calls["args"].all_topics is True
     assert calls["args"].execute is False
+
+
+def test_interactive_menu_builds_list_bots_args(monkeypatch):
+    calls = {}
+
+    async def fake_run(args):
+        calls["args"] = args
+        return 0
+
+    monkeypatch.setattr(cli, "run", fake_run)
+
+    result = asyncio.run(
+        cli.run_interactive_menu(
+            read=lambda _prompt: "7",
+            write=lambda _message: None,
+        )
+    )
+
+    assert result == 0
+    assert calls["args"].command == "bots"
+    assert calls["args"].bot is None
+    assert calls["args"].json_output is None
+    assert calls["args"].yes is False
+
+
+def test_interactive_menu_builds_edit_bot_args(monkeypatch):
+    calls = {}
+
+    async def fake_run(args):
+        calls["args"] = args
+        return 0
+
+    monkeypatch.setattr(cli, "run", fake_run)
+
+    responses = iter(["8", "harry", "Harry Two", "New bio", "New description"])
+    result = asyncio.run(
+        cli.run_interactive_menu(
+            read=lambda _prompt: next(responses),
+            write=lambda _message: None,
+        )
+    )
+
+    assert result == 0
+    assert calls["args"].command == "bots"
+    assert calls["args"].bot == "harry"
+    assert calls["args"].name == "Harry Two"
+    assert calls["args"].bio == "New bio"
+    assert calls["args"].description == "New description"

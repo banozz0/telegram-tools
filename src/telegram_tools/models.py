@@ -52,3 +52,43 @@ class DeleteResult:
             "dry_run": self.dry_run,
             "cancelled": self.cancelled,
         }
+
+
+@dataclass(frozen=True)
+class BotCommandInfo:
+    command: str
+    description: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "command": self.command,
+            "description": self.description,
+        }
+
+
+@dataclass(frozen=True)
+class BotInfo:
+    id: int
+    username: str | None
+    name: str
+    bio: str | None
+    description: str | None
+    is_owned: bool
+    has_photo: bool = False
+    commands: list[BotCommandInfo] = field(default_factory=list)
+    group_rights: list[str] = field(default_factory=list)
+    channel_rights: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "username": self.username,
+            "name": self.name,
+            "bio": self.bio,
+            "description": self.description,
+            "is_owned": self.is_owned,
+            "has_photo": self.has_photo,
+            "commands": [command.to_dict() for command in self.commands],
+            "group_rights": list(self.group_rights),
+            "channel_rights": list(self.channel_rights),
+        }

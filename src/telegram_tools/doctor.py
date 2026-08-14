@@ -6,7 +6,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping
 
-from telegram_tools.config import config_dir
+from dotenv import dotenv_values
+
+from telegram_tools.config import ConfigError, config_dir, parse_bot_tokens
 
 
 MIN_PYTHON = (3, 11)
@@ -48,6 +50,25 @@ def check_session_storage(env: Mapping[str, str], home: Path | None = None) -> D
     return DoctorCheck("WARN", "Session storage was not found (created on first login)")
 
 
+def _effective_env(root: Path, env: Mapping[str, str], home: Path | None = None) -> dict[str, str]:
+    merged: dict[str, str] = {}
+    for path in (config_dir(home) / ".env", root / ".env"):
+        if path.exists():
+            merged.update({key: value for key, value in dotenv_values(path).items() if value is not None})
+    merged.update(env)
+    return merged
+
+
+def check_bot_tokens(root: Path, env: Mapping[str, str], home: Path | None = None) -> DoctorCheck:
+    try:
+        tokens = parse_bot_tokens(_effective_env(root, env, home).get("TELEGRAM_BOT_TOKENS"))
+    except ConfigError:
+        return DoctorCheck("FAIL", "TELEGRAM_BOT_TOKENS is malformed (expected nickname:token, comma separated)")
+    if not tokens:
+        return DoctorCheck("WARN", "No bot tokens loaded (only needed to edit bot commands, photo, or admin rights)")
+    return DoctorCheck("OK", f"{len(tokens)} bot token(s) loaded")
+
+
 def run_doctor(
     *,
     root: Path | str | None = None,
@@ -61,6 +82,7 @@ def run_doctor(
         check_python_version(version_info),
         check_config_presence(root, env, home),
         check_session_storage(env, home),
+        check_bot_tokens(root, env, home),
     ]
 
     for check in checks:

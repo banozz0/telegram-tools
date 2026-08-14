@@ -7,8 +7,23 @@ import sys
 from pathlib import Path
 from typing import Sequence
 
+from telegram_tools.bot_session import apply_bot_edits, bot_client
+from telegram_tools.bots import (
+    apply_owner_edits,
+    build_edit_plan,
+    confirm_bot_edits,
+    format_bot_profile,
+    format_bot_table,
+    format_edit_heading,
+    get_bot_profile,
+    list_bots,
+    parse_commands_file,
+    parse_rights,
+    resolve_bot,
+    right_names,
+)
 from telegram_tools.client import create_client
-from telegram_tools.config import ConfigError, load_config
+from telegram_tools.config import ConfigError, bot_id_from_token, load_config, lookup_bot_token, resolve_bot_token
 from telegram_tools.delete import confirm_clear_topic_messages, delete_topic_messages
 from telegram_tools.discovery import discover_chats, filter_chats, format_discovery_table
 from telegram_tools.doctor import run_doctor
@@ -53,6 +68,23 @@ def build_parser() -> argparse.ArgumentParser:
     search.add_argument("--format", choices=("json", "csv"), default="json", help="Export format")
     search.add_argument("--output", help="Output path; prints a readable table when omitted")
 
+    bots_parser = subparsers.add_parser("bots", help="List the bots you own and edit their BotFather settings")
+    bots_parser.add_argument("--bot", help="Bot nickname from TELEGRAM_BOT_TOKENS, @username, or numeric ID")
+    bots_parser.add_argument("--json", dest="json_output", help="Write bot output to this JSON file")
+    bots_parser.add_argument("--name", help="Set the display name shown in chat lists")
+    bots_parser.add_argument("--bio", help="Set the short bio shown under the bot profile")
+    bots_parser.add_argument("--description", help="Set the 'what can this bot do?' text shown before Start")
+    commands_group = bots_parser.add_mutually_exclusive_group()
+    commands_group.add_argument("--commands", help="Path to a JSON file of {command, description} objects (needs a bot token)")
+    commands_group.add_argument("--clear-commands", action="store_true", help="Remove every command (needs a bot token)")
+    photo_group = bots_parser.add_mutually_exclusive_group()
+    photo_group.add_argument("--photo", help="Path to a new profile photo")
+    photo_group.add_argument("--remove-photo", action="store_true", help="Remove the current profile photo (needs a bot token)")
+    valid_rights = ", ".join(right_names())
+    bots_parser.add_argument("--group-rights", help=f"Default admin rights for groups, comma-separated, or none (needs a bot token). Valid names: {valid_rights}")
+    bots_parser.add_argument("--channel-rights", help=f"Default admin rights for channels, comma-separated, or none (needs a bot token). Valid names: {valid_rights}")
+    bots_parser.add_argument("--yes", action="store_true", help="Skip the confirmation prompt")
+
     subparsers.add_parser("doctor", help="Check local setup without printing secrets")
 
     return parser
@@ -69,9 +101,7 @@ async def _run_discover(client, args) -> int:
     chats = filter_chats(await discover_chats(client), admin_only=not args.all_chats)
     payload = [chat.to_dict() for chat in chats]
     if args.json_output:
-        output = Path(args.json_output)
-        output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(json.dumps(payload, indent=2, default=str) + "\n")
+        _write_json(payload, args.json_output)
     else:
         print(format_discovery_table(chats))
     return 0
@@ -124,6 +154,118 @@ async def _run_search(client, args) -> int:
     return 0
 
 
+EDIT_FLAGS = ("name", "bio", "description", "commands", "clear_commands", "photo", "remove_photo", "group_rights", "channel_rights")
+
+
+def bot_edit_requests(args) -> dict:
+    requested = {}
+    for flag in EDIT_FLAGS:
+        value = getattr(args, flag, None)
+        if value is None or value is False:
+            continue
+        requested[flag] = value
+    return requested
+
+
+def _write_json(payload, path: str) -> None:
+    output = Path(path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(payload, indent=2, default=str) + "\n")
+
+
+def _bot_result(profile, plan, applied, *, cancelled: bool) -> dict:
+    return {
+        "bot_id": profile.id,
+        "username": profile.username,
+        "applied": list(applied),
+        "skipped": list(plan.skipped),
+        "cancelled": cancelled,
+    }
+
+
+def _emit_bot_result(result: dict, json_output: str | None) -> None:
+    if json_output:
+        _write_json(result, json_output)
+    else:
+        print(json.dumps(result, indent=2))
+
+
+async def _run_bots(client, args, config) -> int:
+    requested = bot_edit_requests(args)
+    if requested and not args.bot:
+        raise ValueError("--bot is required when editing a bot.")
+
+    if not args.bot:
+        bots = await list_bots(client)
+        if args.json_output:
+            _write_json([bot.to_dict() for bot in bots], args.json_output)
+        else:
+            print(format_bot_table(bots))
+        return 0
+
+    token, reference = resolve_bot_token(config.bot_tokens, args.bot)
+
+    resolved = await resolve_bot(client, reference)
+    profile = await get_bot_profile(client, resolved)
+    # A nickname can name the wrong bot, so the token is only kept if its own bot id
+    # is the bot that was resolved. Ids only - never any part of a token in an error.
+    if token is None:
+        token = lookup_bot_token(config.bot_tokens, profile.id)
+    if token is not None and bot_id_from_token(token) != profile.id:
+        raise ValueError(
+            f"The stored token is for bot {bot_id_from_token(token)}, not {profile.id}. Check TELEGRAM_BOT_TOKENS."
+        )
+
+    if not requested:
+        if args.json_output:
+            _write_json(profile.to_dict(), args.json_output)
+        else:
+            print(format_bot_profile(profile))
+        return 0
+
+    if not resolved.is_owned:
+        raise PermissionError(f"You do not own @{profile.username or profile.id}; only its owner can edit it.")
+
+    if "commands" in requested:
+        requested["commands"] = parse_commands_file(requested["commands"])
+    if "photo" in requested and not Path(requested["photo"]).is_file():
+        # Checked here so a missing file fails before the confirm, not mid-apply.
+        raise FileNotFoundError(f"No photo file at {requested['photo']}.")
+    for field in ("group_rights", "channel_rights"):
+        if field in requested:
+            requested[field] = parse_rights(requested[field])
+
+    plan = build_edit_plan(profile, requested)
+    if plan.is_empty:
+        _emit_bot_result(_bot_result(profile, plan, [], cancelled=False), args.json_output)
+        return 0
+
+    if plan.bot_changes and token is None:
+        fields = ", ".join(change.field for change in plan.bot_changes)
+        raise ValueError(
+            f"{fields} can only be changed with that bot's token. "
+            "Set TELEGRAM_BOT_TOKENS=nickname:token[,nickname:token] in ~/.telegram-tools/.env."
+        )
+
+    # Named on every edit run, --yes included: it is the one mode with no confirm diff,
+    # so a mistyped token nickname acting on the wrong bot would otherwise go unnamed.
+    print(format_edit_heading(profile))
+    if not args.yes:
+        if not confirm_bot_edits(plan):
+            _emit_bot_result(_bot_result(profile, plan, [], cancelled=True), args.json_output)
+            return 1
+
+    applied: list[str] = []
+    try:
+        await apply_owner_edits(client, resolved.input_user, plan.owner_changes, applied)
+        if plan.bot_changes:
+            async with bot_client(config, token) as bot:
+                await apply_bot_edits(bot, plan.bot_changes, applied)
+    finally:
+        _emit_bot_result(_bot_result(profile, plan, applied, cancelled=False), args.json_output)
+    return 0
+
+
 def _namespace(**kwargs):
     return argparse.Namespace(**kwargs)
 
@@ -144,6 +286,8 @@ async def run_interactive_menu(*, read=input, write=print) -> int:
                 "4. Clear topic messages",
                 "5. Clear multiple topics",
                 "6. Clear all topic messages",
+                "7. List my bots",
+                "8. Edit a bot",
                 "0. Exit",
             ]
         )
@@ -181,6 +325,14 @@ async def run_interactive_menu(*, read=input, write=print) -> int:
     if choice == "6":
         chat = read("Chat (@username, t.me link, or numeric ID): ")
         return await run(_namespace(command="clear-messages", chat=chat, topics=None, all_topics=True, execute=_read_execute(read), batch_size=100))
+    if choice == "7":
+        return await run(_namespace(command="bots", bot=None, json_output=None, name=None, bio=None, description=None, commands=None, clear_commands=False, photo=None, remove_photo=False, group_rights=None, channel_rights=None, yes=False))
+    if choice == "8":
+        bot = read("Bot (nickname, @username, or numeric ID): ")
+        name = read("New display name (blank to keep): ").strip() or None
+        bio = read("New bio (blank to keep): ").strip() or None
+        description = read("New description (blank to keep): ").strip() or None
+        return await run(_namespace(command="bots", bot=bot, json_output=None, name=name, bio=bio, description=description, commands=None, clear_commands=False, photo=None, remove_photo=False, group_rights=None, channel_rights=None, yes=False))
 
     write("Unknown choice.")
     return 2
@@ -200,6 +352,8 @@ async def run(args) -> int:
             return await _run_clear_messages(client, args)
         if args.command == "search":
             return await _run_search(client, args)
+        if args.command == "bots":
+            return await _run_bots(client, args, config)
         raise ValueError(f"Unknown command: {args.command}")
     finally:
         await client.disconnect()
@@ -221,6 +375,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     except PermissionError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
+    except OSError as exc:
+        # A missing or unreadable path is a usage mistake, not a crash. Must stay
+        # below PermissionError, which is an OSError subclass with its own exit.
+        parser.error(str(exc))
 
 
 if __name__ == "__main__":
