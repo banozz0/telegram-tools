@@ -414,7 +414,13 @@ async def _flow_clear(*, session, runner, read, write) -> bool:
     if choice is BACK:
         return True
 
-    for_real = _namespace(**{**vars(dry_run), "execute": True})
+    for_real = _namespace(
+        **{
+            **vars(dry_run),
+            "execute": True,
+            "topics": list(dry_run.topics) if dry_run.topics is not None else None,
+        }
+    )
     return await _act(for_real, session=session, runner=runner, read=read, write=write)
 
 
@@ -635,7 +641,14 @@ async def run_menu(*, read=input, write=print, session=None, runner=None) -> int
             choice = choose(list(ROOT_ITEMS), title=ROOT_TITLE, read=read, write=write, back_label="Exit")
             if choice is BACK:
                 return 0
-            if not await flows[choice](session=session, runner=runner, read=read, write=write):
+            try:
+                keep_going = await flows[choice](session=session, runner=runner, read=read, write=write)
+            except MENU_ERRORS as exc:
+                # A picker's own fetch can fail too: a flood-wait, an expired
+                # session, a chat that vanished. The menu says so and stays open.
+                write(f"error: {exc}")
+                keep_going = after_action(read=read, write=write)
+            if not keep_going:
                 return 0
     finally:
         await session.close()

@@ -305,12 +305,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         if args.command is None:
+            if not sys.stdin.isatty():
+                # A menu needs a human. Scripts and agents get the help they
+                # actually wanted instead of a blocked input() prompt.
+                parser.print_help()
+                return 0
             # Imported here, not at module scope: menu.py imports cli, and a
             # top-level import either way closes the cycle.
             from telegram_tools.menu import run_menu
 
             return asyncio.run(run_menu())
         return asyncio.run(run(args))
+    except (KeyboardInterrupt, EOFError):
+        print()
+        return 130
     except ConfigError as exc:
         parser.error(str(exc))
     except EntityResolutionError as exc:

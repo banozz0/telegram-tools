@@ -211,3 +211,29 @@ def test_run_doctor_never_loads_config_or_connects(monkeypatch):
     monkeypatch.setattr(cli, "create_client", lambda _config: (_ for _ in ()).throw(AssertionError("no client for doctor")))
 
     assert asyncio.run(cli.run(SimpleNamespace(command="doctor"))) == 0
+
+
+def test_main_prints_help_instead_of_a_menu_without_a_tty(monkeypatch, capsys):
+    monkeypatch.setattr(cli.sys, "stdin", SimpleNamespace(isatty=lambda: False))
+
+    assert cli.main([]) == 0
+
+    printed = capsys.readouterr().out
+    assert "usage: telegram-tools" in printed
+    assert "clear-messages" in printed
+
+
+@pytest.mark.filterwarnings("ignore::RuntimeWarning")
+def test_main_exits_130_on_a_keyboard_interrupt(monkeypatch):
+    monkeypatch.setattr(cli.sys, "stdin", SimpleNamespace(isatty=lambda: True))
+    monkeypatch.setattr(cli.asyncio, "run", lambda _coro: (_ for _ in ()).throw(KeyboardInterrupt()))
+
+    assert cli.main([]) == 130
+
+
+@pytest.mark.filterwarnings("ignore::RuntimeWarning")
+def test_main_exits_130_when_input_ends(monkeypatch):
+    monkeypatch.setattr(cli.sys, "stdin", SimpleNamespace(isatty=lambda: True))
+    monkeypatch.setattr(cli.asyncio, "run", lambda _coro: (_ for _ in ()).throw(EOFError()))
+
+    assert cli.main([]) == 130

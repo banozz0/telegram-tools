@@ -549,3 +549,15 @@ def test_bot_edit_apply_with_nothing_staged_says_so():
 
     assert calls == []
     assert "Nothing staged yet." in screens(output)
+
+
+def test_a_picker_error_prints_and_returns_to_the_menu():
+    class ExplodingSession(FakeSession):
+        async def chats(self):
+            raise ValueError("Cannot resolve chat.")
+
+    code, calls, output = run_menu(["2", "", "0"], session=ExplodingSession())
+
+    assert code == 0
+    assert calls == []
+    assert "error: Cannot resolve chat." in screens(output)
