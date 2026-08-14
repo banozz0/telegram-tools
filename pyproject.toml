@@ -45,6 +45,11 @@ Changelog = "https://github.com/banozz0/telegram-tools/blob/main/CHANGELOG.md"
 [tool.hatch.build.targets.wheel]
 packages = ["src/telegram_tools"]
 
+[tool.hatch.build.targets.sdist]
+# Build-process artifacts, not part of the distributed software. They stay public
+# in the GitHub repo; they just have no business inside a package download.
+exclude = [".superpowers", "docs/superpowers"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
