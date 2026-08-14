@@ -520,6 +520,9 @@ def test_bot_edit_refuses_token_fields_without_a_token():
     assert calls == []
     assert "[/start]  (needs this bot's token)" in text
     assert "Set TELEGRAM_BOT_TOKENS" in text
+    # Photo is the exception: setting one never needs a token, only clearing
+    # does, so its row carries the clearing-specific text, not the blanket one.
+    assert "[set]  (clearing needs this bot's token)" in text
 
 
 def test_bot_edit_rights_toggle_with_a_token():

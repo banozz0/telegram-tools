@@ -7,7 +7,7 @@ from typing import Any
 from telethon.errors import ChannelForumMissingError, RPCError
 
 from telegram_tools import cli
-from telegram_tools.bots import IMPLICIT_OTHER_RIGHT, format_bot_profile, get_bot_profile, list_bots, resolve_bot, right_names
+from telegram_tools.bots import IMPLICIT_OTHER_RIGHT, format_bot_profile, format_edit_heading, get_bot_profile, list_bots, resolve_bot, right_names
 from telegram_tools.client import create_client
 from telegram_tools.config import ConfigError, load_config, lookup_bot_token
 from telegram_tools.discovery import list_dialog_choices
@@ -505,11 +505,16 @@ async def _flow_bot_edit(profile, *, session, runner, read, write) -> bool:
             current = _current_bot_value(profile, key)
             pending = _staged_bot_value(key, staged)
             value = current if pending is None else f"{current} -> {pending}"
-            gate = "  (needs this bot's token)" if needs_token and token is None else ""
+            if needs_token and token is None:
+                # Photo is the odd one: only clearing it needs the token, setting
+                # one does not, so its row says so instead of the blanket message.
+                gate = "  (clearing needs this bot's token)" if key == "photo" else "  (needs this bot's token)"
+            else:
+                gate = ""
             rows.append((key, f"{title:<16} [{value}]{gate}"))
         rows.append(("apply", "Review & apply"))
 
-        heading = f"Editing @{profile.username} ({profile.id})" if profile.username else f"Editing bot {profile.id}"
+        heading = format_edit_heading(profile)
         choice = choose([label for _key, label in rows], title=heading, read=read, write=write, back_label="Back (discards)")
 
         if choice is BACK:
