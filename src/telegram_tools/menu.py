@@ -11,7 +11,7 @@ from telegram_tools.bots import get_bot_profile, list_bots, resolve_bot
 from telegram_tools.client import create_client
 from telegram_tools.config import ConfigError, load_config
 from telegram_tools.discovery import list_dialog_choices
-from telegram_tools.prompts import BACK, Extra, after_action, ask_text, choose, pick
+from telegram_tools.prompts import BACK, CLEAR, Extra, after_action, ask_int, ask_text, choose, edit_field, pick
 from telegram_tools.resolver import resolve_chat
 from telegram_tools.topics import get_forum_topics
 
@@ -237,8 +237,127 @@ async def _flow_doctor(*, session, runner, read, write) -> bool:
     return await _act(_namespace(command="doctor"), session=None, runner=runner, read=read, write=write)
 
 
+_ALL_TOPICS = "All topics"
+
+
+def _shown(value, empty: str) -> str:
+    return empty if value in (None, "") else str(value)
+
+
+async def _ask_topic(picked, *, session, read, write) -> Any:
+    topics = await session.topics(picked.reference)
+    if not topics:
+        write("That chat has no topics.")
+        return BACK
+
+    chosen = pick(
+        topics,
+        title=f"Topics in {picked.title}",
+        label=lambda topic: f"{topic.id:<6}  {topic.title}",
+        read=read,
+        write=write,
+        extras=(Extra("all", _ALL_TOPICS),),
+    )
+    if chosen is BACK:
+        return BACK
+    if chosen == "all":
+        return CLEAR
+    return chosen.id
+
+
+def _ask_from_user(*, read, write) -> Any:
+    choice = choose(["Anyone", "Me", "Someone else"], title="From", read=read, write=write)
+    if choice is BACK:
+        return BACK
+    if choice == 0:
+        return CLEAR
+    if choice == 1:
+        return "me"
+    return ask_text("Username, ID, or me", read=read, write=write)
+
+
 async def _flow_search(*, session, runner, read, write) -> bool:
-    raise NotImplementedError("Task 6")
+    picked = await _pick_chat(session=session, read=read, write=write)
+    if picked is BACK:
+        return True
+
+    staged: dict[str, Any] = {"topic": None, "keyword": None, "from_user": None, "since": None, "until": None, "limit": None}
+
+    while True:
+        rows: list[tuple[str, str]] = []
+        if picked.is_forum is not False:
+            rows.append(("topic", f"Topic          [{_shown(staged['topic'], 'all topics')}]"))
+        rows.extend(
+            [
+                ("keyword", f"Contains       [{_shown(staged['keyword'], '(anything)')}]"),
+                ("from_user", f"From           [{_shown(staged['from_user'], '(anyone)')}]"),
+                ("since", f"Since          [{_shown(staged['since'], '(any date)')}]"),
+                ("until", f"Until          [{_shown(staged['until'], '(any date)')}]"),
+                ("limit", f"Limit          [{_shown(staged['limit'], '(no limit)')}]"),
+                ("run", "Run it (print here)"),
+                ("export", "Export to a file"),
+            ]
+        )
+
+        choice = choose([label for _key, label in rows], title=f"Search in {picked.title}", read=read, write=write)
+        if choice is BACK:
+            return True
+        key = rows[choice][0]
+
+        if key in ("run", "export"):
+            output_path = None
+            output_format = "json"
+            if key == "export":
+                output_path = ask_text("Export file path", read=read, write=write)
+                if output_path is BACK:
+                    continue
+                fmt = choose(["JSON", "CSV"], title="Format", read=read, write=write)
+                if fmt is BACK:
+                    continue
+                output_format = ("json", "csv")[fmt]
+
+            args = _namespace(
+                command="search",
+                chat=picked.reference,
+                topic=staged["topic"],
+                keyword=staged["keyword"],
+                from_user=staged["from_user"],
+                since=staged["since"],
+                until=staged["until"],
+                limit=staged["limit"],
+                format=output_format,
+                output=output_path,
+            )
+            return await _act(args, session=session, runner=runner, read=read, write=write)
+
+        if key == "topic":
+            answer = await _ask_topic(picked, session=session, read=read, write=write)
+        elif key == "from_user":
+            answer = _ask_from_user(read=read, write=write)
+        elif key == "limit":
+            answer = edit_field(
+                "Limit",
+                _shown(staged["limit"], "(no limit)"),
+                read=read,
+                write=write,
+                ask=lambda: ask_int("Maximum messages", read=read, write=write),
+                allow_clear=True,
+            )
+        else:
+            labels = {"keyword": ("Contains", "(anything)"), "since": ("Since", "(any date)"), "until": ("Until", "(any date)")}
+            title, empty = labels[key]
+            answer = edit_field(
+                title,
+                _shown(staged[key], empty),
+                read=read,
+                write=write,
+                ask=lambda: ask_text(title, read=read, write=write),
+                allow_clear=True,
+            )
+
+        if answer is BACK:
+            continue
+        staged[key] = None if answer is CLEAR else answer
 
 
 async def _flow_clear(*, session, runner, read, write) -> bool:

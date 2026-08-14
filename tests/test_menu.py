@@ -263,6 +263,23 @@ def test_pick_chat_filters_by_name():
     assert picked.reference == "11"
 
 
+def test_pick_chat_zero_in_a_filtered_list_drops_the_filter():
+    chats = [
+        ChatChoice(id=1, title="Red Group", username=None, type="supergroup"),
+        ChatChoice(id=2, title="Blue Group", username=None, type="supergroup"),
+        ChatChoice(id=3, title="Red Alert", username=None, type="supergroup"),
+    ]
+    session = FakeSession(chats=chats)
+    # 1 = Groups, 4 = Filter by name, "Red" = the needle (matches 2 of 3), 0 = drop
+    # the filter, 1 = pick the first chat from the full (unfiltered) list.
+    picked, output = pick_chat(["1", "4", "Red", "0", "1"], session=session)
+
+    text = screens(output)
+    assert text.count("Blue Group") == 2
+    assert picked.reference == "1"
+    assert picked.title == "Red Group"
+
+
 def test_pick_chat_says_when_a_filter_matches_nothing():
     chats = [ChatChoice(id=1, title="Hermes", username=None, type="supergroup")]
     session = FakeSession(chats=chats)
@@ -279,3 +296,92 @@ def test_pick_chat_forums_only_skips_the_group_screen():
     assert picked.reference == "-100111"
     assert "Forum groups (1)" not in screens(output)
     assert "Pick a forum group" in screens(output)
+
+
+def test_search_runs_with_no_filters():
+    # 2 = search, 1 = forum groups, 1 = Hermes, 7 = run it, Enter = menu, 0 = exit
+    code, calls, _output = run_menu(["2", "1", "1", "7", "", "0"])
+
+    assert code == 0
+    args = calls[0]
+    assert args.command == "search"
+    assert args.chat == "-100111"
+    assert args.topic is None
+    assert args.keyword is None
+    assert args.from_user is None
+    assert args.since is None
+    assert args.until is None
+    assert args.limit is None
+    assert args.format == "json"
+    assert args.output is None
+
+
+def test_search_stages_every_filter_then_runs():
+    answers = [
+        "2", "1", "1",          # search > forum groups > Hermes
+        "1", "1",               # Topic > Deploys (a picker, not keep/change/clear)
+        "2", "2", "deploy",     # Contains > change > "deploy"
+        "3", "2",               # From > Me (a three-way list, not keep/change/clear)
+        "4", "2", "2026-08-01", # Since > change
+        "5", "2", "2026-08-14", # Until > change
+        "6", "2", "50",         # Limit > change
+        "7", "0",               # Run it, then exit
+    ]
+    code, calls, _output = run_menu(answers)
+
+    assert code == 0
+    args = calls[0]
+    assert args.topic == 141
+    assert args.keyword == "deploy"
+    assert args.from_user == "me"
+    assert args.since == "2026-08-01"
+    assert args.until == "2026-08-14"
+    assert args.limit == 50
+
+
+def test_search_shows_staged_values_and_clears_one():
+    answers = [
+        "2", "1", "1",
+        "2", "2", "deploy",   # Contains = deploy
+        "2", "3",             # Contains > clear
+        "7", "0",
+    ]
+    code, calls, output = run_menu(answers)
+
+    assert code == 0
+    assert calls[0].keyword is None
+    # Assert on the bracketed value, never on the column padding — a one-space
+    # change to the row format is not a behaviour change.
+    assert "[deploy]" in screens(output)
+    assert "[(anything)]" in screens(output)
+
+
+def test_search_export_asks_for_a_path_and_a_format():
+    # ... 8 = export, path, 2 = csv
+    answers = ["2", "1", "1", "8", "/tmp/out.csv", "2", "0"]
+    code, calls, _output = run_menu(answers)
+
+    assert code == 0
+    assert calls[0].output == "/tmp/out.csv"
+    assert calls[0].format == "csv"
+
+
+def test_search_hides_the_topic_row_for_a_non_forum_chat():
+    # 2 = search, 2 = Channels, 1 = Alerts (a channel, so no topics)
+    answers = ["2", "2", "1", "6", "0"]
+    code, calls, output = run_menu(answers)
+
+    text = screens(output)
+    assert "Topic" not in text
+    assert "1. Contains" in text
+    assert calls[0].command == "search"
+    assert calls[0].chat == "-100222"
+
+
+def test_search_topic_picker_offers_all_topics():
+    # Topic > "All topics" is the row after the two topics
+    answers = ["2", "1", "1", "1", "3", "7", "0"]
+    code, calls, _output = run_menu(answers)
+
+    assert code == 0
+    assert calls[0].topic is None
