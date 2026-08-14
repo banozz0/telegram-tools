@@ -247,8 +247,10 @@ async def _run_bots(client, args, config) -> int:
             "Set TELEGRAM_BOT_TOKENS=nickname:token[,nickname:token] in ~/.telegram-tools/.env."
         )
 
+    # Named on every edit run, --yes included: it is the one mode with no confirm diff,
+    # so a mistyped token nickname acting on the wrong bot would otherwise go unnamed.
+    print(format_edit_heading(profile))
     if not args.yes:
-        print(format_edit_heading(profile))
         if not confirm_bot_edits(plan):
             _emit_bot_result(_bot_result(profile, plan, [], cancelled=True), args.json_output)
             return 1

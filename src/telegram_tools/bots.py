@@ -17,6 +17,11 @@ DEFAULT_LANG_CODE = ""
 MAX_COMMANDS = 100
 COMMAND_PATTERN = re.compile(r"^[a-z0-9_]{1,32}$")
 
+# Telegram sets this flag implicitly on any non-empty admin-rights set; it is never a
+# right the user chose, so it is dropped from both the profile display and the edit-plan
+# comparison. `right_names()`/`parse_rights` still treat it as a normal, valid name.
+IMPLICIT_OTHER_RIGHT = "other"
+
 
 def right_names() -> list[str]:
     parameters = inspect.signature(types.ChatAdminRights.__init__).parameters
@@ -39,7 +44,7 @@ def parse_rights(raw: str) -> types.ChatAdminRights:
 def rights_to_names(rights: Any) -> list[str]:
     if rights is None:
         return []
-    return [name for name in right_names() if getattr(rights, name, False)]
+    return [name for name in right_names() if name != IMPLICIT_OTHER_RIGHT and getattr(rights, name, False)]
 
 
 def parse_commands_file(path: str | Path) -> list[BotCommandInfo]:
@@ -289,7 +294,14 @@ def format_edit_plan(plan: EditPlan) -> str:
 
 def confirm_bot_edits(plan: EditPlan, *, read: Callable[[str], str] = input, write: Callable[[str], None] = print) -> bool:
     write(format_edit_plan(plan))
-    return read("Apply these changes? [y/N]: ").strip().lower() == "y"
+    answer = read("Apply these changes? [y/N]: ").strip().lower()
+    if not answer:
+        # A stray newline left in the terminal buffer reads as an empty answer, which
+        # would otherwise print a bare cancel result indistinguishable from a typed `y`
+        # being ignored.
+        write("No answer read - cancelled.")
+        return False
+    return answer == "y"
 
 
 async def apply_owner_edits(client, input_user, changes: list[EditChange], applied: list[str] | None = None) -> list[str]:

@@ -50,6 +50,14 @@ def test_rights_to_names_lists_only_enabled_rights():
     assert rights_to_names(None) == []
 
 
+def test_rights_to_names_drops_the_implicit_other_right():
+    # Telegram sets `other` implicitly on any non-empty admin-rights set; it must not
+    # appear in the profile display or either side of the edit-plan comparison.
+    rights = parse_rights("delete_messages,ban_users,other")
+
+    assert rights_to_names(rights) == ["delete_messages", "ban_users"]
+
+
 def test_parse_commands_file_reads_a_valid_file(tmp_path):
     path = tmp_path / "cmds.json"
     path.write_text(json.dumps([{"command": "/Start", "description": "Start the bot"}]))

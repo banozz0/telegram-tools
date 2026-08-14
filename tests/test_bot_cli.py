@@ -106,7 +106,9 @@ def test_run_bots_skips_the_prompt_with_yes(monkeypatch, capsys):
     monkeypatch.setattr("telegram_tools.cli.confirm_bot_edits", lambda _plan: pytest.fail("--yes must not prompt"))
 
     assert _run_and_capture(namespace(bot="harry", name="Harry Two", yes=True), fake_config()) == 0
-    result = json.loads(capsys.readouterr().out)
+    heading, _, json_blob = capsys.readouterr().out.partition("\n")
+    assert heading == "Editing @harrybot (12345)"
+    result = json.loads(json_blob)
     assert result["applied"] == ["name"]
 
 
@@ -132,7 +134,9 @@ def test_run_bots_writes_the_edit_result_to_json_when_requested(monkeypatch, tmp
     exit_code = asyncio.run(_run_bots(object(), args, fake_config()))
 
     assert exit_code == 0
-    assert capsys.readouterr().out == ""
+    # The JSON result goes to the file only; the identifying heading still goes to
+    # stdout, since it prints on every edit run regardless of --json or --yes.
+    assert capsys.readouterr().out == "Editing @harrybot (12345)\n"
     result = json.loads(output_path.read_text())
     assert result["applied"] == ["name"]
 
@@ -345,6 +349,8 @@ def test_run_bots_reports_the_owner_edit_that_landed_before_the_bot_rail_failed(
     with pytest.raises(RuntimeError, match="rights failed"):
         _run_and_capture(args, fake_config(harry=BOT_TOKEN_SECRET))
 
-    result = json.loads(capsys.readouterr().out)
+    heading, _, json_blob = capsys.readouterr().out.partition("\n")
+    assert heading == "Editing @harrybot (12345)"
+    result = json.loads(json_blob)
     assert result["applied"] == ["name"]
     assert result["bot_id"] == 12345

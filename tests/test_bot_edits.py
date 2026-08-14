@@ -95,6 +95,18 @@ def test_build_edit_plan_skips_rights_that_already_match():
     assert plan.is_empty is True
 
 
+def test_build_edit_plan_ignores_the_other_right_telegram_adds_implicitly():
+    # Regression: re-requesting the same rights Telegram already applied used to show a
+    # phantom diff, because the read-back carried an implicit `other` the user never
+    # asked for. Build the requested rights with `other=True` to simulate that read-back.
+    current = current_bot(group_rights=["delete_messages", "ban_users"])
+    requested_rights = parse_rights("delete_messages,ban_users,other")
+
+    plan = build_edit_plan(current, {"group_rights": requested_rights})
+
+    assert plan.is_empty is True
+
+
 def test_build_edit_plan_treats_clearing_a_set_field_as_a_change():
     plan = build_edit_plan(current_bot(), {"bio": ""})
 
@@ -124,6 +136,24 @@ def test_confirm_bot_edits_requires_a_y():
 
     assert confirm_bot_edits(plan, read=lambda _prompt: "n", write=written.append) is False
     assert confirm_bot_edits(plan, read=lambda _prompt: "Y", write=written.append) is True
+
+
+def test_confirm_bot_edits_warns_only_on_a_truly_empty_answer():
+    # A stray newline left in the terminal buffer reads as an empty answer, which used
+    # to cancel silently - indistinguishable from a typed `y` being ignored.
+    plan = build_edit_plan(current_bot(), {"bio": "New bio"})
+
+    empty_written = []
+    assert confirm_bot_edits(plan, read=lambda _prompt: "", write=empty_written.append) is False
+    assert "No answer read - cancelled." in empty_written
+
+    no_written = []
+    assert confirm_bot_edits(plan, read=lambda _prompt: "n", write=no_written.append) is False
+    assert "No answer read - cancelled." not in no_written
+
+    yes_written = []
+    assert confirm_bot_edits(plan, read=lambda _prompt: "y", write=yes_written.append) is True
+    assert "No answer read - cancelled." not in yes_written
 
 
 def test_apply_owner_edits_sends_one_set_bot_info_request_for_text_fields():
