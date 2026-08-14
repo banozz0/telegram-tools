@@ -201,3 +201,81 @@ def test_zero_after_an_action_exits():
 
     assert code == 0
     assert len(calls) == 1
+
+
+def pick_chat(answers, *, session=None, forums_only=False):
+    output = []
+    picked = asyncio.run(
+        menu._pick_chat(
+            session=session or FakeSession(),
+            read=reader(*answers),
+            write=output.append,
+            forums_only=forums_only,
+        )
+    )
+    return picked, output
+
+
+def test_pick_chat_groups_by_kind_then_picks():
+    # 1 = Forum groups, 1 = Hermes
+    picked, output = pick_chat(["1", "1"])
+
+    assert picked.reference == "-100111"
+    assert picked.title == "Hermes"
+    assert picked.is_forum is True
+    assert "1. Forum groups (1)" in screens(output)
+    assert "2. Channels (1)" in screens(output)
+    assert "3. Direct chats (1)" in screens(output)
+
+
+def test_pick_chat_hides_empty_groups():
+    session = FakeSession(chats=[CHATS[1]])
+    _picked, output = pick_chat(["0"], session=session)
+
+    text = screens(output)
+    assert "1. Channels (1)" in text
+    assert "Forum groups" not in text
+
+
+def test_pick_chat_back_from_a_group_returns_to_the_group_list():
+    # 1 = Forum groups, 0 = back to groups, 0 = back out of the picker
+    picked, output = pick_chat(["1", "0", "0"])
+
+    assert picked is menu.BACK
+    assert screens(output).count("1. Forum groups (1)") == 2
+
+
+def test_pick_chat_typed_reference_is_not_assumed_to_be_a_forum():
+    # 4 = "Type an ID or @username" (three groups, so it is row 4)
+    picked, _output = pick_chat(["4", "@somewhere"])
+
+    assert picked.reference == "@somewhere"
+    assert picked.title == "@somewhere"
+    assert picked.is_forum is None
+
+
+def test_pick_chat_filters_by_name():
+    chats = [ChatChoice(id=index, title=f"Group {index}", username=None, type="supergroup") for index in range(12)]
+    session = FakeSession(chats=chats)
+    # 1 = Groups, then 9 chat rows + "Next page" (10) + "Filter by name" (11) + manual (12).
+    picked, _output = pick_chat(["1", "11", "Group 11", "1"], session=session)
+
+    assert picked.reference == "11"
+
+
+def test_pick_chat_says_when_a_filter_matches_nothing():
+    chats = [ChatChoice(id=1, title="Hermes", username=None, type="supergroup")]
+    session = FakeSession(chats=chats)
+    # 1 = Groups, then 1 chat row + "Filter by name" (2) + manual (3). Filter twice.
+    picked, output = pick_chat(["1", "2", "zzz", "2", "Herm", "1"], session=session)
+
+    assert picked.reference == "1"
+    assert "Nothing matches 'zzz'." in screens(output)
+
+
+def test_pick_chat_forums_only_skips_the_group_screen():
+    picked, output = pick_chat(["1"], forums_only=True)
+
+    assert picked.reference == "-100111"
+    assert "Forum groups (1)" not in screens(output)
+    assert "Pick a forum group" in screens(output)

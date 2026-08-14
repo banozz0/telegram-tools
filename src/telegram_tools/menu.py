@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 from typing import Any
 
 from telethon.errors import ChannelForumMissingError, RPCError
@@ -10,7 +11,7 @@ from telegram_tools.bots import get_bot_profile, list_bots, resolve_bot
 from telegram_tools.client import create_client
 from telegram_tools.config import ConfigError, load_config
 from telegram_tools.discovery import list_dialog_choices
-from telegram_tools.prompts import BACK, after_action, ask_text, choose
+from telegram_tools.prompts import BACK, Extra, after_action, ask_text, choose, pick
 from telegram_tools.resolver import resolve_chat
 from telegram_tools.topics import get_forum_topics
 
@@ -107,6 +108,107 @@ async def _act(args, *, session, runner, read, write) -> bool:
     """Run one action, then ask. False means exit the menu."""
     await _call(args, session=session, runner=runner, write=write)
     return after_action(read=read, write=write)
+
+
+CHAT_GROUPS = (
+    ("Forum groups", ("forum_group",)),
+    ("Channels", ("channel",)),
+    ("Groups", ("group", "supergroup")),
+    ("Direct chats", ("user",)),
+)
+
+_TYPE_A_CHAT = "Type an ID or @username"
+
+
+@dataclass(frozen=True)
+class ChatPick:
+    """A chosen chat: what to pass as --chat, what to call it on screen.
+
+    `is_forum` is None for a typed reference — nothing has looked it up, and
+    guessing would put a topic row on a screen that cannot have one.
+    """
+
+    reference: str
+    title: str
+    is_forum: bool | None
+
+
+def _chat_label(chat) -> str:
+    return f"{chat.title[:32]:<32}  {chat.id}"
+
+
+def _ask_reference(*, read, write) -> Any:
+    typed = ask_text("Chat ID or @username", read=read, write=write)
+    if typed is BACK:
+        return BACK
+    return ChatPick(reference=typed, title=typed, is_forum=None)
+
+
+def _pick_from_group(chats, *, title, read, write) -> Any:
+    """Page one group, with a name filter and a manual escape hatch."""
+    items = chats
+    extras = (Extra("filter", "Filter by name"), Extra("manual", _TYPE_A_CHAT))
+    while True:
+        chosen = pick(items, title=title, label=_chat_label, read=read, write=write, extras=extras)
+
+        if chosen is BACK:
+            if items is not chats:
+                # A filter is a view of the group, so back drops the filter first.
+                items = chats
+                continue
+            return BACK
+
+        if chosen == "filter":
+            needle = ask_text("Part of the name", read=read, write=write)
+            if needle is BACK:
+                continue
+            matches = [chat for chat in chats if needle.lower() in chat.title.lower()]
+            if not matches:
+                write(f"Nothing matches {needle!r}.")
+                continue
+            items = matches
+            continue
+
+        if chosen == "manual":
+            typed = _ask_reference(read=read, write=write)
+            if typed is BACK:
+                continue
+            return typed
+
+        return ChatPick(reference=str(chosen.id), title=chosen.title, is_forum=chosen.is_forum)
+
+
+async def _pick_chat(*, session, read, write, forums_only: bool = False) -> Any:
+    chats = await session.chats()
+
+    if forums_only:
+        return _pick_from_group(
+            [chat for chat in chats if chat.is_forum],
+            title="Pick a forum group",
+            read=read,
+            write=write,
+        )
+
+    groups = [(name, [chat for chat in chats if chat.type in types]) for name, types in CHAT_GROUPS]
+    groups = [(name, members) for name, members in groups if members]
+
+    while True:
+        labels = [f"{name} ({len(members)})" for name, members in groups]
+        choice = choose(labels + [_TYPE_A_CHAT], title="Pick a chat", read=read, write=write)
+        if choice is BACK:
+            return BACK
+
+        if choice == len(groups):
+            typed = _ask_reference(read=read, write=write)
+            if typed is BACK:
+                continue
+            return typed
+
+        name, members = groups[choice]
+        picked = _pick_from_group(members, title=f"Pick a chat  >  {name}", read=read, write=write)
+        if picked is BACK:
+            continue
+        return picked
 
 
 async def _flow_discover(*, session, runner, read, write) -> bool:
