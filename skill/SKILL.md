@@ -20,9 +20,10 @@ message history. Installed on the sven account, on PATH:
 telegram-tools <command>
 ```
 
-It is `telegram-tools` 3.0.0 from PyPI, installed with pipx at
+It is the PyPI `telegram-tools`, installed with pipx at
 `/Users/sven/.local/bin/telegram-tools`. Credentials and the login session live in
-`/Users/sven/.telegram-tools/` and never leave the machine.
+`/Users/sven/.telegram-tools/` and never leave the machine. The installed version can
+lag PyPI — its own `--help` is the only reliable statement of what it can do today.
 
 ## When to Use
 
@@ -85,8 +86,8 @@ arrived.
 ## Never run these
 
 - **`clear-messages`** — irreversible deletion of Sven's messages. Rule 2 above.
-- **`bots`** — lands in 3.1.0 (in the repo, not in the installed 3.0.0). It edits a
-  live bot's name, bio, description, commands, profile photo and default admin
+- **`bots`** — released in 3.1.0, and absent from an install still on 3.0.0. It edits
+  a live bot's name, bio, description, commands, profile photo and default admin
   rights. Those are Sven's public-facing bots; the edits are his to make.
 
 ## Delivering the answer
