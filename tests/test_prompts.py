@@ -1,7 +1,5 @@
 from types import SimpleNamespace
 
-import pytest
-
 from telegram_tools import prompts
 from telegram_tools.prompts import BACK, CLEAR, Extra
 
@@ -44,6 +42,13 @@ def test_choose_reprints_after_a_bad_answer():
     result = prompts.choose(["One"], title="Pick", read=reader("9", "banana", "1"), write=output.append)
     assert result == 0
     assert screens(output).count("1. One") == 3
+    assert "Pick one of the numbers listed." in screens(output)
+
+
+def test_choose_rejects_unicode_digits():
+    output = []
+    result = prompts.choose(["One"], title="Pick", read=reader("²", "1"), write=output.append)
+    assert result == 0
     assert "Pick one of the numbers listed." in screens(output)
 
 
@@ -129,6 +134,12 @@ def test_ask_text_shows_the_current_value_and_cancels_on_blank():
 def test_ask_int_rejects_non_numbers_then_returns_the_number():
     output = []
     assert prompts.ask_int("Limit", read=reader("many", "0", "25"), write=output.append) == 25
+    assert "Type a whole number of 1 or more." in screens(output)
+
+
+def test_ask_int_rejects_unicode_digits():
+    output = []
+    assert prompts.ask_int("Limit", read=reader("²", "5"), write=output.append) == 5
     assert "Type a whole number of 1 or more." in screens(output)
 
 

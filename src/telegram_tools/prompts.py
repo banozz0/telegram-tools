@@ -38,7 +38,7 @@ def choose(labels: Sequence[str], *, title: str, read, write, back_label: str = 
         answer = read("Choose: ").strip()
         if answer == "0":
             return BACK
-        if answer.isdigit() and 1 <= int(answer) <= len(labels):
+        if answer.isdecimal() and 1 <= int(answer) <= len(labels):
             return int(answer) - 1
         write("Pick one of the numbers listed.")
 
@@ -152,13 +152,13 @@ def ask_text(label: str, *, read, write, current: str | None = None) -> Any:
 
 
 def ask_int(label: str, *, read, write, current: int | None = None) -> Any:
-    """A positive whole number, matching the CLI's own `positive_int`. Blank cancels."""
+    """A positive whole number. Blank cancels."""
     suffix = f" [{current}]" if current else ""
     while True:
         value = read(f"{label}{suffix} (blank cancels): ").strip()
         if not value:
             return BACK
-        if value.isdigit() and int(value) >= 1:
+        if value.isdecimal() and int(value) >= 1:
             return int(value)
         write("Type a whole number of 1 or more.")
 
