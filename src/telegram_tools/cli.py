@@ -266,78 +266,6 @@ async def _run_bots(client, args, config) -> int:
     return 0
 
 
-def _namespace(**kwargs):
-    return argparse.Namespace(**kwargs)
-
-
-def _read_execute(read) -> bool:
-    return read("Type DELETE to pass --execute, or press Enter for dry-run: ") == "DELETE"
-
-
-async def run_interactive_menu(*, read=input, write=print) -> int:
-    write(
-        "\n".join(
-            [
-                "telegram-tools",
-                "--------------------------------------------",
-                "1. Discover chats/topics",
-                "2. Search messages",
-                "3. Export messages",
-                "4. Clear topic messages",
-                "5. Clear multiple topics",
-                "6. Clear all topic messages",
-                "7. List my bots",
-                "8. Edit a bot",
-                "0. Exit",
-            ]
-        )
-    )
-    choice = read("Choose: ").strip()
-    if choice == "0":
-        return 0
-    if choice == "1":
-        all_chats = read("Show all chats instead of admin/managed only? [y/N]: ").strip().lower() == "y"
-        return await run(_namespace(command="discover", json_output=None, all_chats=all_chats, admin_only=not all_chats))
-    if choice == "2":
-        chat = read("Chat (@username, t.me link, or numeric ID): ")
-        keyword = read("Contains text: ")
-        topic = read("Topic ID (optional): ").strip()
-        return await run(
-            _namespace(command="search", chat=chat, topic=int(topic) if topic else None, keyword=keyword, from_user=None, since=None, until=None, limit=None, format="json", output=None)
-        )
-    if choice == "3":
-        chat = read("Chat (@username, t.me link, or numeric ID): ")
-        topic = read("Topic ID (optional): ").strip()
-        output = read("Output file: ")
-        fmt = read("Format [json/csv, default json]: ").strip() or "json"
-        return await run(
-            _namespace(command="search", chat=chat, topic=int(topic) if topic else None, keyword=None, from_user=None, since=None, until=None, limit=None, format=fmt, output=output)
-        )
-    if choice == "4":
-        chat = read("Chat (@username, t.me link, or numeric ID): ")
-        topic = int(read("Topic ID: "))
-        return await run(_namespace(command="clear-messages", chat=chat, topics=[topic], all_topics=False, execute=_read_execute(read), batch_size=100))
-    if choice == "5":
-        chat = read("Chat (@username, t.me link, or numeric ID): ")
-        raw_topics = read("Topic IDs (space or comma separated): ")
-        topics = [int(value) for value in raw_topics.replace(",", " ").split()]
-        return await run(_namespace(command="clear-messages", chat=chat, topics=topics, all_topics=False, execute=_read_execute(read), batch_size=100))
-    if choice == "6":
-        chat = read("Chat (@username, t.me link, or numeric ID): ")
-        return await run(_namespace(command="clear-messages", chat=chat, topics=None, all_topics=True, execute=_read_execute(read), batch_size=100))
-    if choice == "7":
-        return await run(_namespace(command="bots", bot=None, json_output=None, name=None, bio=None, description=None, commands=None, clear_commands=False, photo=None, remove_photo=False, group_rights=None, channel_rights=None, yes=False))
-    if choice == "8":
-        bot = read("Bot (nickname, @username, or numeric ID): ")
-        name = read("New display name (blank to keep): ").strip() or None
-        bio = read("New bio (blank to keep): ").strip() or None
-        description = read("New description (blank to keep): ").strip() or None
-        return await run(_namespace(command="bots", bot=bot, json_output=None, name=name, bio=bio, description=description, commands=None, clear_commands=False, photo=None, remove_photo=False, group_rights=None, channel_rights=None, yes=False))
-
-    write("Unknown choice.")
-    return 2
-
-
 async def run(args, *, client=None, config=None) -> int:
     """Run one command.
 
@@ -377,7 +305,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         if args.command is None:
-            return asyncio.run(run_interactive_menu())
+            # Imported here, not at module scope: menu.py imports cli, and a
+            # top-level import either way closes the cycle.
+            from telegram_tools.menu import run_menu
+
+            return asyncio.run(run_menu())
         return asyncio.run(run(args))
     except ConfigError as exc:
         parser.error(str(exc))
