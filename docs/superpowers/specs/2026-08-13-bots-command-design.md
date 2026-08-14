@@ -127,6 +127,12 @@ telegram-tools bots --bot @harrybot --name "Harry" --yes    # skip the confirm p
   `manage_topics`, `post_stories`, `edit_stories`, `delete_stories`,
   `manage_direct_messages`, `manage_ranks`, `other` in 1.44). `none` clears every right.
   An unknown name is a `ValueError` listing the valid names.
+- Telegram sets `other` on any non-empty admin-rights set by itself — confirmed live, see
+  "Live verification" below — so it is not a right a user chooses. `parse_rights` still
+  accepts it as an input name, matching every other name `right_names()` lists, but
+  `rights_to_names` drops it before it reaches either the profile display or the
+  edit-plan comparison. Without that, re-requesting rights Telegram had already applied
+  read back as a change (`… → …, other`) and sent a pointless write.
 - Commands file is JSON: `[{"command": "start", "description": "Start the bot"}, …]`.
   Validation before any network call: list of objects, both keys present and non-empty,
   command lowercase `[a-z0-9_]{1,32}`, description 1–256 chars, no duplicates, max 100
@@ -140,10 +146,14 @@ typed `DELETE` ceremony `clear-messages` uses for destruction.
 1. Read the current profile.
 2. Drop no-op edits (new value equals current) and say so.
 3. Print one line naming the bot — `Editing @harrybot (12345)`, or `Editing bot 12345`
-   when it has no username — so a `y` is never answered blind. Then `field: old → new`
-   per remaining change; long text is truncated for display with the full value still sent.
-4. Prompt `Apply these changes? [y/N]`. Anything but `y` exits 1 with `cancelled`.
-   `--yes` skips the prompt.
+   when it has no username — on every run with a non-empty plan, `--yes` included.
+   `--yes` is the one mode with no diff to catch a mistyped token nickname pointed at the
+   wrong bot, so it is also the one mode that must not skip the name.
+4. Unless `--yes`: print `field: old → new` per remaining change (long text truncated for
+   display, full value still sent), then prompt `Apply these changes? [y/N]`. A `y`
+   applies. Anything else cancels and exits 1 with `cancelled`; an empty answer first
+   prints `No answer read - cancelled.`, so a stray newline left in the terminal buffer
+   cannot read as a typed `y` that got silently ignored. `--yes` skips this whole step.
 5. Apply — Rail 1 first, then Rail 2 if a token is needed and present.
 6. Print a JSON result: `{"bot_id":…, "username":…, "applied":[…], "skipped":[…],
    "cancelled": false}`.
@@ -205,15 +215,21 @@ Mirrors the existing suite: `SimpleNamespace` fakes, no network, no session file
 
 - `parse_bot_tokens`: single entry, several entries, whitespace, token's internal colon
   preserved, malformed entry raises without echoing the token, absent var → `{}`.
-- `parse_rights`: names → `ChatAdminRights` flags, `none` clears, unknown name raises.
+- `parse_rights`: names → `ChatAdminRights` flags, `none` clears, unknown name raises,
+  `other` accepted like any other name.
+- `rights_to_names`: drops `other` while keeping the rights beside it; a `build_edit_plan`
+  regression pins the case that mattered live — a current/requested pair that disagrees
+  only on `other` produces an empty plan.
 - `parse_commands_file`: valid file, bad shape, bad command pattern, duplicate command,
   over-length description, over-100 entries.
 - `build_edit_plan`: no-op edits dropped, mixed rails split correctly, Rail 2 fields
   without a token produce the explanatory error.
 - `format_bot_table` / `format_bot_profile`: expected columns and the "not owned by you"
   marker.
-- Confirm flow: `n` cancels and applies nothing, `--yes` bypasses the prompt, and the
-  prompt names the bot before the diff.
+- Confirm flow: the heading prints on every edit run, `--yes` included, and does not print
+  the confirm prompt when `--yes` is set; when it does run, `n` cancels and applies
+  nothing, an empty answer also cancels and additionally writes
+  `No answer read - cancelled.`, and the heading prints before the diff.
 - `resolve_bot_token`: nickname hit, numeric-bot-id hit, and a `@username` that is not a
   nickname falling through to no token. At the CLI: a token whose bot id is not the
   resolved bot's is refused, and a token nicknamed after another bot's username never
@@ -234,16 +250,41 @@ Mirrors the existing suite: `SimpleNamespace` fakes, no network, no session file
   ones lack a `bot` parameter and why that forces a bot session.
 - `.env.example` — commented `TELEGRAM_BOT_TOKENS` line with the format.
 
-## To verify against a live account during implementation
+## Live verification
 
-These are read from Telethon's TL definitions, not yet exercised on a real bot. Each is
-checked before the feature is called done; if one fails, the affected field moves to
-Rail 2 or drops out with a plain "not supported" message.
+Checked against a real account and a real owned bot on 2026-08-14. Confirmed:
 
 1. `bots.getAdminedBots` returns a list of `User` objects for owned bots.
 2. `bots.setBotInfo` accepts `bot=` for a bot the session owns, for all three fields.
-3. `photos.uploadProfilePhoto(bot=…)` sets a bot's photo from the owner session.
-4. `photos.deletePhotos` from the bot session removes it, using the photo reference read
+3. `bots.setBotCommands` / `bots.resetBotCommands` and `bots.setBotGroupDefaultAdminRights`
+   apply from a bot-token session opened with `MemorySession`.
+4. `lang_code=""` is the correct default for `setBotInfo` / `setBotCommands` — the edits
+   showed up in a real Telegram client, not just in the read-back.
+5. Telegram sets the `other` admin-rights flag implicitly on any non-empty rights set —
+   not a user's choice, and not something any fake had modeled, so offline tests could
+   not have caught it. This is what the "Rights values" and "Edit behaviour" sections
+   above now describe, and what the three post-live fixes below responded to.
+
+Skipped on purpose — testing either would cost the bot's current photo:
+
+6. `photos.uploadProfilePhoto(bot=…)` sets a bot's photo from the owner session.
+7. `photos.deletePhotos` from the bot session removes it, using the photo reference read
    via `users.getFullUser`.
-5. `lang_code=""` is the correct default for `setBotInfo` / `setBotCommands` — an edit that
-   applies but stays invisible in a Telegram client means it is not.
+
+### Post-live fixes (2026-08-14)
+
+Three behaviours this run surfaced, none reachable from a fake:
+
+1. **The `other` right.** `--group-rights delete_messages,ban_users` applied correctly,
+   but the read-back showed `delete_messages, ban_users, other`, and re-running the exact
+   same command then showed a diff and re-sent it. Fixed by dropping `other` in
+   `rights_to_names` (a named constant, `bots.IMPLICIT_OTHER_RIGHT`, not a bare literal);
+   `right_names()` and `parse_rights` are unchanged; `other` is still a valid input name.
+2. **The confirm heading skipped under `--yes`.** It printed only on the interactive path,
+   so `--yes` — the one run with no diff to catch a mistyped token nickname pointed at the
+   wrong bot — was also the one run that never named the bot. Now prints on every edit run
+   regardless of `--yes`; the diff and the prompt itself stay behind the `--yes` check.
+3. **A blank answer read as a silent cancel.** A stray newline left in the terminal buffer
+   produced an empty read, which cancelled with no output — indistinguishable from a typed
+   `y` being ignored. `confirm_bot_edits` now prints `No answer read - cancelled.` first
+   when the answer is empty; a deliberate `n` still cancels with no extra line.
