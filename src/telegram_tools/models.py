@@ -19,6 +19,32 @@ class TopicInfo:
 
 
 @dataclass(frozen=True)
+class ChatChoice:
+    """A chat as a picker sees it: enough to show and to pass as --chat, no more.
+
+    Deliberately not ChatInfo, which carries an `is_admin` the light dialog walk
+    never asks Telegram for and a `topics` list it does not fetch.
+    """
+
+    id: int
+    title: str
+    username: str | None
+    type: str
+
+    @property
+    def is_forum(self) -> bool:
+        return self.type == "forum_group"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "title": self.title,
+            "username": self.username,
+            "type": self.type,
+        }
+
+
+@dataclass(frozen=True)
 class ChatInfo:
     id: int
     title: str

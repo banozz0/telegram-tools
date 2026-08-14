@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from telegram_tools.models import ChatInfo, TopicInfo
+from telegram_tools.models import ChatChoice, ChatInfo, TopicInfo
 from telegram_tools.topics import get_forum_topics
 
 
@@ -136,3 +136,23 @@ async def discover_chats(client) -> list[ChatInfo]:
         )
 
     return chats
+
+
+async def list_dialog_choices(client) -> list[ChatChoice]:
+    """Every dialog, cheaply — for pickers.
+
+    No per-chat permissions call and no per-forum topics call, so this is two or
+    three API requests where `discover_chats` is one per chat.
+    """
+    choices: list[ChatChoice] = []
+    async for dialog in client.iter_dialogs():
+        entity = dialog.entity
+        choices.append(
+            ChatChoice(
+                id=int(dialog.id),
+                title=str(getattr(dialog, "title", None) or getattr(dialog, "name", None) or ""),
+                username=getattr(entity, "username", None),
+                type=classify_entity(entity),
+            )
+        )
+    return choices

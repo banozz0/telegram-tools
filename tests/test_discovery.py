@@ -1,5 +1,7 @@
+import asyncio
 from types import SimpleNamespace
 
+from telegram_tools import discovery
 from telegram_tools.discovery import classify_entity, dialog_to_chat_info, filter_chats, format_discovery_table
 from telegram_tools.models import TopicInfo
 
@@ -87,3 +89,53 @@ def test_format_discovery_table_groups_managed_chats():
     assert "Forum" in text
     assert "Channel" in text
     assert "Group" in text
+
+
+class FakeDialogClient:
+    """Only what `list_dialog_choices` may touch. Anything else is a test failure."""
+
+    def __init__(self, dialogs):
+        self._dialogs = dialogs
+        self.permission_calls = 0
+        self.topic_calls = 0
+
+    async def iter_dialogs(self):
+        for dialog in self._dialogs:
+            yield dialog
+
+    async def get_permissions(self, *_args, **_kwargs):
+        self.permission_calls += 1
+        raise AssertionError("the picker must not ask for permissions")
+
+    async def __call__(self, *_args, **_kwargs):
+        self.topic_calls += 1
+        raise AssertionError("the picker must not fetch topics")
+
+
+def test_list_dialog_choices_maps_dialogs_without_permission_or_topic_calls():
+    forum = SimpleNamespace(megagroup=True, forum=True, username="hermes")
+    channel = SimpleNamespace(broadcast=True, megagroup=False, username=None)
+    client = FakeDialogClient(
+        [
+            SimpleNamespace(id=-100111, title="Hermes", entity=forum),
+            SimpleNamespace(id=-100222, title="Alerts", entity=channel),
+        ]
+    )
+
+    choices = asyncio.run(discovery.list_dialog_choices(client))
+
+    assert [choice.id for choice in choices] == [-100111, -100222]
+    assert [choice.type for choice in choices] == ["forum_group", "channel"]
+    assert [choice.username for choice in choices] == ["hermes", None]
+    assert [choice.is_forum for choice in choices] == [True, False]
+    assert client.permission_calls == 0
+    assert client.topic_calls == 0
+
+
+def test_list_dialog_choices_falls_back_to_the_dialog_name():
+    entity = SimpleNamespace(megagroup=True, forum=False, username=None)
+    client = FakeDialogClient([SimpleNamespace(id=7, title=None, name="Saved", entity=entity)])
+
+    choices = asyncio.run(discovery.list_dialog_choices(client))
+
+    assert choices[0].title == "Saved"
