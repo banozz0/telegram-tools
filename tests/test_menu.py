@@ -178,6 +178,18 @@ def test_discover_zero_at_where_screen_returns_to_scope_not_root():
     assert screens(output).count("1. Chats I manage") == 2
 
 
+def test_discover_blank_json_path_returns_to_where_screen_not_root():
+    # 1 = discover, 1 = chats I manage, 2 = write a JSON file, "" = blank
+    # cancels the path prompt -> back to "Where should it go?" (not root),
+    # 1 = print here this time, Enter = menu, 0 = exit.
+    answers = ["1", "1", "2", "", "1", "", "0"]
+    code, calls, output = run_menu(answers)
+
+    assert code == 0
+    assert calls[0].json_output is None
+    assert screens(output).count("Where should it go?") == 2
+
+
 def test_two_actions_in_one_session():
     code, calls, _output = run_menu(["5", "", "5", "", "0"])
 
@@ -434,6 +446,20 @@ def test_search_zero_at_staging_returns_to_the_chat_picker_not_root():
     assert calls[0].chat == "@newchat"
 
 
+def test_search_staging_back_discards_and_says_so():
+    # 2 = search, 1 = forum groups, 1 = Hermes, 2 = Contains, 2 = change it,
+    # "deploy" = the value, 0 = staging back (discards it and says so),
+    # 0 = chat picker back, 0 = exit.
+    answers = ["2", "1", "1", "2", "2", "deploy", "0", "0", "0"]
+    code, calls, output = run_menu(answers)
+
+    text = screens(output)
+    assert code == 0
+    assert calls == []
+    assert "0. Back (discards)" in text
+    assert "Discarded 1 staged change." in text
+
+
 def test_clear_dry_runs_first_then_executes():
     # 3 = clear, 1 = Hermes, 1 = tick Deploys, 4 = continue, 1 = for real, Enter, 0
     answers = ["3", "1", "1", "4", "1", "", "0"]
@@ -508,7 +534,22 @@ def test_clear_says_when_a_chat_has_no_topics():
 
     assert code == 0
     assert calls == []
-    assert "No topics in that chat." in screens(output)
+    assert "That chat has no topics." in screens(output)
+
+
+def test_clear_offers_manual_entry_when_there_are_no_forum_groups():
+    # No forum groups at all: the picker's list is empty, so `pick` would
+    # normally bail out before ever showing the manual escape hatch.
+    session = FakeSession(chats=[], topics=[])
+    # 3 = clear topic messages, 2 = "Type an ID or @username" (the only rows
+    # on an empty list are the two extras), type an id, 0 = exit.
+    code, calls, output = run_menu(["3", "2", "-100999", "0"], session=session)
+
+    text = screens(output)
+    assert code == 0
+    assert calls == []
+    assert "Type an ID or @username" in text
+    assert "That chat has no topics." in text
 
 
 def test_bots_lists_and_prints_a_profile():
@@ -521,6 +562,22 @@ def test_bots_lists_and_prints_a_profile():
     assert "1. @harrybot  Harry" in text
     assert "Bio: Runs the agency" in text
     assert "1. Edit this bot" in text
+
+
+def test_bots_with_no_username_matches_the_existing_formatters():
+    # bots.py's own formatters say "(no username)" in a table row and "bot
+    # <id>" in a heading; the menu must follow those, not invent "@<id>".
+    bot = BotInfo(id=99999, username=None, name="Nameless", bio=None, description=None, is_owned=True)
+    session = FakeSession(bots=[bot], profile=bot)
+    # 4 = my bots, 1 = the only bot, 0 = back out of its screen, 0 = exit
+    code, calls, output = run_menu(["4", "1", "0", "0"], session=session)
+
+    text = screens(output)
+    assert code == 0
+    assert calls == []
+    assert "1. (no username)  Nameless" in text
+    assert "bot 99999" in text
+    assert "@99999" not in text
 
 
 def test_bots_saves_a_profile_to_json():
@@ -561,6 +618,17 @@ def test_bot_edit_shows_current_values_and_staged_changes():
     assert "[Harry]" in text
     assert "[Harry -> Harry Two]" in text
     assert "Discarded 1 staged change." in text
+
+
+def test_bot_edit_staging_the_name_none_is_not_shown_as_cleared():
+    # "none" is the sentinel for clearing rights, not an ordinary staged value.
+    # Typed as a *name* it must render as the literal value, not "(cleared)".
+    answers = ["4", "1", "1", "1", "2", "none", "0", "0", "0"]
+    _code, _calls, output = run_menu(answers)
+
+    text = screens(output)
+    assert "[Harry -> none]" in text
+    assert "(cleared)" not in text
 
 
 def test_bot_edit_refuses_token_fields_without_a_token():

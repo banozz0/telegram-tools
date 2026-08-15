@@ -95,6 +95,23 @@ telegram-tools bots --bot @mybot --name "My Bot" --description "Does the thing"
 telegram-tools bots --bot @mybot --photo avatar.png
 ```
 
+`discover` output looks like:
+
+```text
+Forum Groups
+============
+Example Forum
+Chat ID: -1001234567890
+Type: Forum Group
+Admin: yes
+
+Topics
+--------------------------------------------
+141   Deploys
+217   Support
+16    General
+```
+
 ## The menu
 
 Run `telegram-tools` with no arguments and you get a menu instead of flags:
@@ -118,23 +135,6 @@ current value and offer keep / change / clear. After every job it returns to the
 The safety gates are the same as the flags', not looser: clearing topic messages
 dry-runs first and still asks you to type `DELETE`, and bot edits still print a diff
 and ask before writing. With no terminal attached it prints this help instead.
-
-`discover` output looks like:
-
-```text
-Forum Groups
-============
-Example Forum
-Chat ID: -1001234567890
-Type: Forum Group
-Admin: yes
-
-Topics
---------------------------------------------
-141   Deploys
-217   Support
-16    General
-```
 
 ## Safety model
 

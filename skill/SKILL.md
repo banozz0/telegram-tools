@@ -1,7 +1,7 @@
 ---
 name: telegram-tools
 description: "Use when you need the real numeric ID of a Telegram chat, channel, group or forum topic — 'what's the ID of that topic?', 'which chat is -100…?', 'where do I send this?' — or when the user wants their own Telegram messages searched or exported to JSON/CSV."
-version: 1.0.0
+version: 1.1.0
 author: banozz0
 license: MIT
 platforms: [macos]

@@ -116,7 +116,7 @@ and offers:
 
 ```
 1. Clear them for real (asks you to type DELETE)
-0. Back to the menu
+0. Back to the topic list
 ```
 
 Choosing 1 re-runs with `execute=True`, which reaches the existing warning banner and

@@ -149,7 +149,16 @@ def _pick_from_group(chats, *, title, read, write) -> Any:
     items = chats
     extras = (Extra("filter", "Filter by name"), Extra("manual", _TYPE_A_CHAT))
     while True:
-        chosen = pick(items, title=title, label=_chat_label, read=read, write=write, extras=extras)
+        if items:
+            chosen = pick(items, title=title, label=_chat_label, read=read, write=write, extras=extras)
+        else:
+            # `pick` bails out with "Nothing to pick from." before it ever
+            # renders extras, which would take the manual escape hatch down
+            # with the (rightly) absent picker rows. Offer the extras on
+            # their own instead, so an account with no forum groups still
+            # has a way to type a chat by hand.
+            choice = choose([extra.label for extra in extras], title=title, read=read, write=write)
+            chosen = BACK if choice is BACK else extras[choice].key
 
         if chosen is BACK:
             if items is not chats:
@@ -217,20 +226,23 @@ async def _flow_discover(*, session, runner, read, write) -> bool:
         if scope is BACK:
             return True
 
-        where = choose(["Print it here", "Write a JSON file"], title="Where should it go?", read=read, write=write)
-        if where is BACK:
-            continue
+        while True:
+            where = choose(["Print it here", "Write a JSON file"], title="Where should it go?", read=read, write=write)
+            if where is BACK:
+                break
 
-        json_output = None
-        if where == 1:
-            path = ask_text("JSON file path", read=read, write=write)
-            if path is BACK:
-                return True
-            json_output = path
+            json_output = None
+            if where == 1:
+                path = ask_text("JSON file path", read=read, write=write)
+                if path is BACK:
+                    # Cancelling the path steps back one screen, same as every
+                    # other cancel — not all the way out to the root menu.
+                    continue
+                json_output = path
 
-        all_chats = scope == 1
-        args = _namespace(command="discover", json_output=json_output, all_chats=all_chats, admin_only=not all_chats)
-        return await _act(args, session=session, runner=runner, read=read, write=write)
+            all_chats = scope == 1
+            args = _namespace(command="discover", json_output=json_output, all_chats=all_chats, admin_only=not all_chats)
+            return await _act(args, session=session, runner=runner, read=read, write=write)
 
 
 async def _flow_doctor(*, session, runner, read, write) -> bool:
@@ -303,8 +315,17 @@ async def _flow_search(*, session, runner, read, write) -> bool:
                 ]
             )
 
-            choice = choose([label for _key, label in rows], title=f"Search in {picked.title}", read=read, write=write)
+            choice = choose(
+                [label for _key, label in rows],
+                title=f"Search in {picked.title}",
+                read=read,
+                write=write,
+                back_label="Back (discards)",
+            )
             if choice is BACK:
+                count = sum(1 for value in staged.values() if value is not None)
+                if count:
+                    write(f"Discarded {count} staged change{'s' if count > 1 else ''}.")
                 break
             key = rows[choice][0]
 
@@ -378,7 +399,7 @@ async def _flow_clear(*, session, runner, read, write) -> bool:
 
         topics = await session.topics(picked.reference)
         if not topics:
-            write("No topics in that chat.")
+            write("That chat has no topics.")
             return True
 
         preselected: list = []
@@ -490,7 +511,9 @@ def _staged_bot_value(key: str, staged: dict) -> str | None:
     value = staged.get(key)
     if value is None:
         return None
-    if value in ("", "none"):
+    if key in ("group_rights", "channel_rights"):
+        return "(cleared)" if value == "none" else value
+    if value == "":
         return "(cleared)"
     return value
 
@@ -606,7 +629,7 @@ async def _flow_bots(*, session, runner, read, write) -> bool:
     chosen = pick(
         bots,
         title="My bots",
-        label=lambda bot: f"@{bot.username or bot.id}  {bot.name}",
+        label=lambda bot: f"{'@' + bot.username if bot.username else '(no username)'}  {bot.name}",
         read=read,
         write=write,
     )
@@ -622,7 +645,7 @@ async def _flow_bots(*, session, runner, read, write) -> bool:
     while True:
         choice = choose(
             ["Edit this bot", "Save this profile to a JSON file"],
-            title=f"@{profile.username or profile.id}",
+            title=f"@{profile.username}" if profile.username else f"bot {profile.id}",
             read=read,
             write=write,
         )
