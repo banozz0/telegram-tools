@@ -127,10 +127,11 @@ telegram-tools
 0. Exit
 ```
 
-`0` always goes back — one step at a time inside a picker, straight to this menu from
-anywhere else — and exits at the root. Chats, topics, bots, and admin rights come from
-live pick-lists rather than prompts asking you to type an ID. Bot fields show their
-current value and offer keep / change / clear. After every job it returns to the menu.
+`0` always steps back one screen — the same whether you're paging through a picker or
+backing out of a flow's own screen — and exits once you're back at the root. Chats,
+topics, bots, and admin rights come from live pick-lists rather than prompts asking
+you to type an ID. Bot fields show their current value and offer keep / change /
+clear. After every job it returns to the menu.
 
 The safety gates are the same as the flags', not looser: clearing topic messages
 dry-runs first and still asks you to type `DELETE`, and bot edits still print a diff
