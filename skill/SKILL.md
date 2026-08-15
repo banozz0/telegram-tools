@@ -89,6 +89,9 @@ arrived.
   readable table, which is usually what you want to summarise from.
 - **Check the tool's own help before using a flag** that is not in this table. The
   CLI's `--help` is current; this file is a snapshot.
+- **The menu is for the human at the keyboard.** `telegram-tools` with no arguments
+  opens a looping menu with pick-lists. Every action it offers is a flag combination
+  this CLI already has — nothing in the menu is a capability the flags lack.
 
 ## Never run these
 
@@ -96,6 +99,10 @@ arrived.
 - **`bots`** — it edits a live bot's name, bio, description, commands, profile photo
   and default admin rights. Those are the user's public-facing bots; the edits are
   theirs to make. Check `--help` for whether the installed build has it at all.
+- **A bare `telegram-tools`** — no subcommand opens the interactive menu, which waits
+  for a human; from an agent session with a terminal it will block. Always pass a
+  command. With no terminal attached it prints help instead, so it will not hang in a
+  pipe, but it answers nothing either.
 
 ## Delivering the answer
 
