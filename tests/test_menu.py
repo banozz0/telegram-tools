@@ -164,6 +164,20 @@ def test_zero_at_the_first_flow_screen_returns_to_the_root_menu():
     assert screens(output).count("1. Chats & topics (find IDs)") == 2
 
 
+def test_discover_zero_at_where_screen_returns_to_scope_not_root():
+    # 1 = discover, 1 = chats I manage, 0 = "where" back -> scope screen again,
+    # 2 = every chat this time, 1 = print here, Enter = menu, 0 = exit
+    answers = ["1", "1", "0", "2", "1", "", "0"]
+    code, calls, output = run_menu(answers)
+
+    assert code == 0
+    # Proves the second pass through the scope screen (not the root) is what
+    # produced the call: an "every chat" answer only reaches here if 0 at
+    # "Where should it go?" landed back on the scope screen.
+    assert calls[0].all_chats is True
+    assert screens(output).count("1. Chats I manage") == 2
+
+
 def test_two_actions_in_one_session():
     code, calls, _output = run_menu(["5", "", "5", "", "0"])
 
@@ -391,8 +405,10 @@ def test_search_topic_picker_offers_all_topics():
 
 def test_search_topic_picker_says_the_chat_has_no_topics():
     session = FakeSession(topics=[])
-    # 2 = search, 1 = forum groups, 1 = Hermes, 1 = Topic row (no topics), 0 = back, 0 = exit
-    answers = ["2", "1", "1", "1", "0", "0"]
+    # 2 = search, 1 = forum groups, 1 = Hermes, 1 = Topic row (no topics), 0 = back to
+    # the staging screen, 0 = back to the chat picker, 0 = back out of the picker to
+    # root, 0 = exit
+    answers = ["2", "1", "1", "1", "0", "0", "0"]
     code, calls, output = run_menu(answers, session=session)
 
     assert code == 0
@@ -402,6 +418,20 @@ def test_search_topic_picker_says_the_chat_has_no_topics():
     # It returned to the staging screen rather than crashing or exiting: the
     # screen renders once before the Topic row is chosen, once again after.
     assert text.count("Search in Hermes") == 2
+
+
+def test_search_zero_at_staging_returns_to_the_chat_picker_not_root():
+    # 2 = search, 1 = forum groups, 1 = Hermes, 0 = staging back -> chat picker,
+    # 4 = type an ID/username this time, a new chat, 7 = run it (topic row is
+    # shown since the typed chat's forum-ness is unknown), Enter, 0 = exit
+    answers = ["2", "1", "1", "0", "4", "@newchat", "7", "", "0"]
+    code, calls, _output = run_menu(answers)
+
+    assert code == 0
+    # Proves the chat picker ran again (not root): "@newchat" only ends up as
+    # the search target if 0 at the staging screen landed on the chat picker.
+    assert calls[0].command == "search"
+    assert calls[0].chat == "@newchat"
 
 
 def test_clear_dry_runs_first_then_executes():
@@ -422,12 +452,32 @@ def test_clear_dry_runs_first_then_executes():
 
 
 def test_clear_stops_at_the_dry_run_when_you_go_back():
-    answers = ["3", "1", "1", "4", "0", "0"]
+    # 3 = clear, 1 = Hermes, 1 = tick Deploys, 4 = continue, dry-run runs, 0 = back to
+    # the ticker, 0 = back to the chat picker, 0 = back out of the picker to root, 0 = exit
+    answers = ["3", "1", "1", "4", "0", "0", "0", "0"]
     code, calls, _output = run_menu(answers)
 
     assert code == 0
     assert len(calls) == 1
     assert calls[0].execute is False
+
+
+def test_clear_zero_at_dry_run_returns_to_the_ticker_with_ticks_preserved():
+    # 3 = clear, 1 = Hermes, 1 = tick Deploys, 4 = continue, dry-run runs, 0 = back
+    # to the ticker (Deploys should still be ticked), 4 = continue again with no
+    # further ticking, 1 = for real, Enter, 0 = exit
+    answers = ["3", "1", "1", "4", "0", "4", "1", "", "0"]
+    code, calls, output = run_menu(answers)
+
+    assert code == 0
+    assert len(calls) == 3
+    # Both dry runs, and the real pass, all cover just Deploys: the tick made
+    # on the first pass through the ticker survived the trip back and forth.
+    assert calls[0].topics == [141]
+    assert calls[1].topics == [141]
+    assert calls[2].execute is True
+    assert calls[2].topics == [141]
+    assert screens(output).count("[x] 141") == 2
 
 
 def test_clear_every_topic_uses_all_topics():
@@ -502,7 +552,8 @@ def test_bot_edit_clears_a_bio_with_an_empty_string():
 
 
 def test_bot_edit_shows_current_values_and_staged_changes():
-    answers = ["4", "1", "1", "1", "2", "Harry Two", "0", "0"]
+    # ... 0 = field list back (to the bot's own screen), 0 = back out of that screen, 0 = exit
+    answers = ["4", "1", "1", "1", "2", "Harry Two", "0", "0", "0"]
     _code, _calls, output = run_menu(answers)
 
     text = screens(output)
@@ -513,7 +564,8 @@ def test_bot_edit_shows_current_values_and_staged_changes():
 
 
 def test_bot_edit_refuses_token_fields_without_a_token():
-    answers = ["4", "1", "1", "4", "0", "0"]
+    # ... 0 = field list back (to the bot's own screen), 0 = back out of that screen, 0 = exit
+    answers = ["4", "1", "1", "4", "0", "0", "0"]
     _code, calls, output = run_menu(answers)
 
     text = screens(output)
@@ -544,11 +596,26 @@ def test_bot_edit_clears_rights_with_none():
 
 
 def test_bot_edit_apply_with_nothing_staged_says_so():
-    answers = ["4", "1", "1", "8", "0", "0"]
+    # ... 0 = field list back (to the bot's own screen), 0 = back out of that screen, 0 = exit
+    answers = ["4", "1", "1", "8", "0", "0", "0"]
     _code, calls, output = run_menu(answers)
 
     assert calls == []
     assert "Nothing staged yet." in screens(output)
+
+
+def test_bot_edit_zero_at_field_list_returns_to_the_bots_own_screen_not_root():
+    # 4 = bots, 1 = harrybot, 1 = edit, 0 = field list back (nothing staged) ->
+    # the bot's own screen, 2 = save profile (proves we landed there, not root),
+    # path, Enter, 0 = exit
+    answers = ["4", "1", "1", "0", "2", "/tmp/bot.json", "", "0"]
+    code, calls, _output = run_menu(answers)
+
+    assert code == 0
+    # Proves the bot's own screen ran again (not root): "2" only saves this
+    # bot's profile if 0 at the field list landed on that screen.
+    assert calls[0].command == "bots"
+    assert calls[0].json_output == "/tmp/bot.json"
 
 
 def test_a_picker_error_prints_and_returns_to_the_menu():

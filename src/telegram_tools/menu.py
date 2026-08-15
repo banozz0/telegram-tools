@@ -212,24 +212,25 @@ async def _pick_chat(*, session, read, write, forums_only: bool = False) -> Any:
 
 
 async def _flow_discover(*, session, runner, read, write) -> bool:
-    scope = choose(["Chats I manage", "Every chat"], title="Chats & topics", read=read, write=write)
-    if scope is BACK:
-        return True
-
-    where = choose(["Print it here", "Write a JSON file"], title="Where should it go?", read=read, write=write)
-    if where is BACK:
-        return True
-
-    json_output = None
-    if where == 1:
-        path = ask_text("JSON file path", read=read, write=write)
-        if path is BACK:
+    while True:
+        scope = choose(["Chats I manage", "Every chat"], title="Chats & topics", read=read, write=write)
+        if scope is BACK:
             return True
-        json_output = path
 
-    all_chats = scope == 1
-    args = _namespace(command="discover", json_output=json_output, all_chats=all_chats, admin_only=not all_chats)
-    return await _act(args, session=session, runner=runner, read=read, write=write)
+        where = choose(["Print it here", "Write a JSON file"], title="Where should it go?", read=read, write=write)
+        if where is BACK:
+            continue
+
+        json_output = None
+        if where == 1:
+            path = ask_text("JSON file path", read=read, write=write)
+            if path is BACK:
+                return True
+            json_output = path
+
+        all_chats = scope == 1
+        args = _namespace(command="discover", json_output=json_output, all_chats=all_chats, admin_only=not all_chats)
+        return await _act(args, session=session, runner=runner, read=read, write=write)
 
 
 async def _flow_doctor(*, session, runner, read, write) -> bool:
@@ -277,151 +278,159 @@ def _ask_from_user(*, read, write) -> Any:
 
 
 async def _flow_search(*, session, runner, read, write) -> bool:
-    picked = await _pick_chat(session=session, read=read, write=write)
-    if picked is BACK:
-        return True
-
-    staged: dict[str, Any] = {"topic": None, "keyword": None, "from_user": None, "since": None, "until": None, "limit": None}
-    topic_info = None  # The picked TopicInfo, kept only for display; staged["topic"] holds its id.
-
     while True:
-        rows: list[tuple[str, str]] = []
-        if picked.is_forum is not False:
-            topic_shown = "all topics" if topic_info is None else f"{topic_info.id} {topic_info.title}"
-            rows.append(("topic", f"Topic          [{topic_shown}]"))
-        rows.extend(
-            [
-                ("keyword", f"Contains       [{_shown(staged['keyword'], '(anything)')}]"),
-                ("from_user", f"From           [{_shown(staged['from_user'], '(anyone)')}]"),
-                ("since", f"Since          [{_shown(staged['since'], '(any date)')}]"),
-                ("until", f"Until          [{_shown(staged['until'], '(any date)')}]"),
-                ("limit", f"Limit          [{_shown(staged['limit'], '(no limit)')}]"),
-                ("run", "Run it (print here)"),
-                ("export", "Export to a file"),
-            ]
-        )
-
-        choice = choose([label for _key, label in rows], title=f"Search in {picked.title}", read=read, write=write)
-        if choice is BACK:
+        picked = await _pick_chat(session=session, read=read, write=write)
+        if picked is BACK:
             return True
-        key = rows[choice][0]
 
-        if key in ("run", "export"):
-            output_path = None
-            output_format = "json"
-            if key == "export":
-                output_path = ask_text("Export file path", read=read, write=write)
-                if output_path is BACK:
-                    continue
-                fmt = choose(["JSON", "CSV"], title="Format", read=read, write=write)
-                if fmt is BACK:
-                    continue
-                output_format = ("json", "csv")[fmt]
+        staged: dict[str, Any] = {"topic": None, "keyword": None, "from_user": None, "since": None, "until": None, "limit": None}
+        topic_info = None  # The picked TopicInfo, kept only for display; staged["topic"] holds its id.
 
-            args = _namespace(
-                command="search",
-                chat=picked.reference,
-                topic=staged["topic"],
-                keyword=staged["keyword"],
-                from_user=staged["from_user"],
-                since=staged["since"],
-                until=staged["until"],
-                limit=staged["limit"],
-                format=output_format,
-                output=output_path,
+        while True:
+            rows: list[tuple[str, str]] = []
+            if picked.is_forum is not False:
+                topic_shown = "all topics" if topic_info is None else f"{topic_info.id} {topic_info.title}"
+                rows.append(("topic", f"Topic          [{topic_shown}]"))
+            rows.extend(
+                [
+                    ("keyword", f"Contains       [{_shown(staged['keyword'], '(anything)')}]"),
+                    ("from_user", f"From           [{_shown(staged['from_user'], '(anyone)')}]"),
+                    ("since", f"Since          [{_shown(staged['since'], '(any date)')}]"),
+                    ("until", f"Until          [{_shown(staged['until'], '(any date)')}]"),
+                    ("limit", f"Limit          [{_shown(staged['limit'], '(no limit)')}]"),
+                    ("run", "Run it (print here)"),
+                    ("export", "Export to a file"),
+                ]
             )
-            return await _act(args, session=session, runner=runner, read=read, write=write)
 
-        if key == "topic":
-            answer = await _ask_topic(picked, session=session, read=read, write=write)
+            choice = choose([label for _key, label in rows], title=f"Search in {picked.title}", read=read, write=write)
+            if choice is BACK:
+                break
+            key = rows[choice][0]
+
+            if key in ("run", "export"):
+                output_path = None
+                output_format = "json"
+                if key == "export":
+                    output_path = ask_text("Export file path", read=read, write=write)
+                    if output_path is BACK:
+                        continue
+                    fmt = choose(["JSON", "CSV"], title="Format", read=read, write=write)
+                    if fmt is BACK:
+                        continue
+                    output_format = ("json", "csv")[fmt]
+
+                args = _namespace(
+                    command="search",
+                    chat=picked.reference,
+                    topic=staged["topic"],
+                    keyword=staged["keyword"],
+                    from_user=staged["from_user"],
+                    since=staged["since"],
+                    until=staged["until"],
+                    limit=staged["limit"],
+                    format=output_format,
+                    output=output_path,
+                )
+                return await _act(args, session=session, runner=runner, read=read, write=write)
+
+            if key == "topic":
+                answer = await _ask_topic(picked, session=session, read=read, write=write)
+                if answer is BACK:
+                    continue
+                topic_info = None if answer is CLEAR else answer
+                staged["topic"] = None if topic_info is None else topic_info.id
+                continue
+
+            if key == "from_user":
+                answer = _ask_from_user(read=read, write=write)
+            elif key == "limit":
+                answer = edit_field(
+                    "Limit",
+                    _shown(staged["limit"], "(no limit)"),
+                    read=read,
+                    write=write,
+                    ask=lambda: ask_int("Maximum messages", read=read, write=write),
+                    allow_clear=True,
+                )
+            else:
+                labels = {"keyword": ("Contains", "(anything)"), "since": ("Since", "(any date)"), "until": ("Until", "(any date)")}
+                title, empty = labels[key]
+                answer = edit_field(
+                    title,
+                    _shown(staged[key], empty),
+                    read=read,
+                    write=write,
+                    ask=lambda: ask_text(title, read=read, write=write),
+                    allow_clear=True,
+                )
+
             if answer is BACK:
                 continue
-            topic_info = None if answer is CLEAR else answer
-            staged["topic"] = None if topic_info is None else topic_info.id
-            continue
-
-        if key == "from_user":
-            answer = _ask_from_user(read=read, write=write)
-        elif key == "limit":
-            answer = edit_field(
-                "Limit",
-                _shown(staged["limit"], "(no limit)"),
-                read=read,
-                write=write,
-                ask=lambda: ask_int("Maximum messages", read=read, write=write),
-                allow_clear=True,
-            )
-        else:
-            labels = {"keyword": ("Contains", "(anything)"), "since": ("Since", "(any date)"), "until": ("Until", "(any date)")}
-            title, empty = labels[key]
-            answer = edit_field(
-                title,
-                _shown(staged[key], empty),
-                read=read,
-                write=write,
-                ask=lambda: ask_text(title, read=read, write=write),
-                allow_clear=True,
-            )
-
-        if answer is BACK:
-            continue
-        staged[key] = None if answer is CLEAR else answer
+            staged[key] = None if answer is CLEAR else answer
 
 
 async def _flow_clear(*, session, runner, read, write) -> bool:
-    picked = await _pick_chat(session=session, read=read, write=write, forums_only=True)
-    if picked is BACK:
-        return True
+    while True:
+        picked = await _pick_chat(session=session, read=read, write=write, forums_only=True)
+        if picked is BACK:
+            return True
 
-    topics = await session.topics(picked.reference)
-    if not topics:
-        write("No topics in that chat.")
-        return True
+        topics = await session.topics(picked.reference)
+        if not topics:
+            write("No topics in that chat.")
+            return True
 
-    selected = pick_many(
-        topics,
-        title=f"Topics in {picked.title} - tick what to clear",
-        label=lambda topic: f"{topic.id:<6}  {topic.title}",
-        read=read,
-        write=write,
-    )
-    if selected is BACK:
-        return True
+        preselected: list = []
+        while True:
+            selected = pick_many(
+                topics,
+                title=f"Topics in {picked.title} - tick what to clear",
+                label=lambda topic: f"{topic.id:<6}  {topic.title}",
+                read=read,
+                write=write,
+                preselected=preselected,
+            )
+            if selected is BACK:
+                break
 
-    every_topic = len(selected) == len(topics)
-    dry_run = _namespace(
-        command="clear-messages",
-        chat=picked.reference,
-        topics=None if every_topic else [topic.id for topic in selected],
-        all_topics=every_topic,
-        execute=False,
-        batch_size=100,
-    )
+            every_topic = len(selected) == len(topics)
+            dry_run = _namespace(
+                command="clear-messages",
+                chat=picked.reference,
+                topics=None if every_topic else [topic.id for topic in selected],
+                all_topics=every_topic,
+                execute=False,
+                batch_size=100,
+            )
 
-    # The dry-run always runs first: the menu must never be a shorter path to a
-    # deletion than the flags are, and the count is what makes the next screen
-    # an informed answer.
-    if not await _call(dry_run, session=session, runner=runner, write=write):
-        return after_action(read=read, write=write)
+            # The dry-run always runs first: the menu must never be a shorter path to a
+            # deletion than the flags are, and the count is what makes the next screen
+            # an informed answer.
+            if not await _call(dry_run, session=session, runner=runner, write=write):
+                return after_action(read=read, write=write)
 
-    choice = choose(
-        ["Clear them for real (asks you to type DELETE)"],
-        title="Dry-run done",
-        read=read,
-        write=write,
-        back_label="Back to the menu",
-    )
-    if choice is BACK:
-        return True
+            choice = choose(
+                ["Clear them for real (asks you to type DELETE)"],
+                title="Dry-run done",
+                read=read,
+                write=write,
+                back_label="Back to the topic list",
+            )
+            if choice is BACK:
+                # The ticks survive the trip back: pick_many's own preselected=
+                # is what makes that free.
+                preselected = selected
+                continue
 
-    for_real = _namespace(
-        **{
-            **vars(dry_run),
-            "execute": True,
-            "topics": list(dry_run.topics) if dry_run.topics is not None else None,
-        }
-    )
-    return await _act(for_real, session=session, runner=runner, read=read, write=write)
+            for_real = _namespace(
+                **{
+                    **vars(dry_run),
+                    "execute": True,
+                    "topics": list(dry_run.topics) if dry_run.topics is not None else None,
+                }
+            )
+            return await _act(for_real, session=session, runner=runner, read=read, write=write)
 
 
 BOT_FIELDS = (
@@ -501,7 +510,10 @@ def _ask_rights(title: str, current: list[str], *, read, write) -> Any:
     return ",".join(chosen)
 
 
-async def _flow_bot_edit(profile, *, session, runner, read, write) -> bool:
+async def _flow_bot_edit(profile, *, session, runner, read, write) -> Any:
+    """True/False when an edit is applied (the session's normal keep-going contract);
+    BACK when the field list is backed out of untouched, so the caller can redisplay
+    the bot's own screen instead of bubbling all the way up to the root menu."""
     token = lookup_bot_token(session.config.bot_tokens, profile.id)
     staged: dict[str, Any] = {}
 
@@ -527,7 +539,7 @@ async def _flow_bot_edit(profile, *, session, runner, read, write) -> bool:
             if staged:
                 count = len(staged)
                 write(f"Discarded {count} staged change{'s' if count > 1 else ''}.")
-            return True
+            return BACK
 
         key = rows[choice][0]
 
@@ -622,7 +634,10 @@ async def _flow_bots(*, session, runner, read, write) -> bool:
                 continue
             args = _bots_namespace(bot=str(profile.id), json_output=path)
             return await _act(args, session=session, runner=runner, read=read, write=write)
-        return await _flow_bot_edit(profile, session=session, runner=runner, read=read, write=write)
+        result = await _flow_bot_edit(profile, session=session, runner=runner, read=read, write=write)
+        if result is BACK:
+            continue
+        return result
 
 
 async def run_menu(*, read=input, write=print, session=None, runner=None) -> int:
