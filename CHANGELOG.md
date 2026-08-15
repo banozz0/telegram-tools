@@ -4,6 +4,15 @@ All notable changes to this project will be documented here.
 
 This project follows a practical changelog style: user-visible changes, safety changes, and release notes belong here; active task tracking belongs outside the repo.
 
+## 3.2.0 - 2026-08-15
+
+- `telegram-tools` with no arguments now opens a menu you walk forward and back through instead of a single screen that exits after one action: numbered lists all the way down, `0` = back at every level, and a return to the menu after every job.
+- Chats, forum topics, bots, and admin-right names are picked from live lists. Typing is left for the things a list cannot carry — a search phrase, a name, a date, a file path.
+- Bot editing shows each field's current value and offers keep / change / clear, so a field can finally be emptied from the menu; blank no longer has to mean "keep".
+- Clearing topic messages from the menu always runs a dry-run first and only then offers the real pass, which still asks you to type `DELETE`. Bot edits still print an old → new diff and ask; the menu never skips it.
+- Ctrl-C anywhere exits cleanly with no traceback. With no arguments and no terminal — a script, a cron job, an agent — it prints help instead of waiting forever for a human.
+- No flag changed. The menu builds the same commands the flags do.
+
 ## 3.1.0 - 2026-08-14
 
 - Add `bots`: list the bots you own with their numeric IDs, show one bot's full profile, and edit its display name, bio, description, commands, profile photo, and default group/channel admin rights.

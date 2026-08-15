@@ -23,7 +23,9 @@ telegram-tools <command>
 It is the PyPI `telegram-tools`, installed with pipx at
 `/Users/sven/.local/bin/telegram-tools`. Credentials and the login session live in
 `/Users/sven/.telegram-tools/` and never leave the machine. The installed version can
-lag PyPI — its own `--help` is the only reliable statement of what it can do today.
+lag PyPI — as of 2026-08-15, pipx has 3.1.0 while the repo is at 3.2.0, so the looping,
+pick-list menu this file describes may not be live yet. Its own `--help` is the only
+reliable statement of what it can do today.
 
 ## When to Use
 
@@ -82,6 +84,10 @@ arrived.
   readable table, which is usually what you want to summarise from.
 - **Check the tool's own help before using a flag** that is not in this table. The
   CLI's `--help` is current; this file is a snapshot.
+- **Sven has a menu; you have flags.** `telegram-tools` with no arguments is his front
+  door — a looping menu with pick-lists. Every one of its actions is a flag combination
+  this file already documents, so nothing in it is a capability you lack — `bots` and
+  `clear-messages` stay off-limits as menu items for exactly the reasons named below.
 
 ## Never run these
 
@@ -89,6 +95,9 @@ arrived.
 - **`bots`** — released in 3.1.0, and absent from an install still on 3.0.0. It edits
   a live bot's name, bio, description, commands, profile photo and default admin
   rights. Those are Sven's public-facing bots; the edits are his to make.
+- **A bare `telegram-tools`** — no subcommand opens the interactive menu, which waits
+  for a human. From a session with a terminal it will block; always pass a command.
+  (Without a TTY it prints help instead, so nothing hangs, but it also answers nothing.)
 
 ## Delivering the answer
 

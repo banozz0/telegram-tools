@@ -95,7 +95,29 @@ telegram-tools bots --bot @mybot --name "My Bot" --description "Does the thing"
 telegram-tools bots --bot @mybot --photo avatar.png
 ```
 
-Running `telegram-tools` with no arguments opens an interactive menu with the same operations.
+## The menu
+
+Run `telegram-tools` with no arguments and you get a menu instead of flags:
+
+```text
+telegram-tools
+--------------------------------------------
+1. Chats & topics (find IDs)
+2. Search / export messages
+3. Clear topic messages
+4. My bots
+5. Check setup
+0. Exit
+```
+
+`0` always goes back — one step at a time inside a picker, straight to this menu from
+anywhere else — and exits at the root. Chats, topics, bots, and admin rights come from
+live pick-lists rather than prompts asking you to type an ID. Bot fields show their
+current value and offer keep / change / clear. After every job it returns to the menu.
+
+The safety gates are the same as the flags', not looser: clearing topic messages
+dry-runs first and still asks you to type `DELETE`, and bot edits still print a diff
+and ask before writing. With no terminal attached it prints this help instead.
 
 `discover` output looks like:
 
