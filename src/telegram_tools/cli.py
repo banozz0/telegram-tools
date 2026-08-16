@@ -310,6 +310,15 @@ def main(argv: Sequence[str] | None = None) -> int:
                 # actually wanted instead of a blocked input() prompt.
                 parser.print_help()
                 return 0
+            try:
+                # `input()` only gets line editing when readline is imported.
+                # Without it every arrow key echoes its raw escape sequence
+                # (^[[A) into the answer. Menu-only, and optional: readline is
+                # absent on some platforms and the menu works fine without it.
+                import readline  # noqa: F401
+            except ImportError:
+                pass
+
             # Imported here, not at module scope: menu.py imports cli, and a
             # top-level import either way closes the cycle.
             from telegram_tools.menu import run_menu
