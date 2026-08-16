@@ -373,6 +373,7 @@ async def _flow_search(*, session, runner, read, write) -> bool:
                     write=write,
                     ask=lambda: ask_int("Maximum messages", read=read, write=write),
                     allow_clear=True,
+                    is_set=staged["limit"] is not None,
                 )
             else:
                 labels = {"keyword": ("Contains", "(anything)"), "since": ("Since", "(any date)"), "until": ("Until", "(any date)")}
@@ -384,6 +385,7 @@ async def _flow_search(*, session, runner, read, write) -> bool:
                     write=write,
                     ask=lambda: ask_text(title, read=read, write=write),
                     allow_clear=True,
+                    is_set=staged[key] is not None,
                 )
 
             if answer is BACK:
@@ -518,6 +520,25 @@ def _staged_bot_value(key: str, staged: dict) -> str | None:
     return value
 
 
+def _bot_field_is_set(profile, key: str) -> bool:
+    """Whether a bot field has a current value -- the thing keep/clear would act on.
+
+    Mirrors `_current_bot_value`'s notion of empty rather than string-matching its
+    display text: a name always has one (Telegram requires it), an unset photo and
+    empty command/rights lists are not strings at all, and bio/description treat ""
+    the same as None.
+    """
+    if key == "name":
+        return True
+    if key == "commands":
+        return bool(profile.commands)
+    if key == "photo":
+        return profile.has_photo
+    if key in ("group_rights", "channel_rights"):
+        return bool(getattr(profile, key))
+    return getattr(profile, key) not in (None, "")
+
+
 def _ask_rights(title: str, current: list[str], *, read, write) -> Any:
     names = [name for name in right_names() if name != IMPLICIT_OTHER_RIGHT]
     chosen = pick_many(
@@ -596,6 +617,7 @@ async def _flow_bot_edit(profile, *, session, runner, read, write) -> Any:
             write=write,
             ask=ask,
             allow_clear=allow_clear and not (needs_token and token is None),
+            is_set=_bot_field_is_set(profile, key),
         )
         if answer is BACK:
             continue

@@ -99,7 +99,13 @@ def pick_many(
     preselected: Sequence[Any] = (),
     page_size: int = PAGE_SIZE,
 ) -> Any:
-    """Toggle items on and off. Returns the selected items in list order, or BACK."""
+    """Toggle items on and off. Returns the selected items in list order, or BACK.
+
+    One number acts on that row exactly like `choose` would, control rows (paging,
+    Select all, Continue) included. Several numbers -- space- and/or comma-separated,
+    e.g. "2 3" or "2,3" -- must all name item rows, and toggle in a single pass; a
+    control row or an out-of-range number anywhere among them changes nothing.
+    """
     if not items:
         write("Nothing to pick from.")
         return BACK
@@ -124,24 +130,39 @@ def pick_many(
         labels.append(f"Continue ({len(selected)} selected)")
         keys.append("continue")
 
-        choice = choose(labels, title=title, read=read, write=write)
-        if choice is BACK:
+        write(_screen(title, labels, "Back"))
+        answer = read("Choose one or more (2 3 or 2,3): ").strip()
+        if answer == "0":
             return BACK
 
-        key = keys[choice]
-        if key is _NEXT:
-            page += 1
-        elif key is _PREV:
-            page -= 1
-        elif key == "all":
-            selected = set(range(len(items)))
-        elif key == "continue":
-            if not selected:
-                write("Tick at least one, or press 0 to go back.")
-                continue
-            return [item for index, item in enumerate(items) if index in selected]
-        else:
-            selected.symmetric_difference_update({key})
+        tokens = answer.replace(",", " ").split()
+        if not tokens or not all(token.isdecimal() and 1 <= int(token) <= len(labels) for token in tokens):
+            write("Pick one of the numbers listed.")
+            continue
+        indices = [int(token) - 1 for token in tokens]
+
+        if len(indices) == 1:
+            key = keys[indices[0]]
+            if key is _NEXT:
+                page += 1
+            elif key is _PREV:
+                page -= 1
+            elif key == "all":
+                selected = set(range(len(items)))
+            elif key == "continue":
+                if not selected:
+                    write("Tick at least one, or press 0 to go back.")
+                    continue
+                return [item for index, item in enumerate(items) if index in selected]
+            else:
+                selected.symmetric_difference_update({key})
+            continue
+
+        picked_keys = [keys[index] for index in indices]
+        if any(not isinstance(key, int) for key in picked_keys):
+            write("Several at once must all be item numbers, not a page or Continue row.")
+            continue
+        selected.symmetric_difference_update(picked_keys)
 
 
 def ask_text(label: str, *, read, write, current: str | None = None) -> Any:
@@ -163,13 +184,23 @@ def ask_int(label: str, *, read, write, current: int | None = None) -> Any:
         write("Type a whole number of 1 or more.")
 
 
-def edit_field(title: str, current_display: str, *, read, write, ask: Callable[[], Any], allow_clear: bool) -> Any:
+def edit_field(
+    title: str, current_display: str, *, read, write, ask: Callable[[], Any], allow_clear: bool, is_set: bool = True
+) -> Any:
     """Keep / change / clear for one field.
 
     Returns BACK to keep the current value, CLEAR to empty it, or whatever `ask`
     returned. `ask` returning BACK also means keep, so cancelling out of the value
     prompt cannot stage a change.
+
+    `is_set` is the caller's word on whether the field has a current value at all --
+    this never guesses from `current_display`'s text. With nothing set there is
+    nothing to keep and nothing to clear, so the screen is skipped and this goes
+    straight to `ask()`.
     """
+    if not is_set:
+        return ask()
+
     labels = [f"Keep it as {current_display}", "Change it"]
     if allow_clear:
         labels.append("Clear it")

@@ -116,6 +116,60 @@ def test_pick_many_returns_back_for_zero():
     assert result is BACK
 
 
+def test_pick_many_accepts_several_numbers_separated_by_space_comma_or_both():
+    items = [item("a", 1), item("b", 2), item("c", 3)]
+    # 3 items: rows are a(1) b(2) c(3) Select all(4) Continue(5).
+    for answer in ("2 3", "2,3", "2, 3"):
+        result = prompts.pick_many(items, title="Topics", label=lambda value: value.name, read=reader(answer, "5"), write=lambda _: None)
+        assert result == [items[1], items[2]]
+
+
+def test_pick_many_single_number_still_pages_forward_and_back():
+    # Existing tests already cover a single number on an item row (toggle), on
+    # Select all, and on Continue; paging is the one control row pick_many never
+    # had its own test for, and it is the one the read/parse rewrite could most
+    # easily have broken.
+    items = [item(f"i{n}", n) for n in range(10)]
+    output = []
+    # Page 1: 9 items + Next (row 10). Page 2: 1 item + Previous (row 2). Back from there.
+    result = prompts.pick_many(items, title="Topics", label=lambda value: value.name, read=reader("10", "2", "0"), write=output.append)
+    assert result is BACK
+    assert "10. Next page (1 more)" in screens(output)
+    assert "2. Previous page" in screens(output)
+
+
+def test_pick_many_rejects_several_numbers_that_include_a_control_row():
+    items = [item("a", 1), item("b", 2), item("c", 3)]
+    output = []
+    # Rows: a(1) b(2) c(3) Select all(4) Continue(5). "2 4" mixes an item with Select all.
+    result = prompts.pick_many(items, title="Topics", label=lambda value: value.name, read=reader("2 4", "0"), write=output.append)
+    assert result is BACK
+    text = screens(output)
+    assert "Several at once must all be item numbers, not a page or Continue row." in text
+    # Nothing was partially applied: both rows still show unticked on the redraw.
+    assert "1. [ ] a" in text
+    assert "2. [ ] b" in text
+
+
+def test_pick_many_rejects_several_numbers_with_one_out_of_range():
+    items = [item("a", 1), item("b", 2), item("c", 3)]
+    output = []
+    result = prompts.pick_many(items, title="Topics", label=lambda value: value.name, read=reader("2 99", "0"), write=output.append)
+    assert result is BACK
+    assert "Pick one of the numbers listed." in screens(output)
+
+
+def test_pick_many_prompt_says_several_are_allowed():
+    prompts_seen = []
+
+    def read(prompt):
+        prompts_seen.append(prompt)
+        return "0"
+
+    prompts.pick_many([item("a", 1)], title="Topics", label=lambda value: value.name, read=read, write=lambda _: None)
+    assert "2 3" in prompts_seen[0] or "2,3" in prompts_seen[0]
+
+
 def test_ask_text_returns_the_typed_value():
     assert prompts.ask_text("Name", read=reader(" Harry "), write=lambda _: None) == "Harry"
 
@@ -165,6 +219,34 @@ def test_edit_field_hides_clear_when_it_is_not_legal():
     result = prompts.edit_field("Name", "Harry", read=reader("0"), write=output.append, ask=lambda: "new", allow_clear=False)
     assert result is BACK
     assert "Clear it" not in screens(output)
+
+
+def test_edit_field_skips_its_screen_when_not_set():
+    output = []
+    read = reader("deploy")
+    result = prompts.edit_field(
+        "Contains",
+        "(anything)",
+        read=read,
+        write=output.append,
+        ask=lambda: prompts.ask_text("Contains", read=read, write=output.append),
+        allow_clear=True,
+        is_set=False,
+    )
+    assert result == "deploy"
+    assert output == []
+
+
+def test_edit_field_still_shows_keep_change_clear_when_set():
+    output = []
+    result = prompts.edit_field(
+        "Contains", "deploy", read=reader("1"), write=output.append, ask=lambda: "never", allow_clear=True, is_set=True
+    )
+    assert result is BACK
+    text = screens(output)
+    assert "1. Keep it as deploy" in text
+    assert "2. Change it" in text
+    assert "3. Clear it" in text
 
 
 def test_after_action_returns_true_for_enter_and_false_for_zero():

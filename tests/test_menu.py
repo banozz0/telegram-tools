@@ -346,11 +346,11 @@ def test_search_stages_every_filter_then_runs():
     answers = [
         "2", "1", "1",          # search > forum groups > Hermes
         "1", "1",               # Topic > Deploys (a picker, not keep/change/clear)
-        "2", "2", "deploy",     # Contains > change > "deploy"
+        "2", "deploy",          # Contains: unset -> straight to the value prompt
         "3", "2",               # From > Me (a three-way list, not keep/change/clear)
-        "4", "2", "2026-08-01", # Since > change
-        "5", "2", "2026-08-14", # Until > change
-        "6", "2", "50",         # Limit > change
+        "4", "2026-08-01",      # Since: unset -> straight to the value prompt
+        "5", "2026-08-14",      # Until: unset -> straight to the value prompt
+        "6", "50",               # Limit: unset -> straight to the value prompt
         "7", "0",               # Run it, then exit
     ]
     code, calls, output = run_menu(answers)
@@ -370,8 +370,8 @@ def test_search_stages_every_filter_then_runs():
 def test_search_shows_staged_values_and_clears_one():
     answers = [
         "2", "1", "1",
-        "2", "2", "deploy",   # Contains = deploy
-        "2", "3",             # Contains > clear
+        "2", "deploy",         # Contains: unset -> straight to the value prompt = deploy
+        "2", "3",              # Contains is set now -> keep/change/clear > clear
         "7", "0",
     ]
     code, calls, output = run_menu(answers)
@@ -447,10 +447,10 @@ def test_search_zero_at_staging_returns_to_the_chat_picker_not_root():
 
 
 def test_search_staging_back_discards_and_says_so():
-    # 2 = search, 1 = forum groups, 1 = Hermes, 2 = Contains, 2 = change it,
-    # "deploy" = the value, 0 = staging back (discards it and says so),
-    # 0 = chat picker back, 0 = exit.
-    answers = ["2", "1", "1", "2", "2", "deploy", "0", "0", "0"]
+    # 2 = search, 1 = forum groups, 1 = Hermes, 2 = Contains (unset -> straight to
+    # the value prompt), "deploy" = the value, 0 = staging back (discards it and
+    # says so), 0 = chat picker back, 0 = exit.
+    answers = ["2", "1", "1", "2", "deploy", "0", "0", "0"]
     code, calls, output = run_menu(answers)
 
     text = screens(output)
@@ -504,6 +504,21 @@ def test_clear_zero_at_dry_run_returns_to_the_ticker_with_ticks_preserved():
     assert calls[2].execute is True
     assert calls[2].topics == [141]
     assert screens(output).count("[x] 141") == 2
+
+
+def test_clear_ticker_accepts_several_numbers_in_one_answer():
+    # 3 = clear, 1 = Hermes, "1 2" ticks both topics in a single answer (item rows
+    # only, so this is legal), 4 = continue, dry-run covers both, 0 = decline the
+    # real pass, 0 = chat picker back, 0 = out of the picker to root, 0 = exit.
+    answers = ["3", "1", "1 2", "4", "0", "0", "0", "0"]
+    code, calls, _output = run_menu(answers)
+
+    assert code == 0
+    assert len(calls) == 1
+    assert calls[0].command == "clear-messages"
+    assert calls[0].all_topics is True
+    assert calls[0].topics is None
+    assert calls[0].execute is False
 
 
 def test_clear_every_topic_uses_all_topics():
@@ -606,6 +621,22 @@ def test_bot_edit_clears_a_bio_with_an_empty_string():
     code, calls, _output = run_menu(answers)
 
     assert calls[0].bio == ""
+
+
+def test_bot_edit_unset_field_skips_the_keep_change_clear_screen():
+    # A bot with no bio at all: PROFILE (used elsewhere) always has one set, so this
+    # uses its own profile to reach the truly-unset case.
+    profile = BotInfo(id=12345, username="harrybot", name="Harry", bio=None, description=None, is_owned=True)
+    session = FakeSession(profile=profile)
+    # 4 = my bots, 1 = harrybot, 1 = edit, 2 = Bio (unset -> straight to the value
+    # prompt, no keep/change/clear screen), "hello" = the typed value, 8 = apply,
+    # Enter, 0 = exit.
+    answers = ["4", "1", "1", "2", "hello", "8", "", "0"]
+    code, calls, output = run_menu(answers, session=session)
+
+    assert code == 0
+    assert calls[0].bio == "hello"
+    assert "Keep it as (not set)" not in screens(output)
 
 
 def test_bot_edit_shows_current_values_and_staged_changes():
