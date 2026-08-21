@@ -224,7 +224,7 @@ async def _run_bots(client, args, config) -> int:
         return 0
 
     if not resolved.is_owned:
-        raise PermissionError(f"You do not own @{profile.username or profile.id}; only its owner can edit it.")
+        raise PermissionError(f"You do not own {f'@{profile.username}' if profile.username else f'bot {profile.id}'}; only its owner can edit it.")
 
     if "commands" in requested:
         requested["commands"] = parse_commands_file(requested["commands"])

@@ -206,6 +206,15 @@ def test_editing_an_unowned_bot_raises_permission_error_and_applies_nothing(monk
         asyncio.run(_run_bots(object(), namespace(bot="harry", name="Harry Two"), fake_config()))
 
 
+def test_editing_an_unowned_bot_without_a_username_names_it_by_id_not_at_id(monkeypatch):
+    patch_bot_reads(monkeypatch, owned_profile(username=None, is_owned=False))
+
+    with pytest.raises(PermissionError, match=r"bot 12345") as excinfo:
+        asyncio.run(_run_bots(object(), namespace(bot="harry", name="Harry Two"), fake_config()))
+
+    assert "@12345" not in str(excinfo.value)
+
+
 def test_mixed_plan_without_a_token_raises_before_applying_owner_changes(monkeypatch):
     patch_bot_reads(monkeypatch, owned_profile())
 
