@@ -681,7 +681,7 @@ def test_resolve_bot_falls_back_to_entity_lookup_for_a_bot_you_do_not_own(monkey
 
 def test_resolve_bot_rejects_a_reference_that_is_not_a_bot(monkeypatch):
     client = FakeClient(admined=[])
-    human = SimpleNamespace(id=42, username="sven", first_name="Sven", bot=False)
+    human = SimpleNamespace(id=42, username="alice", first_name="Alice", bot=False)
 
     async def fake_resolve_chat(_client, _reference):
         return SimpleNamespace(id=42, entity=human, input_entity=SimpleNamespace(user_id=42))
@@ -689,7 +689,7 @@ def test_resolve_bot_rejects_a_reference_that_is_not_a_bot(monkeypatch):
     monkeypatch.setattr("telegram_tools.bots.resolve_chat", fake_resolve_chat)
 
     with pytest.raises(EntityResolutionError, match="not a bot"):
-        asyncio.run(resolve_bot(client, "@sven"))
+        asyncio.run(resolve_bot(client, "@alice"))
 
 
 def test_get_bot_profile_reads_bio_description_commands_and_rights():
@@ -2013,9 +2013,9 @@ git commit -m "docs: document the bots command and bump to 3.1.0"
 - Consumes: the installed CLI from Tasks 1–7.
 - Produces: a verified feature, or a corrected plan for whichever call fails.
 
-Everything so far is tested against fakes. These five calls are read from Telethon's TL definitions and have never been run against Telegram. **Do not report the feature as working until this task is done.** Run these against a bot Sven owns, and stop and report if any step behaves differently.
+Everything so far is tested against fakes. These five calls are read from Telethon's TL definitions and have never been run against Telegram. **Do not report the feature as working until this task is done.** Run these against a bot the maintainer owns, and stop and report if any step behaves differently.
 
-> **Result, 2026-08-14 (Sven ran it against `@bottalerttbot`):** steps 1–3, 5 and 6 all
+> **Result, 2026-08-14 (the maintainer ran it against `@examplebot`):** steps 1–3, 5 and 6 all
 > passed — the bot list, the profile read, a `setBotInfo` write, `lang_code=""`, the
 > memory-session bot client, `setBotCommands`, `resetBotCommands`, and
 > `setBotGroupDefaultAdminRights`. Step 4 and the photo half of step 5
@@ -2091,4 +2091,4 @@ git commit -m "fix: correct bot API assumptions found in live verification"
 - The three text fields are easy to mix up. `--bio` maps to MTProto `about` / Bot API `setMyShortDescription`; `--description` maps to MTProto `description` / Bot API `setMyDescription`.
 - `build_edit_plan` treats `--photo` as always-changed on purpose: a local file cannot be compared to a remote photo.
 - `bio` and `description` are `None` in the list view because the list does not fetch full profiles — one request instead of one per bot.
-- Nothing in this plan calls `bots.exportBotToken`. If a future task wants token-free command editing, that is the method to argue about, and it needs Sven's explicit decision.
+- Nothing in this plan calls `bots.exportBotToken`. If a future task wants token-free command editing, that is the method to argue about, and it needs the maintainer's explicit decision.
