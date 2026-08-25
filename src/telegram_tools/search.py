@@ -22,8 +22,12 @@ def format_message_records(records: list[dict[str, Any]]) -> str:
         topic = record.get("topic_id") or ""
         date = record.get("date") or ""
         text = _truncate(str(record.get("text") or ""))
+        # Outside the truncation, so a long caption can never push it off the row:
+        # without it a photo with no caption prints as an empty line and reads as
+        # "nothing was sent". The exports have carried `has_media` all along.
+        media = "[media] " if record.get("has_media") else ""
         lines.append(
-            f"{record.get('id')}\t{date}\ttopic={topic}\tsender={sender}\t{text}"
+            f"{record.get('id')}\t{date}\ttopic={topic}\tsender={sender}\t{media}{text}"
         )
     return "\n".join(lines)
 

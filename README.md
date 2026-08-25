@@ -7,7 +7,7 @@ Built on [Telethon](https://github.com/LonamiWebs/Telethon). Everything runs on 
 ## What it does
 
 - **`discover`** — lists your chats, channels, and forum groups with their exact numeric IDs and every forum topic ID. The fastest way to answer "what is this chat's `-100…` ID and what are its topic IDs?"
-- **`search`** — searches messages by text, sender, date range, or topic, and prints a table or exports JSON/CSV.
+- **`search`** — searches messages by text, sender, date range, or topic, and prints a table or exports JSON/CSV. Messages carrying a photo or file are marked `[media]`.
 - **`clear-messages`** — deletes all messages inside selected forum topic(s) while preserving the topics and their IDs. Dry-run by default; deleting requires both `--execute` *and* typing `DELETE` at a prompt.
 - **`send`** — posts a message, a file, or both to a chat or into one forum topic. Shows you the whole message and its destination, then asks `y/N`.
 - **`create`** — makes a supergroup (optionally with topics already on), a broadcast channel, or a topic inside a forum group, and prints the new ID.

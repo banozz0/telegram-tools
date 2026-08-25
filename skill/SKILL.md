@@ -1,7 +1,7 @@
 ---
 name: telegram-tools
 description: "Use when you need the real numeric ID of a Telegram chat, channel, group or forum topic — 'what's the ID of that topic?', 'which chat is -100…?', 'where do I send this?' — when the user wants their own Telegram messages searched or exported to JSON/CSV, or when a message must be posted to a chat or topic the user has allowlisted."
-version: 1.3.0
+version: 1.3.1
 author: banozz0
 license: MIT
 platforms: [macos]
@@ -102,6 +102,9 @@ arrived.
   longer walk through their dialog list.
 - **`--json` on `discover` takes a path, not a flag.** It writes the file; it does
   not print JSON to the terminal.
+- **`[media]` in a `search` row means a photo or file is attached.** A media-only
+  message has no text at all, so without that marker the row looks empty and reads
+  as "nothing is there". `--format json` carries the same fact as `has_media`.
 - **`search` requires `--chat`.** Accepts a username, a link, or the numeric ID.
   Narrow with `--topic`, `--keyword`, `--from-user` (a username, an ID, or `me`),
   `--since` / `--until` (ISO dates), and `--limit`. With no `--output` it prints a

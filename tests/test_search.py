@@ -97,3 +97,47 @@ def test_format_message_records_outputs_human_readable_table():
     assert "141" in text
     assert "alice" in text
     assert "deploy finished" in text
+
+
+def test_format_message_records_marks_a_message_that_carries_media():
+    text = format_message_records(
+        [{"id": 6394, "date": "2026-08-25T10:10:40+00:00", "text": "attachment test", "has_media": True}]
+    )
+
+    assert "[media]" in text
+    assert "attachment test" in text
+
+
+def test_format_message_records_leaves_a_plain_message_unmarked():
+    text = format_message_records(
+        [{"id": 12, "date": "2026-07-06T12:30:00+00:00", "text": "deploy finished", "has_media": False}]
+    )
+
+    assert "[media]" not in text
+    assert "deploy finished" in text
+
+
+def test_a_media_only_message_is_not_a_blank_row():
+    # The row that started this: a photo with no caption printed as nothing at all.
+    text = format_message_records([{"id": 6394, "date": "2026-08-25T10:10:40+00:00", "text": "", "has_media": True}])
+
+    assert "[media]" in text
+
+
+def test_records_without_the_has_media_key_still_render():
+    # Older exports and hand-built records predate the flag; they must not crash.
+    text = format_message_records([{"id": 12, "date": "2026-07-06T12:30:00+00:00", "text": "hi"}])
+
+    assert "hi" in text
+    assert "[media]" not in text
+
+
+def test_the_media_marker_does_not_eat_the_text_column():
+    text = format_message_records(
+        [{"id": 1, "date": "d", "text": "a" * 200, "has_media": True}]
+    )
+
+    row = [line for line in text.splitlines() if line.startswith("1\t")][0]
+    # Truncation still applies to the text, and the marker sits outside it.
+    assert row.count("[media]") == 1
+    assert row.endswith("...")

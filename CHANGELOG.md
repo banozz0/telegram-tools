@@ -4,6 +4,10 @@ All notable changes to this project will be documented here.
 
 This project follows a practical changelog style: user-visible changes, safety changes, and release notes belong here; active task tracking belongs outside the repo.
 
+## 3.4.1 - 2026-08-25
+
+- `search`'s printed table marks messages that carry a photo or file with `[media]`. It always recorded `has_media` in the JSON and CSV exports and only the table dropped it, so a photo sent with no caption printed as a blank row and read as "nothing was sent" — which is exactly how it was found, minutes after `send --file` shipped. No export format changed.
+
 ## 3.4.0 - 2026-08-25
 
 - `send` takes attachments: `--file PATH`, repeatable. Several files go as one album, `--text` becomes the caption, and a file with no text is a valid send. Every path is checked before the confirmation, so a typo in the fourth one cannot surface after the first three have already gone. The preview lists each file with its size read off disk — naming the wrong file is exactly what a preview is for.
