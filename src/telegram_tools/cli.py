@@ -23,7 +23,7 @@ from telegram_tools.bots import (
     resolve_bot,
     right_names,
 )
-from telegram_tools.client import create_client
+from telegram_tools.client import create_client, start_client
 from telegram_tools.config import ConfigError, bot_id_from_token, load_config, lookup_bot_token, resolve_bot_token
 from telegram_tools.create import confirm_create, create_channel, create_group, create_topic, format_create_preview
 from telegram_tools.delete import confirm_clear_topic_messages, delete_topic_messages
@@ -91,7 +91,8 @@ def build_parser() -> argparse.ArgumentParser:
     send_parser = subparsers.add_parser("send", help="Send a message to a chat or forum topic")
     send_parser.add_argument("--chat", required=True, help="Chat/channel username, link, or ID")
     send_parser.add_argument("--topic", type=int, help="Topic ID to post into; omit for the chat itself")
-    send_parser.add_argument("--text", required=True, help="Message text, or - to read it from stdin")
+    send_parser.add_argument("--text", help="Message text, or - to read it from stdin; optional when --file is given")
+    send_parser.add_argument("--file", dest="files", action="append", metavar="PATH", help="Attach a file; repeatable, several are sent as one album")
     send_parser.add_argument(
         "--yes",
         action="store_true",
@@ -196,18 +197,32 @@ def _entity_title(entity, fallback: str) -> str:
     return name or str(getattr(entity, "username", None) or fallback)
 
 
-def _message_text(raw: str) -> str:
+def _message_text(raw: str | None, *, has_files: bool) -> str | None:
     # `-` is how a multi-line body gets in: quoting newlines through a shell flag is
     # the kind of thing that silently sends half a message.
-    text = sys.stdin.read() if raw == "-" else raw
-    text = text.strip()
-    if not text:
+    if raw is None:
+        if not has_files:
+            raise ValueError("Nothing to send: pass --text, or --file to send an attachment.")
+        return None
+    text = (sys.stdin.read() if raw == "-" else raw).strip()
+    if not text and not has_files:
         raise ValueError("Nothing to send: the message text is empty.")
-    return text
+    return text or None
+
+
+def _attachments(paths: list[str] | None) -> list[str]:
+    # Checked before the confirm, never mid-send: a typo in the fourth path should
+    # not surface after the first three have already reached Telegram.
+    files = list(paths or [])
+    missing = [path for path in files if not Path(path).is_file()]
+    if missing:
+        raise FileNotFoundError("No file at " + ", ".join(missing) + ".")
+    return files
 
 
 async def _run_send(client, args, config) -> int:
-    text = _message_text(args.text)
+    files = _attachments(getattr(args, "files", None))
+    text = _message_text(args.text, has_files=bool(files))
     resolved = await resolve_chat(client, args.chat)
     peer = resolved.input_entity
 
@@ -227,10 +242,10 @@ async def _run_send(client, args, config) -> int:
             topic_id=args.topic,
         )
     else:
-        preview = format_send_preview(target, text, sender=_entity_title(await client.get_me(), "you"))
+        preview = format_send_preview(target, text, sender=_entity_title(await client.get_me(), "you"), files=files)
         confirm = partial(confirm_send, preview)
 
-    result = await send_message(client, peer, target, text, confirm=confirm)
+    result = await send_message(client, peer, target, text, files=files, confirm=confirm)
     print(json.dumps(result.to_dict(), indent=2))
     return 1 if result.cancelled else 0
 
@@ -399,8 +414,7 @@ async def run(args, *, client=None, config=None) -> int:
 
     owns_client = client is None
     if owns_client:
-        client = create_client(config)
-        await client.start()
+        client = await start_client(create_client(config))
 
     try:
         if args.command == "discover":

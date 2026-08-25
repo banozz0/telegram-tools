@@ -4,6 +4,13 @@ All notable changes to this project will be documented here.
 
 This project follows a practical changelog style: user-visible changes, safety changes, and release notes belong here; active task tracking belongs outside the repo.
 
+## 3.4.0 - 2026-08-25
+
+- `send` takes attachments: `--file PATH`, repeatable. Several files go as one album, `--text` becomes the caption, and a file with no text is a valid send. Every path is checked before the confirmation, so a typo in the fourth one cannot surface after the first three have already gone. The preview lists each file with its size read off disk — naming the wrong file is exactly what a preview is for.
+- The menu's message box takes several lines, ended by a `.` on its own line. This closes a real hazard rather than adding a nicety: pasting a three-line message into the old one-line prompt fed lines two and three to the menu as if they were menu choices.
+- Two clients on one login session now say so — "Another telegram-tools is already using the login session. Close the other one - a menu open in another terminal counts" — instead of a raw `sqlite3.OperationalError: database is locked` traceback. The menu prints it and stays open.
+- The menu's send screen gains a Files row; Send it moves down one on that screen.
+
 ## 3.3.0 - 2026-08-25
 
 - Add `send`: post a message to a chat, or into one forum topic with `--topic`. It prints the destination and the whole message body, then asks `y/N`. `--text -` reads the body from stdin, which is how a multi-line message gets in without fighting your shell.

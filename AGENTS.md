@@ -3,7 +3,7 @@
 Local Telethon CLI operating the user's own Telegram account: `discover` chat/topic IDs, `search`/export messages, `send` a message, `create` group/channel/topic, `clear-messages`, `bots` (BotFather settings), `doctor`. Public repo — contributor-facing; never commit phone numbers, API hashes, tokens, or exported chat data (CONTRIBUTING.md binds).
 
 ## Working here
-- Test: `.venv/bin/python -m pytest -q` → all pass (300 as of v3.3.0), no network. CI adds `compileall` + per-subcommand `--help` smoke; there is no lint step.
+- Test: `.venv/bin/python -m pytest -q` → all pass (334 as of v3.4.0), no network. CI adds `compileall` + per-subcommand `--help` smoke; there is no lint step.
 - Bare invocation is the human menu; agents pass a subcommand. Session + exports live in `~/.telegram-tools/`, outside the repo.
 - `skill/SKILL.md` (independently versioned) is the bundled agent skill's source of truth: a CLI-surface change updates it **in the same commit** — convention, nothing enforces it.
 - A user-visible fix also gets its CHANGELOG entry and version bump in the same change; unreleased fixes silently stacking on the last shipped version is the failure mode to avoid.

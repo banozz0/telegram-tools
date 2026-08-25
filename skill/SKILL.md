@@ -1,7 +1,7 @@
 ---
 name: telegram-tools
 description: "Use when you need the real numeric ID of a Telegram chat, channel, group or forum topic — 'what's the ID of that topic?', 'which chat is -100…?', 'where do I send this?' — when the user wants their own Telegram messages searched or exported to JSON/CSV, or when a message must be posted to a chat or topic the user has allowlisted."
-version: 1.2.0
+version: 1.3.0
 author: banozz0
 license: MIT
 platforms: [macos]
@@ -92,6 +92,7 @@ arrived.
 | "export it" | `telegram-tools search --chat <id> --format csv --output /path/out.csv` |
 | "post this to that topic" (allowlisted) | `telegram-tools send --chat <id> --topic <topic-id> --text "..." --yes` |
 | a long or multi-line message | pipe it: `... \| telegram-tools send --chat <id> --text - --yes` |
+| "send them that file" (allowlisted) | `telegram-tools send --chat <id> --file /path/to/file --text "caption" --yes` |
 | "make me a group with topics" (they asked) | `telegram-tools create group --title "..." --forum --yes` |
 | "add a topic to that group" (they asked) | `telegram-tools create topic --chat <id> --title "..." --yes` |
 | "is telegram-tools set up?" | `telegram-tools doctor` |
@@ -113,6 +114,13 @@ arrived.
 - **`send --topic` is the difference between delivered and lost.** Omitting it posts
   to the chat itself, not the thread. Confirm the topic ID with `discover` first;
   never guess one.
+- **`--file` is repeatable and needs a path that exists.** Several files arrive as
+  one album and `--text` becomes their caption; a file with no `--text` is a valid
+  send. Attaching sends the user's file to other people — the allowlist governs it
+  exactly as it governs text, and rule 2 applies unchanged.
+- **A held session is not a bug to retry.** "Another telegram-tools is already using
+  the login session" means the user has the menu open somewhere. Say so; a retry
+  loop will not free it.
 - **Check the tool's own help before using a flag** that is not in this table. The
   CLI's `--help` is current; this file is a snapshot.
 - **The menu is for the human at the keyboard.** `telegram-tools` with no arguments

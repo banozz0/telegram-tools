@@ -130,7 +130,7 @@ def _patch_send_resolution(monkeypatch, *, username=None, title="Hermes"):
 
 
 def send_args(**overrides):
-    return argparse.Namespace(**{"chat": "-100111", "topic": None, "text": "ship it", "yes": False, **overrides})
+    return argparse.Namespace(**{"chat": "-100111", "topic": None, "text": "ship it", "files": None, "yes": False, **overrides})
 
 
 def test_send_uses_the_shared_resolver_and_posts_into_the_topic(monkeypatch):
@@ -250,3 +250,48 @@ def test_create_declined_creates_nothing(monkeypatch):
 def test_create_without_a_kind_is_an_error():
     with pytest.raises(ValueError):
         asyncio.run(cli._run_create(FakeClient(), argparse.Namespace(command="create", create_kind=None, yes=False)))
+
+
+def test_send_refuses_when_neither_text_nor_file_is_given(monkeypatch):
+    _patch_send_resolution(monkeypatch)
+    client = SendingClient()
+
+    with pytest.raises(ValueError, match="--file"):
+        asyncio.run(cli._run_send(client, send_args(text=None), SimpleNamespace(send_allowlist=())))
+
+
+def test_send_refuses_a_missing_attachment_before_asking(monkeypatch):
+    _patch_send_resolution(monkeypatch)
+    client = SendingClient()
+
+    with pytest.raises(FileNotFoundError, match="nope.png"):
+        asyncio.run(
+            cli._run_send(client, send_args(files=["/tmp/definitely/nope.png"]), SimpleNamespace(send_allowlist=()))
+        )
+
+    assert client.sent == []
+
+
+def test_send_attaches_a_real_file(monkeypatch, tmp_path):
+    path = tmp_path / "shot.png"
+    path.write_bytes(b"png")
+    _patch_send_resolution(monkeypatch)
+    monkeypatch.setattr(cli, "confirm_send", lambda preview: True)
+
+    class FileClient(SendingClient):
+        def __init__(self):
+            super().__init__()
+            self.files_sent = []
+
+        async def send_file(self, entity, file, *, caption=None, reply_to=None):
+            self.files_sent.append({"file": file, "caption": caption, "reply_to": reply_to})
+            return SimpleNamespace(id=9101)
+
+    client = FileClient()
+    status = asyncio.run(
+        cli._run_send(client, send_args(text=None, files=[str(path)]), SimpleNamespace(send_allowlist=()))
+    )
+
+    assert status == 0
+    assert client.files_sent[0]["file"] == [str(path)]
+    assert client.files_sent[0]["caption"] is None

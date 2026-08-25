@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 
 from telegram_tools import prompts
-from telegram_tools.prompts import BACK, CLEAR, Extra
+from telegram_tools.prompts import BACK, CLEAR, Extra, ask_lines
 
 
 def reader(*answers):
@@ -252,3 +252,52 @@ def test_edit_field_still_shows_keep_change_clear_when_set():
 def test_after_action_returns_true_for_enter_and_false_for_zero():
     assert prompts.after_action(read=reader(""), write=lambda _: None) is True
     assert prompts.after_action(read=reader("0"), write=lambda _: None) is False
+
+
+def test_ask_lines_collects_until_a_lone_dot():
+    output = []
+    value = ask_lines("Message", read=reader("deploy is green", "all tests pass", "."), write=output.append)
+
+    assert value == "deploy is green\nall tests pass"
+
+
+def test_ask_lines_takes_a_single_line_too():
+    value = ask_lines("Message", read=reader("hi", "."), write=lambda _line: None)
+
+    assert value == "hi"
+
+
+def test_ask_lines_keeps_blank_lines_inside_the_body():
+    value = ask_lines("Message", read=reader("one", "", "three", "."), write=lambda _line: None)
+
+    assert value == "one\n\nthree"
+
+
+def test_ask_lines_cancels_when_nothing_was_typed():
+    assert ask_lines("Message", read=reader("."), write=lambda _line: None) is BACK
+
+
+def test_ask_lines_cancels_on_a_blank_first_line():
+    assert ask_lines("Message", read=reader(""), write=lambda _line: None) is BACK
+
+
+def test_ask_lines_says_how_to_finish_and_how_to_cancel():
+    output = []
+    ask_lines("Message", read=reader("hi", "."), write=output.append)
+
+    header = "\n".join(output)
+    assert "blank cancels" in header
+    assert "." in header
+
+
+def test_ask_lines_shows_the_current_value_in_the_header():
+    output = []
+    ask_lines("Message", read=reader("new", "."), write=output.append, current="old body")
+
+    assert "old body" in "\n".join(output)
+
+
+def test_ask_lines_trailing_blank_lines_are_dropped():
+    value = ask_lines("Message", read=reader("body", "", "", "."), write=lambda _line: None)
+
+    assert value == "body"

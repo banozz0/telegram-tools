@@ -9,7 +9,7 @@ Built on [Telethon](https://github.com/LonamiWebs/Telethon). Everything runs on 
 - **`discover`** — lists your chats, channels, and forum groups with their exact numeric IDs and every forum topic ID. The fastest way to answer "what is this chat's `-100…` ID and what are its topic IDs?"
 - **`search`** — searches messages by text, sender, date range, or topic, and prints a table or exports JSON/CSV.
 - **`clear-messages`** — deletes all messages inside selected forum topic(s) while preserving the topics and their IDs. Dry-run by default; deleting requires both `--execute` *and* typing `DELETE` at a prompt.
-- **`send`** — posts a message to a chat, or into one forum topic. Shows you the whole message and its destination, then asks `y/N`.
+- **`send`** — posts a message, a file, or both to a chat or into one forum topic. Shows you the whole message and its destination, then asks `y/N`.
 - **`create`** — makes a supergroup (optionally with topics already on), a broadcast channel, or a topic inside a forum group, and prints the new ID.
 - **`bots`** — lists the bots you own with their numeric IDs, and edits what @BotFather edits: display name, bio, description, commands, profile photo, and default admin rights.
 - **`doctor`** — checks your local setup without printing any secrets.
@@ -17,7 +17,7 @@ Built on [Telethon](https://github.com/LonamiWebs/Telethon). Everything runs on 
 ## What it doesn't do (on purpose)
 
 - No deleting forum topics, and no renaming them — `clear-messages` leaves topic IDs untouched.
-- No media downloads, and no attachments on `send` — text only.
+- No media downloads. `send` can attach files; nothing downloads them back.
 - No automation loops. The `bots` command edits bot *settings*; it never runs a bot.
 - No changing a bot's `@username`, creating or deleting bots, or reading/revoking bot tokens — those stay with @BotFather.
 - No cloud anything — credentials and session files stay in `~/.telegram-tools/`.
@@ -105,6 +105,9 @@ telegram-tools send --chat -1001234567890 --topic 141 --text "deploy is green"
 # Multi-line body, straight from a file or a pipe
 cat notes.txt | telegram-tools send --chat -1001234567890 --text -
 
+# Attach files (repeatable; several go as one album, --text is the caption)
+telegram-tools send --chat -1001234567890 --file shot.png --file notes.pdf --text "the numbers"
+
 # Make a group with topics already switched on, then a topic in it
 telegram-tools create group --title "Agency" --forum
 telegram-tools create topic --chat -1001234567890 --title "Deploys"
@@ -162,6 +165,9 @@ topics, bots, and admin rights come from live pick-lists rather than prompts ask
 you to type an ID. Bot fields show their current value and offer keep / change /
 clear. After every job it returns to the menu.
 
+The message box takes several lines — end it with a `.` on its own line — so pasting
+a multi-line message works instead of feeding its later lines to the menu as answers.
+
 The safety gates are the same as the flags', not looser: clearing topic messages
 dry-runs first and still asks you to type `DELETE`, sending shows the whole message
 and asks `y/N`, and bot edits still print a diff and ask before writing. The menu has
@@ -173,7 +179,7 @@ no equivalent of `--yes` at all. With no terminal attached it prints this help i
 | --- | --- |
 | `discover`, `search`, `doctor` | No — read-only |
 | `create` | No — makes new things, changes nothing existing, after a `y/N` unless you pass `--yes` |
-| `send` | Outward-facing — posts publicly as you, after showing the whole message and asking `y/N`. `--yes` skips the prompt only for destinations in `TELEGRAM_SEND_ALLOWLIST` |
+| `send` | Outward-facing — posts publicly as you (text, files, or both), after showing the whole message and asking `y/N`. `--yes` skips the prompt only for destinations in `TELEGRAM_SEND_ALLOWLIST` |
 | `bots` | No — changes settings on bots you own, after a diff and a `y/N` unless you pass `--yes`; reversible if you still have the old values, but `--remove-photo` and `--clear-commands` discard data Telegram will not hand back |
 | `clear-messages` | Yes — but only with `--execute` **and** a typed `DELETE`, only messages, never topics |
 

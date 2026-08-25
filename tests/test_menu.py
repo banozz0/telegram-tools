@@ -737,7 +737,7 @@ def test_a_picker_error_prints_and_returns_to_the_menu():
 def test_send_stages_a_topic_and_a_message():
     # 3 = send, 1 = forum groups, 1 = Hermes, 1 = Topic row, 1 = Deploys,
     # 2 = Message, 3 = Send it
-    answers = ["3", "1", "1", "1", "1", "2", "ship it", "3", "", "0"]
+    answers = ["3", "1", "1", "1", "1", "2", "ship it", ".", "4", "", "0"]
     code, calls, output = run_menu(answers)
 
     assert code == 0
@@ -752,7 +752,7 @@ def test_send_stages_a_topic_and_a_message():
 
 
 def test_send_without_choosing_a_topic_goes_to_the_chat_itself():
-    answers = ["3", "1", "1", "2", "hi", "3", "", "0"]
+    answers = ["3", "1", "1", "2", "hi", ".", "4", "", "0"]
     code, calls, output = run_menu(answers)
 
     assert code == 0
@@ -762,7 +762,7 @@ def test_send_without_choosing_a_topic_goes_to_the_chat_itself():
 
 def test_send_topic_picker_offers_the_chat_itself():
     # Topic > row 3 is the extra after the two topics
-    answers = ["3", "1", "1", "1", "3", "2", "hi", "3", "", "0"]
+    answers = ["3", "1", "1", "1", "3", "2", "hi", ".", "4", "", "0"]
     code, calls, output = run_menu(answers)
 
     assert code == 0
@@ -772,7 +772,7 @@ def test_send_topic_picker_offers_the_chat_itself():
 
 def test_send_hides_the_topic_row_for_a_non_forum_chat():
     # 3 = send, 2 = Channels, 1 = Alerts, 1 = Message, 2 = Send it
-    answers = ["3", "2", "1", "1", "hi", "2", "", "0"]
+    answers = ["3", "2", "1", "1", "hi", ".", "3", "", "0"]
     code, calls, output = run_menu(answers)
 
     assert code == 0
@@ -782,7 +782,7 @@ def test_send_hides_the_topic_row_for_a_non_forum_chat():
 
 def test_send_says_a_chat_with_no_topics_goes_to_the_chat():
     session = FakeSession(topics=[])
-    answers = ["3", "1", "1", "1", "2", "hi", "3", "", "0"]
+    answers = ["3", "1", "1", "1", "2", "hi", ".", "4", "", "0"]
     code, calls, output = run_menu(answers, session=session)
 
     assert code == 0
@@ -791,18 +791,18 @@ def test_send_says_a_chat_with_no_topics_goes_to_the_chat():
 
 
 def test_send_refuses_to_run_without_a_message():
-    # 3 = Send it with nothing typed, then 0 back out of each screen to the root.
-    answers = ["3", "1", "1", "3", "0", "0", "0"]
+    # 4 = Send it with nothing staged, then 0 back out of each screen to the root.
+    answers = ["3", "1", "1", "4", "0", "0", "0"]
     code, calls, output = run_menu(answers)
 
     assert code == 0
     assert calls == []
-    assert "Type a message first." in screens(output)
+    assert "Type a message or attach a file first." in screens(output)
 
 
 def test_send_shows_a_long_message_on_one_line():
     body = "line one\nline two that keeps going well past the width of the row"
-    answers = ["3", "1", "1", "2", body, "3", "", "0"]
+    answers = ["3", "1", "1", "2", body, ".", "4", "", "0"]
     code, calls, output = run_menu(answers)
 
     assert code == 0
@@ -870,50 +870,96 @@ def test_create_cancelling_the_title_returns_to_the_kind_list():
     assert screens(output).count("1. Group") == 2
 
 
-def run_menu_recording_prompts(answers, *, session=None):
-    """Like run_menu, but keeps the prompt strings read() was called with.
-
-    Prompts never reach `write`, so a screen-text assertion cannot see them.
-    """
-    values = iter(answers)
-    prompts = []
-    calls, runner = recorder()
-
-    def read(prompt):
-        prompts.append(prompt)
-        return next(values)
-
-    code = asyncio.run(
-        menu.run_menu(read=read, write=lambda _line: None, session=session or FakeSession(), runner=runner)
-    )
-    return code, calls, prompts
-
-
-def test_send_reoffers_the_staged_message_in_the_prompt():
-    # 2 = Message twice: the second prompt must carry what was already typed, so
-    # keeping it does not mean typing it again.
-    answers = ["3", "1", "1", "2", "hiiiii", "2", "", "3", "", "0"]
-    code, calls, prompts = run_menu_recording_prompts(answers)
+def test_send_reoffers_the_staged_message_in_the_header():
+    # 2 = Message twice: the second header must carry what was already typed, so
+    # keeping it does not mean typing it again. A blank first line keeps it.
+    answers = ["3", "1", "1", "2", "hiiiii", ".", "2", "", "4", "", "0"]
+    code, calls, output = run_menu(answers)
 
     assert code == 0
-    # Blank at the second prompt kept the staged body rather than clearing it.
     assert calls[0].text == "hiiiii"
-    assert "Message [hiiiii] (blank cancels): " in prompts
+    assert "Message [hiiiii] (blank cancels, . on its own line ends it):" in screens(output)
 
 
-def test_send_message_prompt_is_bare_before_anything_is_typed():
-    answers = ["3", "1", "1", "2", "hi", "3", "", "0"]
-    _code, _calls, prompts = run_menu_recording_prompts(answers)
+def test_send_message_header_is_bare_before_anything_is_typed():
+    answers = ["3", "1", "1", "2", "hi", ".", "4", "", "0"]
+    _code, _calls, output = run_menu(answers)
 
-    assert "Message (blank cancels): " in prompts
+    assert "Message (blank cancels, . on its own line ends it):" in screens(output)
 
 
-def test_send_shows_a_long_staged_message_cut_in_the_prompt():
+def test_send_shows_a_long_staged_message_cut_in_the_header():
     body = "line one\nline two that keeps going well past the width of the row"
-    answers = ["3", "1", "1", "2", body, "2", "", "3", "", "0"]
-    _code, calls, prompts = run_menu_recording_prompts(answers)
+    answers = ["3", "1", "1", "2", body, ".", "2", "", "4", "", "0"]
+    _code, calls, output = run_menu(answers)
 
     assert calls[0].text == body
-    reoffer = [prompt for prompt in prompts if prompt.startswith("Message [")][0]
+    reoffer = [line for line in output if line.startswith("Message [")][0]
     assert "line one / line two" in reoffer
     assert "\n" not in reoffer
+
+
+def test_send_takes_a_multi_line_message_from_the_menu():
+    answers = ["3", "1", "1", "2", "deploy is green", "all 300 tests pass", ".", "4", "", "0"]
+    code, calls, _output = run_menu(answers)
+
+    assert code == 0
+    assert calls[0].text == "deploy is green\nall 300 tests pass"
+
+
+def test_send_pasted_lines_become_body_not_menu_answers():
+    # The hazard this replaced: line two used to be read as the next menu choice.
+    answers = ["3", "1", "1", "2", "one", "2", "3", ".", "4", "", "0"]
+    code, calls, _output = run_menu(answers)
+
+    assert code == 0
+    assert calls[0].text == "one\n2\n3"
+
+
+def test_send_attaches_a_file_from_the_menu():
+    # 3 = Files row, then a path; 4 = Send it
+    answers = ["3", "1", "1", "3", "/tmp/shot.png", "4", "", "0"]
+    code, calls, output = run_menu(answers)
+
+    assert code == 0
+    assert calls[0].files == ["/tmp/shot.png"]
+    # A file alone is a valid send: no message body required.
+    assert calls[0].text is None
+    assert "[shot.png]" in screens(output)
+
+
+def test_send_attaches_several_files():
+    # Files row a second time offers Add another / Remove them all
+    answers = ["3", "1", "1", "3", "/tmp/a.png", "3", "1", "/tmp/b.pdf", "4", "", "0"]
+    code, calls, output = run_menu(answers)
+
+    assert code == 0
+    assert calls[0].files == ["/tmp/a.png", "/tmp/b.pdf"]
+    assert "[a.png +1 more]" in screens(output)
+
+
+def test_send_can_clear_the_attachments():
+    answers = ["3", "1", "1", "3", "/tmp/a.png", "3", "2", "2", "hi", ".", "4", "", "0"]
+    code, calls, output = run_menu(answers)
+
+    assert code == 0
+    assert calls[0].files is None
+    assert calls[0].text == "hi"
+    assert "[(none)]" in screens(output)
+
+
+def test_send_a_caption_with_a_file_sends_both():
+    answers = ["3", "1", "1", "2", "look at this", ".", "3", "/tmp/a.png", "4", "", "0"]
+    code, calls, _output = run_menu(answers)
+
+    assert code == 0
+    assert calls[0].text == "look at this"
+    assert calls[0].files == ["/tmp/a.png"]
+
+
+def test_send_cancelling_the_file_path_stages_nothing():
+    answers = ["3", "1", "1", "3", "", "2", "hi", ".", "4", "", "0"]
+    code, calls, _output = run_menu(answers)
+
+    assert code == 0
+    assert calls[0].files is None

@@ -28,3 +28,8 @@ Checked on 2026-08-25 for the `send` and `create` commands (Telethon 1.44.0):
 - `channels.CreateChannelRequest` covers both a supergroup (`megagroup=True`) and a broadcast channel (`broadcast=True`), and takes a `forum` flag. Passing `forum=True` at creation avoids a second `channels.ToggleForumRequest` round trip, and with it the window where a group exists but the toggle failed.
 - `messages.CreateForumTopicRequest` lives under `messages`, not `channels` (unlike `ToggleForumRequest`). Its `random_id` is auto-generated when omitted.
 - Neither create request returns the created object directly. `CreateChannelRequest` returns `Updates` whose `chats[0]` is the new channel — `telethon.utils.get_peer_id` converts it to the marked `-100…` form. `CreateForumTopicRequest` returns `Updates` carrying only the topic's service message; that message's `id` **is** the new topic id.
+
+Checked on 2026-08-25 for `send --file` and the session lock (Telethon 1.44.0):
+
+- `TelegramClient.send_file(entity, file, caption=..., reply_to=...)` accepts a list for `file` and groups it into a single album; passing a one-item list is the same as passing the item, so the caller never has to special-case one attachment. It returns a list of messages for a list and a single message otherwise.
+- The SQLite session raises a bare `sqlite3.OperationalError("database is locked")` when a second client opens a session file another already holds — no Telethon-specific exception wraps it. Matching on that wording is the only way to tell "someone else has it" from a corrupt database, so the check is narrow on purpose and any other `OperationalError` still propagates.

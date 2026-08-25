@@ -172,6 +172,34 @@ def ask_text(label: str, *, read, write, current: str | None = None) -> Any:
     return value or BACK
 
 
+END_OF_MESSAGE = "."
+
+
+def ask_lines(label: str, *, read, write, current: str | None = None) -> Any:
+    """Free text over several lines, ended by a lone `.`. Blank first line cancels.
+
+    One-line `input()` is not merely limited here, it is wrong: pasting a
+    three-line message feeds lines two and three to whatever asks next, which in
+    a menu means they are answered as menu choices. Reading to a sentinel
+    consumes the whole paste as the body it is.
+    """
+    suffix = f" [{current}]" if current else ""
+    write(f"{label}{suffix} (blank cancels, {END_OF_MESSAGE} on its own line ends it):")
+
+    lines: list[str] = []
+    while True:
+        line = read("> ")
+        if line.strip() == END_OF_MESSAGE:
+            break
+        if not lines and not line.strip():
+            return BACK
+        lines.append(line.rstrip("\n"))
+
+    while lines and not lines[-1].strip():
+        lines.pop()
+    return "\n".join(lines) if lines else BACK
+
+
 def ask_int(label: str, *, read, write, current: int | None = None) -> Any:
     """A positive whole number. Blank cancels."""
     suffix = f" [{current}]" if current else ""

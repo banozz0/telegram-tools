@@ -249,11 +249,24 @@ def test_send_parses_a_chat_topic_and_text():
     assert args.yes is False
 
 
-def test_send_requires_a_chat_and_text():
+def test_send_requires_a_chat():
     with pytest.raises(SystemExit):
         parse_args("send", "--text", "hi")
-    with pytest.raises(SystemExit):
-        parse_args("send", "--chat", "@group")
+
+
+def test_send_text_is_optional_at_parse_time_because_a_file_can_carry_it():
+    # Whether there is anything to send is decided in _run_send, where --file is
+    # visible too; argparse cannot express "one of these two".
+    args = parse_args("send", "--chat", "@group")
+
+    assert args.text is None
+    assert args.files is None
+
+
+def test_send_collects_repeated_file_flags():
+    args = parse_args("send", "--chat", "@group", "--file", "a.png", "--file", "b.pdf")
+
+    assert args.files == ["a.png", "b.pdf"]
 
 
 def test_create_without_a_kind_parses_but_names_none():

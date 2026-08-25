@@ -155,3 +155,90 @@ def test_the_refusal_names_the_topic_scoped_destination():
         require_send_allowed((), chat_id=-100111, username=None, topic_id=141)
 
     assert "-100111:141" in str(excinfo.value)
+
+
+# --- attachments ------------------------------------------------------------
+
+
+class SendingFileClient(FakeClient):
+    def __init__(self, message_ids=(9101, 9102)):
+        super().__init__()
+        self.message_ids = list(message_ids)
+        self.files_sent = []
+
+    async def send_file(self, entity, file, *, caption=None, reply_to=None):
+        self.files_sent.append({"entity": entity, "file": file, "caption": caption, "reply_to": reply_to})
+        sent = [SimpleNamespace(id=mid) for mid in self.message_ids[: len(file) if isinstance(file, list) else 1]]
+        return sent if isinstance(file, list) else sent[0]
+
+
+def test_files_go_through_send_file_with_the_text_as_a_caption():
+    client = SendingFileClient()
+
+    result = asyncio.run(
+        send_message(client, "PEER", TARGET, "look at this", files=["/tmp/a.png"], confirm=lambda: True)
+    )
+
+    assert client.sent == []
+    assert client.files_sent == [
+        {"entity": "PEER", "file": ["/tmp/a.png"], "caption": "look at this", "reply_to": 141}
+    ]
+    assert result.message_id == 9101
+    assert result.to_dict()["files"] == 1
+
+
+def test_several_files_are_sent_together():
+    client = SendingFileClient()
+
+    result = asyncio.run(
+        send_message(client, "PEER", WHOLE_CHAT, None, files=["/tmp/a.png", "/tmp/b.pdf"], confirm=lambda: True)
+    )
+
+    assert client.files_sent[0]["file"] == ["/tmp/a.png", "/tmp/b.pdf"]
+    assert client.files_sent[0]["caption"] is None
+    assert result.to_dict()["files"] == 2
+    assert result.message_id == 9101
+
+
+def test_declining_sends_no_files():
+    client = SendingFileClient()
+
+    result = asyncio.run(send_message(client, "PEER", TARGET, "hi", files=["/tmp/a.png"], confirm=lambda: False))
+
+    assert client.files_sent == []
+    assert result.cancelled is True
+
+
+def test_a_text_only_send_reports_no_files():
+    client = FakeClient()
+
+    result = asyncio.run(send_message(client, "PEER", WHOLE_CHAT, "hi", confirm=lambda: True))
+
+    assert result.to_dict()["files"] == 0
+
+
+def test_preview_lists_each_attachment_with_its_size(tmp_path):
+    small = tmp_path / "notes.txt"
+    small.write_bytes(b"x" * 2048)
+    big = tmp_path / "shot.png"
+    big.write_bytes(b"y" * 3_000_000)
+
+    preview = format_send_preview(TARGET, "caption", sender="Sven", files=[str(small), str(big)])
+
+    assert "notes.txt" in preview
+    assert "shot.png" in preview
+    assert "2.0 kB" in preview
+    assert "2.9 MB" in preview
+
+
+def test_preview_says_when_a_file_has_no_caption(tmp_path):
+    path = tmp_path / "a.png"
+    path.write_bytes(b"z")
+
+    preview = format_send_preview(WHOLE_CHAT, None, sender="Sven", files=[str(path)])
+
+    assert "no caption" in preview.lower()
+
+
+def test_preview_without_files_has_no_files_row():
+    assert "Files" not in format_send_preview(TARGET, "hi", sender="Sven")

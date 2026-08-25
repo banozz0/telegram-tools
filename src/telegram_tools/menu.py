@@ -2,23 +2,24 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from telethon.errors import ChannelForumMissingError, RPCError
 
 from telegram_tools import cli
 from telegram_tools.bots import IMPLICIT_OTHER_RIGHT, format_bot_profile, format_edit_heading, get_bot_profile, list_bots, resolve_bot, right_names
-from telegram_tools.client import create_client
+from telegram_tools.client import SessionInUseError, create_client, start_client
 from telegram_tools.config import ConfigError, load_config, lookup_bot_token
 from telegram_tools.discovery import list_dialog_choices
-from telegram_tools.prompts import BACK, CLEAR, Extra, after_action, ask_int, ask_text, choose, edit_field, pick, pick_many
+from telegram_tools.prompts import BACK, CLEAR, Extra, after_action, ask_int, ask_lines, ask_text, choose, edit_field, pick, pick_many
 from telegram_tools.resolver import resolve_chat
 from telegram_tools.topics import get_forum_topics
 
 # What the menu turns into a printed line instead of an exit. EntityResolutionError
 # is a ValueError and PermissionError is an OSError, so both are already covered;
 # anything not named here is a bug and should still be loud.
-MENU_ERRORS = (ConfigError, ValueError, OSError, RPCError)
+MENU_ERRORS = (ConfigError, SessionInUseError, ValueError, OSError, RPCError)
 
 ROOT_TITLE = "telegram-tools"
 ROOT_ITEMS = (
@@ -54,9 +55,7 @@ class MenuSession:
 
     async def client(self):
         if self._client is None:
-            client = create_client(self.config)
-            await client.start()
-            self._client = client
+            self._client = await start_client(create_client(self.config))
         return self._client
 
     async def chats(self):
@@ -406,6 +405,33 @@ def _preview_line(text: str | None, width: int = 40) -> str:
     return flat if len(flat) <= width else flat[: width - 1] + "…"
 
 
+def _files_label(files: list[str]) -> str:
+    if not files:
+        return "(none)"
+    first = Path(files[0]).name
+    return first if len(files) == 1 else f"{first} +{len(files) - 1} more"
+
+
+def _ask_files(files: list[str], *, read, write) -> Any:
+    """The new attachment list, or BACK to leave it alone."""
+    if not files:
+        path = ask_text("File path", read=read, write=write)
+        return BACK if path is BACK else [path]
+
+    choice = choose(
+        ["Add another file", "Remove them all"],
+        title=f"Files ({len(files)})",
+        read=read,
+        write=write,
+    )
+    if choice is BACK:
+        return BACK
+    if choice == 1:
+        return []
+    path = ask_text("File path", read=read, write=write)
+    return BACK if path is BACK else [*files, path]
+
+
 async def _ask_send_topic(picked, *, session, read, write) -> Any:
     """A topic to post into, CLEAR for the chat itself, or BACK to cancel.
 
@@ -438,6 +464,7 @@ async def _flow_send(*, session, runner, read, write) -> bool:
 
         topic_info = None
         text: str | None = None
+        files: list[str] = []
         while True:
             rows: list[tuple[str, str]] = []
             if picked.is_forum is not False:
@@ -446,6 +473,7 @@ async def _flow_send(*, session, runner, read, write) -> bool:
             rows.extend(
                 [
                     ("text", f"Message   [{_preview_line(text)}]"),
+                    ("files", f"Files     [{_files_label(files)}]"),
                     ("send", "Send it (shows the whole message, then asks y/N)"),
                 ]
             )
@@ -469,16 +497,22 @@ async def _flow_send(*, session, runner, read, write) -> bool:
                 continue
 
             if key == "text":
-                # The staged body is shown flattened and cut: `ask_text` puts it in the
-                # prompt itself, where a real multi-line message would wreck the line.
-                # It is display only — blank still cancels and keeps what is there.
-                answer = ask_text("Message", read=read, write=write, current=_preview_line(text) if text else None)
+                # The staged body is shown flattened and cut: it goes in the prompt
+                # header, where a real multi-line message would wreck the line. It is
+                # display only — cancelling keeps what is already there.
+                answer = ask_lines("Message", read=read, write=write, current=_preview_line(text) if text else None)
                 if answer is not BACK:
                     text = answer
                 continue
 
-            if not text:
-                write("Type a message first.")
+            if key == "files":
+                answer = _ask_files(files, read=read, write=write)
+                if answer is not BACK:
+                    files = answer
+                continue
+
+            if not text and not files:
+                write("Type a message or attach a file first.")
                 continue
 
             args = _namespace(
@@ -486,6 +520,7 @@ async def _flow_send(*, session, runner, read, write) -> bool:
                 chat=picked.reference,
                 topic=None if topic_info is None else topic_info.id,
                 text=text,
+                files=files or None,
                 # The menu is never the shorter path past a gate: the preview and
                 # its y/N run exactly as they do for the flags.
                 yes=False,
