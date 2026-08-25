@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import json
 import sys
+from functools import partial
 from pathlib import Path
 from typing import Sequence
 
@@ -24,12 +25,14 @@ from telegram_tools.bots import (
 )
 from telegram_tools.client import create_client
 from telegram_tools.config import ConfigError, bot_id_from_token, load_config, lookup_bot_token, resolve_bot_token
+from telegram_tools.create import confirm_create, create_channel, create_group, create_topic, format_create_preview
 from telegram_tools.delete import confirm_clear_topic_messages, delete_topic_messages
 from telegram_tools.discovery import discover_chats, filter_chats, format_discovery_table
 from telegram_tools.doctor import run_doctor
 from telegram_tools.exporters import write_records
 from telegram_tools.resolver import EntityResolutionError, resolve_chat
 from telegram_tools.search import format_message_records, search_messages
+from telegram_tools.send import SendTarget, confirm_send, format_send_preview, require_send_allowed, send_message
 from telegram_tools.topics import get_forum_topics, get_forum_topics_by_ids
 
 
@@ -84,6 +87,35 @@ def build_parser() -> argparse.ArgumentParser:
     bots_parser.add_argument("--group-rights", help=f"Default admin rights for groups, comma-separated, or none (needs a bot token). Valid names: {valid_rights}")
     bots_parser.add_argument("--channel-rights", help=f"Default admin rights for channels, comma-separated, or none (needs a bot token). Valid names: {valid_rights}")
     bots_parser.add_argument("--yes", action="store_true", help="Skip the confirmation prompt")
+
+    send_parser = subparsers.add_parser("send", help="Send a message to a chat or forum topic")
+    send_parser.add_argument("--chat", required=True, help="Chat/channel username, link, or ID")
+    send_parser.add_argument("--topic", type=int, help="Topic ID to post into; omit for the chat itself")
+    send_parser.add_argument("--text", required=True, help="Message text, or - to read it from stdin")
+    send_parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="Skip the preview and send; the destination must be in TELEGRAM_SEND_ALLOWLIST",
+    )
+
+    create_parser = subparsers.add_parser("create", help="Create a group, channel, or forum topic")
+    create_kinds = create_parser.add_subparsers(dest="create_kind")
+
+    create_group_parser = create_kinds.add_parser("group", help="Create a supergroup, optionally with topics")
+    create_group_parser.add_argument("--title", required=True, help="Group name")
+    create_group_parser.add_argument("--about", help="Group description")
+    create_group_parser.add_argument("--forum", action="store_true", help="Enable topics on the new group")
+
+    create_channel_parser = create_kinds.add_parser("channel", help="Create a broadcast channel")
+    create_channel_parser.add_argument("--title", required=True, help="Channel name")
+    create_channel_parser.add_argument("--about", help="Channel description")
+
+    create_topic_parser = create_kinds.add_parser("topic", help="Create a topic in a forum group")
+    create_topic_parser.add_argument("--chat", required=True, help="Forum group username, link, or ID")
+    create_topic_parser.add_argument("--title", required=True, help="Topic name")
+
+    for kind_parser in (create_group_parser, create_channel_parser, create_topic_parser):
+        kind_parser.add_argument("--yes", action="store_true", help="Skip the confirmation prompt")
 
     subparsers.add_parser("doctor", help="Check local setup without printing secrets")
 
@@ -152,6 +184,91 @@ async def _run_search(client, args) -> int:
     else:
         print(format_message_records(records))
     return 0
+
+
+def _entity_title(entity, fallback: str) -> str:
+    """A chat's name for the preview: a title, a person's name, or what was typed."""
+    title = getattr(entity, "title", None)
+    if title:
+        return str(title)
+    parts = [getattr(entity, "first_name", None), getattr(entity, "last_name", None)]
+    name = " ".join(part for part in parts if part)
+    return name or str(getattr(entity, "username", None) or fallback)
+
+
+def _message_text(raw: str) -> str:
+    # `-` is how a multi-line body gets in: quoting newlines through a shell flag is
+    # the kind of thing that silently sends half a message.
+    text = sys.stdin.read() if raw == "-" else raw
+    text = text.strip()
+    if not text:
+        raise ValueError("Nothing to send: the message text is empty.")
+    return text
+
+
+async def _run_send(client, args, config) -> int:
+    text = _message_text(args.text)
+    resolved = await resolve_chat(client, args.chat)
+    peer = resolved.input_entity
+
+    topic = None
+    if args.topic is not None:
+        topics = await get_forum_topics_by_ids(client, peer, [args.topic])
+        topic = topics[0] if topics else None
+
+    target = SendTarget(chat_id=resolved.id, chat_title=_entity_title(resolved.entity, args.chat), topic=topic)
+
+    confirm = None
+    if args.yes:
+        require_send_allowed(
+            config.send_allowlist,
+            chat_id=resolved.id,
+            username=getattr(resolved.entity, "username", None),
+            topic_id=args.topic,
+        )
+    else:
+        preview = format_send_preview(target, text, sender=_entity_title(await client.get_me(), "you"))
+        confirm = partial(confirm_send, preview)
+
+    result = await send_message(client, peer, target, text, confirm=confirm)
+    print(json.dumps(result.to_dict(), indent=2))
+    return 1 if result.cancelled else 0
+
+
+async def _run_create(client, args) -> int:
+    if args.create_kind is None:
+        raise ValueError("create needs one of: group, channel, topic.")
+
+    chat_title = None
+    peer = None
+    chat_id = None
+    if args.create_kind == "topic":
+        resolved = await resolve_chat(client, args.chat)
+        peer = resolved.input_entity
+        chat_id = resolved.id
+        chat_title = _entity_title(resolved.entity, args.chat)
+
+    forum = bool(getattr(args, "forum", False))
+    confirm = None
+    if not args.yes:
+        preview = format_create_preview(
+            args.create_kind,
+            args.title,
+            about=getattr(args, "about", None),
+            forum=forum,
+            chat_title=chat_title,
+        )
+        confirm = partial(confirm_create, preview)
+
+    if args.create_kind == "group":
+        created = await create_group(client, args.title, about=args.about, forum=forum, confirm=confirm)
+    elif args.create_kind == "channel":
+        created = await create_channel(client, args.title, about=args.about, confirm=confirm)
+    else:
+        created = await create_topic(client, peer, chat_id=chat_id, title=args.title, confirm=confirm)
+
+    print(json.dumps(created.to_dict(), indent=2))
+    return 1 if created.cancelled else 0
 
 
 EDIT_FLAGS = ("name", "bio", "description", "commands", "clear_commands", "photo", "remove_photo", "group_rights", "channel_rights")
@@ -294,6 +411,10 @@ async def run(args, *, client=None, config=None) -> int:
             return await _run_search(client, args)
         if args.command == "bots":
             return await _run_bots(client, args, config)
+        if args.command == "send":
+            return await _run_send(client, args, config)
+        if args.command == "create":
+            return await _run_create(client, args)
         raise ValueError(f"Unknown command: {args.command}")
     finally:
         if owns_client:

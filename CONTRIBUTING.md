@@ -35,6 +35,8 @@ telegram-tools --help
 telegram-tools discover --help
 telegram-tools clear-messages --help
 telegram-tools search --help
+telegram-tools send --help
+telegram-tools create --help
 telegram-tools bots --help
 telegram-tools doctor --help
 ```
@@ -44,6 +46,18 @@ If you have local Telegram config and session storage, also run:
 ```bash
 telegram-tools doctor
 ```
+
+## Send Changes
+
+`send` posts publicly as the person running it, so its gates are load-bearing:
+
+- Without `--yes`, the whole message and its resolved destination are printed and a
+  `y/N` is required.
+- `--yes` skips that prompt and therefore requires the destination to appear in
+  `TELEGRAM_SEND_ALLOWLIST`. An unset allowlist refuses every `--yes` send.
+- The menu never passes `--yes`.
+
+Keep all three covered by tests.
 
 ## Clear-Message Changes
 

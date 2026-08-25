@@ -21,3 +21,10 @@ Checked on 2026-08-13 for the `bots` command (Telethon 1.44.0):
 - `photos.deletePhotos` needs an `InputPhoto` with an access hash, which `UserProfilePhoto` does not carry; fetch the photo through `photos.getUserPhotos` and convert it with `telethon.utils.get_input_photo`.
 - `bots.exportBotToken` exists and would let an owner read a bot's token. This project never calls it: it sits next to a `revoke` flag, and reading credentials is outside what the tool does.
 - Changing a bot's `@username`, creating a bot, and deleting a bot have no user-facing API and remain @BotFather-only.
+
+Checked on 2026-08-25 for the `send` and `create` commands (Telethon 1.44.0):
+
+- `TelegramClient.send_message(entity, message, reply_to=...)` posts into a forum topic by passing the topic id as `reply_to` — a topic *is* its root message thread, so there is no separate topic parameter.
+- `channels.CreateChannelRequest` covers both a supergroup (`megagroup=True`) and a broadcast channel (`broadcast=True`), and takes a `forum` flag. Passing `forum=True` at creation avoids a second `channels.ToggleForumRequest` round trip, and with it the window where a group exists but the toggle failed.
+- `messages.CreateForumTopicRequest` lives under `messages`, not `channels` (unlike `ToggleForumRequest`). Its `random_id` is auto-generated when omitted.
+- Neither create request returns the created object directly. `CreateChannelRequest` returns `Updates` whose `chats[0]` is the new channel — `telethon.utils.get_peer_id` converts it to the marked `-100…` form. `CreateForumTopicRequest` returns `Updates` carrying only the topic's service message; that message's `id` **is** the new topic id.

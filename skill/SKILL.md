@@ -1,13 +1,13 @@
 ---
 name: telegram-tools
-description: "Use when you need the real numeric ID of a Telegram chat, channel, group or forum topic — 'what's the ID of that topic?', 'which chat is -100…?', 'where do I send this?' — or when the user wants their own Telegram messages searched or exported to JSON/CSV."
-version: 1.1.0
+description: "Use when you need the real numeric ID of a Telegram chat, channel, group or forum topic — 'what's the ID of that topic?', 'which chat is -100…?', 'where do I send this?' — when the user wants their own Telegram messages searched or exported to JSON/CSV, or when a message must be posted to a chat or topic the user has allowlisted."
+version: 1.2.0
 author: banozz0
 license: MIT
 platforms: [macos]
 metadata:
   hermes:
-    tags: [telegram, chat-ids, topic-ids, forum, search, export, cli]
+    tags: [telegram, chat-ids, topic-ids, forum, search, export, send, cli]
 ---
 
 # telegram-tools
@@ -40,8 +40,9 @@ their own message history searched, filtered or exported. It is the fastest way 
 settle "which thread does this go to?", which is the single most common cause of a
 message being delivered into a topic nobody reads.
 
-It does not send messages, run bots, download media, or create and delete topics.
-Anything that *posts* to Telegram belongs to a bot token and a different tool.
+It can also **send** a message and **create** a group, channel or topic. Those write
+to Telegram as the user, so rules 2 and 3 below govern them — read those before
+running either. It still does not run bots, download media, or delete topics.
 
 ## Hard rules
 
@@ -49,18 +50,31 @@ Anything that *posts* to Telegram belongs to a bot token and a different tool.
 it is their user account, the same one their friends message. Reads are read-only and
 fine. Anything that writes is theirs to run, not yours.
 
-**2. Never run `clear-messages`.** It deletes real messages out of their forum topics
+**2. `send` only goes where the user already said it may.** `send --yes` posts with
+no human in the loop, and the CLI refuses it for any destination not in the user's
+`TELEGRAM_SEND_ALLOWLIST`. That refusal is the whole safety model — do not work
+around it by dropping `--yes` (which would block on a `y/N` prompt no agent can
+answer), by editing the user's `.env`, or by picking a different chat. A destination
+that is not allowlisted is a destination the user has not approved: draft the message,
+show it to them, and let them send it or add the entry.
+
+**3. Never run `create` unprompted.** New groups, channels and topics are real,
+visible objects in the user's Telegram — other people see them appear. Create one only
+when the user asked for that specific thing in this conversation, and never invent a
+title. `create` outside an explicit ask is theirs to run, not yours.
+
+**4. Never run `clear-messages`.** It deletes real messages out of their forum topics
 and Telegram does not undo that. Dry-run is its default and the destructive path
 needs both `--execute` and a typed confirmation, so you will not trip it by accident
 — but do not run it at all, in any form, even to preview. If the answer is "those
 messages should go", say so and let the user run it.
 
-**3. Never print the credentials.** `TELEGRAM_API_ID`, `TELEGRAM_API_HASH` and the
+**5. Never print the credentials.** `TELEGRAM_API_ID`, `TELEGRAM_API_HASH` and the
 `.session` file are secrets. Point at where they live; never read them out, copy
 them, or paste them into a reply. `doctor` exists precisely so setup can be checked
 without any of that reaching the screen.
 
-**4. If the CLI errors, say so.** A login prompt, a flood-wait, an expired session —
+**6. If the CLI errors, say so.** A login prompt, a flood-wait, an expired session —
 that *is* the answer. Never guess a chat ID. A made-up `-100…` sends the user's next
 alert into the void, and they will not find out until something they needed never
 arrived.
@@ -76,6 +90,10 @@ arrived.
 | "find where X was discussed" | `telegram-tools search --chat <id> --keyword "X"` |
 | "everything in that topic since Monday" | `telegram-tools search --chat <id> --topic <topic-id> --since 2026-08-10` |
 | "export it" | `telegram-tools search --chat <id> --format csv --output /path/out.csv` |
+| "post this to that topic" (allowlisted) | `telegram-tools send --chat <id> --topic <topic-id> --text "..." --yes` |
+| a long or multi-line message | pipe it: `... \| telegram-tools send --chat <id> --text - --yes` |
+| "make me a group with topics" (they asked) | `telegram-tools create group --title "..." --forum --yes` |
+| "add a topic to that group" (they asked) | `telegram-tools create topic --chat <id> --title "..." --yes` |
 | "is telegram-tools set up?" | `telegram-tools doctor` |
 
 - **`discover` defaults to admin/managed chats only** — the ones the user runs. Add
@@ -87,6 +105,14 @@ arrived.
   Narrow with `--topic`, `--keyword`, `--from-user` (a username, an ID, or `me`),
   `--since` / `--until` (ISO dates), and `--limit`. With no `--output` it prints a
   readable table, which is usually what you want to summarise from.
+- **`send` needs `--yes` from an agent session, and `--yes` needs the allowlist.**
+  Without `--yes` it prints the message and waits for a `y/N` nobody is there to
+  type. With `--yes` it refuses anything outside `TELEGRAM_SEND_ALLOWLIST` and the
+  error names the destination to add — relay that to the user verbatim rather than
+  retrying. `doctor` says how many destinations are listed, never which.
+- **`send --topic` is the difference between delivered and lost.** Omitting it posts
+  to the chat itself, not the thread. Confirm the topic ID with `discover` first;
+  never guess one.
 - **Check the tool's own help before using a flag** that is not in this table. The
   CLI's `--help` is current; this file is a snapshot.
 - **The menu is for the human at the keyboard.** `telegram-tools` with no arguments
@@ -95,7 +121,10 @@ arrived.
 
 ## Never run these
 
-- **`clear-messages`** — irreversible deletion of the user's messages. Rule 2 above.
+- **`clear-messages`** — irreversible deletion of the user's messages. Rule 4 above.
+- **`create` on your own initiative** — rule 3. If a new group or topic looks like
+  the right answer, propose it and let the user say yes; do not create it and report
+  back.
 - **`bots`** — it edits a live bot's name, bio, description, commands, profile photo
   and default admin rights. Those are the user's public-facing bots; the edits are
   theirs to make. Check `--help` for whether the installed build has it at all.

@@ -17,11 +17,25 @@ def config_dir(home: Path | None = None) -> Path:
 
 
 @dataclass(frozen=True)
+class SendDestination:
+    """One entry of TELEGRAM_SEND_ALLOWLIST: a chat, optionally one topic in it.
+
+    `chat` is the reference as written, lowercased and stripped of a leading `@`,
+    so it matches either a numeric id or a username. `topic` None means the whole
+    chat, every topic included.
+    """
+
+    chat: str
+    topic: int | None = None
+
+
+@dataclass(frozen=True)
 class Config:
     api_id: int
     api_hash: str = field(repr=False)
     session_path: Path
     bot_tokens: dict[str, str] = field(default_factory=dict, repr=False)
+    send_allowlist: tuple[SendDestination, ...] = ()
 
 
 def bot_id_from_token(token: str) -> int | None:
@@ -45,6 +59,31 @@ def parse_bot_tokens(raw: str | None) -> dict[str, str]:
             raise ConfigError(f"TELEGRAM_BOT_TOKENS entry {position} must look like nickname:token.")
         tokens[nickname] = token
     return tokens
+
+
+def parse_send_allowlist(raw: str | None) -> tuple[SendDestination, ...]:
+    """Parse `chat[:topic],chat[:topic]` into the destinations `--yes` may send to.
+
+    Unset means an empty tuple, which refuses every unattended send. That is the
+    intended default: sending posts as the account's real owner, so each
+    destination is opted into by hand rather than inherited from a blank setting.
+    """
+    entries: list[SendDestination] = []
+    for position, entry in enumerate((raw or "").split(","), start=1):
+        entry = entry.strip()
+        if not entry:
+            continue
+
+        chat, separator, topic = entry.partition(":")
+        chat = chat.strip().lstrip("@").lower()
+        topic = topic.strip()
+        if not chat or (separator and not topic.isdecimal()):
+            raise ConfigError(
+                f"TELEGRAM_SEND_ALLOWLIST entry {position} ({entry!r}) must be a chat id or @username, "
+                "optionally followed by :topic-id."
+            )
+        entries.append(SendDestination(chat=chat, topic=int(topic) if separator else None))
+    return tuple(entries)
 
 
 def _token_index(tokens: Mapping[str, str]) -> dict[str, str]:
@@ -122,4 +161,5 @@ def load_config(
         api_hash=api_hash,
         session_path=session_path,
         bot_tokens=parse_bot_tokens(env.get("TELEGRAM_BOT_TOKENS")),
+        send_allowlist=parse_send_allowlist(env.get("TELEGRAM_SEND_ALLOWLIST")),
     )

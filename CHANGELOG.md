@@ -4,6 +4,15 @@ All notable changes to this project will be documented here.
 
 This project follows a practical changelog style: user-visible changes, safety changes, and release notes belong here; active task tracking belongs outside the repo.
 
+## 3.3.0 - 2026-08-25
+
+- Add `send`: post a message to a chat, or into one forum topic with `--topic`. It prints the destination and the whole message body, then asks `y/N`. `--text -` reads the body from stdin, which is how a multi-line message gets in without fighting your shell.
+- Add `create`: `create group` (a supergroup, with `--forum` to switch topics on in the same call), `create channel` (a broadcast channel), and `create topic` (a topic inside a forum group). Each asks before it acts and prints the new ID, so a new chat can be piped straight into `send`.
+- Both are in the menu, at 3 and 4. The other entries moved down: clearing topic messages is now 5, bots 6, check setup 7. The menu has no `--yes` equivalent — every send it makes shows the message and asks.
+- New optional `TELEGRAM_SEND_ALLOWLIST` (`chat[:topic]`, comma separated). It gates one thing only: `send --yes`, the unattended path where nobody sees the preview. Unset means every `--yes` send is refused; `send` without `--yes` is unaffected. `doctor` reports how many destinations are listed and never which.
+- The menu's staged message shows in the prompt when you go back to it (`Message [hiiiii]`), so keeping it does not mean typing it again. Long or multi-line bodies are flattened and cut for that one line only.
+- No attachments on `send` — text only for now.
+
 ## 3.2.0 - 2026-08-15
 
 - `telegram-tools` with no arguments now opens a menu you walk forward and back through instead of a single screen that exits after one action: numbered lists all the way down, `0` always backs out one screen at a time — inside a picker or a flow's own screen alike — and a return to the menu after every job.

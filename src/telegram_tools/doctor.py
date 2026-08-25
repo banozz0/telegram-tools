@@ -8,7 +8,7 @@ from typing import Mapping
 
 from dotenv import dotenv_values
 
-from telegram_tools.config import ConfigError, config_dir, parse_bot_tokens
+from telegram_tools.config import ConfigError, config_dir, parse_bot_tokens, parse_send_allowlist
 
 
 MIN_PYTHON = (3, 11)
@@ -69,6 +69,17 @@ def check_bot_tokens(root: Path, env: Mapping[str, str], home: Path | None = Non
     return DoctorCheck("OK", f"{len(tokens)} bot token(s) loaded")
 
 
+def check_send_allowlist(root: Path, env: Mapping[str, str], home: Path | None = None) -> DoctorCheck:
+    try:
+        allowlist = parse_send_allowlist(_effective_env(root, env, home).get("TELEGRAM_SEND_ALLOWLIST"))
+    except ConfigError:
+        return DoctorCheck("FAIL", "TELEGRAM_SEND_ALLOWLIST is malformed (expected chat[:topic], comma separated)")
+    if not allowlist:
+        # Counts only, never the destinations: same discipline as the token check.
+        return DoctorCheck("WARN", "No send destinations allowlisted (send --yes is refused; send without it still asks)")
+    return DoctorCheck("OK", f"{len(allowlist)} send destination(s) allowlisted")
+
+
 def run_doctor(
     *,
     root: Path | str | None = None,
@@ -83,6 +94,7 @@ def run_doctor(
         check_config_presence(root, env, home),
         check_session_storage(env, home),
         check_bot_tokens(root, env, home),
+        check_send_allowlist(root, env, home),
     ]
 
     for check in checks:

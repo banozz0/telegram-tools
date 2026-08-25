@@ -76,3 +76,40 @@ def test_doctor_uses_explicit_empty_env_instead_of_process_env(tmp_path, capsys,
     assert result == 1
     assert "FAIL Telegram config is missing" in output
     assert "process-env-secret" not in output
+
+
+def test_doctor_warns_when_no_send_destination_is_allowlisted(tmp_path, capsys):
+    run_doctor(root=tmp_path, env={"TELEGRAM_API_ID": "1", "TELEGRAM_API_HASH": "h"}, version_info=(3, 11, 0), home=tmp_path / "home")
+
+    output = capsys.readouterr().out
+    assert "WARN No send destinations allowlisted" in output
+
+
+def test_doctor_counts_allowlisted_destinations_without_naming_them(tmp_path, capsys):
+    run_doctor(
+        root=tmp_path,
+        env={
+            "TELEGRAM_API_ID": "1",
+            "TELEGRAM_API_HASH": "h",
+            "TELEGRAM_SEND_ALLOWLIST": "-100111:141,@alerts",
+        },
+        version_info=(3, 11, 0),
+        home=tmp_path / "home",
+    )
+
+    output = capsys.readouterr().out
+    assert "OK   2 send destination(s) allowlisted" in output
+    assert "-100111" not in output
+    assert "alerts" not in output
+
+
+def test_doctor_fails_on_a_malformed_allowlist(tmp_path, capsys):
+    result = run_doctor(
+        root=tmp_path,
+        env={"TELEGRAM_API_ID": "1", "TELEGRAM_API_HASH": "h", "TELEGRAM_SEND_ALLOWLIST": "-100111:nope"},
+        version_info=(3, 11, 0),
+        home=tmp_path / "home",
+    )
+
+    assert result == 1
+    assert "FAIL TELEGRAM_SEND_ALLOWLIST is malformed" in capsys.readouterr().out

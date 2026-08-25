@@ -1,6 +1,6 @@
 # telegram-tools
 
-A local CLI for operating your own Telegram chats: find the real IDs of your groups, channels, and forum topics, search and export messages, and clear all messages out of forum topics without destroying the topics themselves.
+A local CLI for operating your own Telegram chats: find the real IDs of your groups, channels, and forum topics, search and export messages, send a message into a chat or topic, create groups/channels/topics, and clear all messages out of forum topics without destroying the topics themselves.
 
 Built on [Telethon](https://github.com/LonamiWebs/Telethon). Everything runs on your machine with your own Telegram API credentials — no server, no third party, nothing leaves your computer except the Telegram API calls you asked for.
 
@@ -9,14 +9,16 @@ Built on [Telethon](https://github.com/LonamiWebs/Telethon). Everything runs on 
 - **`discover`** — lists your chats, channels, and forum groups with their exact numeric IDs and every forum topic ID. The fastest way to answer "what is this chat's `-100…` ID and what are its topic IDs?"
 - **`search`** — searches messages by text, sender, date range, or topic, and prints a table or exports JSON/CSV.
 - **`clear-messages`** — deletes all messages inside selected forum topic(s) while preserving the topics and their IDs. Dry-run by default; deleting requires both `--execute` *and* typing `DELETE` at a prompt.
+- **`send`** — posts a message to a chat, or into one forum topic. Shows you the whole message and its destination, then asks `y/N`.
+- **`create`** — makes a supergroup (optionally with topics already on), a broadcast channel, or a topic inside a forum group, and prints the new ID.
 - **`bots`** — lists the bots you own with their numeric IDs, and edits what @BotFather edits: display name, bio, description, commands, profile photo, and default admin rights.
 - **`doctor`** — checks your local setup without printing any secrets.
 
 ## What it doesn't do (on purpose)
 
-- No deleting or creating forum topics — topic IDs never change.
-- No media downloads.
-- No sending messages and no automation loops. The `bots` command edits bot *settings*; it never runs a bot.
+- No deleting forum topics, and no renaming them — `clear-messages` leaves topic IDs untouched.
+- No media downloads, and no attachments on `send` — text only.
+- No automation loops. The `bots` command edits bot *settings*; it never runs a bot.
 - No changing a bot's `@username`, creating or deleting bots, or reading/revoking bot tokens — those stay with @BotFather.
 - No cloud anything — credentials and session files stay in `~/.telegram-tools/`.
 
@@ -64,6 +66,21 @@ TELEGRAM_BOT_TOKENS=mybot:12345:AAExampleToken,alerts:67890:BBExampleToken
 
 Nicknames are yours to choose and can be used as `--bot mybot`. The tool only ever reads this variable — it never writes a token anywhere, and never prints one.
 
+### Optional: the send allowlist
+
+`send` asks you to confirm every message. `--yes` skips that prompt, and because a
+skipped prompt means nobody saw where the message was going, it only works for
+destinations you have named in advance:
+
+```bash
+# in ~/.telegram-tools/.env
+TELEGRAM_SEND_ALLOWLIST=-1001234567890:141,-1009876543210,@myalerts
+```
+
+Each entry is a chat ID or `@username`, optionally `:topic-id` to allow just one topic
+in it. Unset means every `--yes` send is refused — `send` without `--yes` still works
+and still asks. `doctor` reports how many destinations are listed, never which.
+
 ## 30 seconds of usage
 
 ```bash
@@ -81,6 +98,16 @@ telegram-tools search --chat @mygroup --topic 141 --output topic-141.json
 telegram-tools clear-messages --chat @mygroup --topic 141
 # Actually delete: needs --execute AND typing DELETE at the prompt
 telegram-tools clear-messages --chat @mygroup --topic 141 --execute
+
+# Send a message into a topic (shows it, then asks y/N)
+telegram-tools send --chat -1001234567890 --topic 141 --text "deploy is green"
+
+# Multi-line body, straight from a file or a pipe
+cat notes.txt | telegram-tools send --chat -1001234567890 --text -
+
+# Make a group with topics already switched on, then a topic in it
+telegram-tools create group --title "Agency" --forum
+telegram-tools create topic --chat -1001234567890 --title "Deploys"
 
 # Which bots do I own, and what are their IDs?
 telegram-tools bots
@@ -121,9 +148,11 @@ telegram-tools
 --------------------------------------------
 1. Chats & topics (find IDs)
 2. Search / export messages
-3. Clear topic messages
-4. My bots
-5. Check setup
+3. Send a message
+4. Create a group, channel, or topic
+5. Clear topic messages
+6. My bots
+7. Check setup
 0. Exit
 ```
 
@@ -134,14 +163,17 @@ you to type an ID. Bot fields show their current value and offer keep / change /
 clear. After every job it returns to the menu.
 
 The safety gates are the same as the flags', not looser: clearing topic messages
-dry-runs first and still asks you to type `DELETE`, and bot edits still print a diff
-and ask before writing. With no terminal attached it prints this help instead.
+dry-runs first and still asks you to type `DELETE`, sending shows the whole message
+and asks `y/N`, and bot edits still print a diff and ask before writing. The menu has
+no equivalent of `--yes` at all. With no terminal attached it prints this help instead.
 
 ## Safety model
 
 | Command | Destructive? |
 | --- | --- |
 | `discover`, `search`, `doctor` | No — read-only |
+| `create` | No — makes new things, changes nothing existing, after a `y/N` unless you pass `--yes` |
+| `send` | Outward-facing — posts publicly as you, after showing the whole message and asking `y/N`. `--yes` skips the prompt only for destinations in `TELEGRAM_SEND_ALLOWLIST` |
 | `bots` | No — changes settings on bots you own, after a diff and a `y/N` unless you pass `--yes`; reversible if you still have the old values, but `--remove-photo` and `--clear-commands` discard data Telegram will not hand back |
 | `clear-messages` | Yes — but only with `--execute` **and** a typed `DELETE`, only messages, never topics |
 
@@ -151,7 +183,7 @@ and ask before writing. With no terminal attached it prints this help instead.
 
 ## Status
 
-Stable for its four jobs; used regularly by its author. This is a solo project whose code was written by AI agents under review — issues are welcome, fixes are best-effort, and there is no support promise.
+Stable for its six jobs; used regularly by its author. This is a solo project whose code was written by AI agents under review — issues are welcome, fixes are best-effort, and there is no support promise.
 
 ## License
 

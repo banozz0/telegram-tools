@@ -237,3 +237,62 @@ def test_main_exits_130_when_input_ends(monkeypatch):
     monkeypatch.setattr(cli.asyncio, "run", lambda _coro: (_ for _ in ()).throw(EOFError()))
 
     assert cli.main([]) == 130
+
+
+def test_send_parses_a_chat_topic_and_text():
+    args = parse_args("send", "--chat", "@group", "--topic", "141", "--text", "ship it")
+
+    assert args.command == "send"
+    assert args.chat == "@group"
+    assert args.topic == 141
+    assert args.text == "ship it"
+    assert args.yes is False
+
+
+def test_send_requires_a_chat_and_text():
+    with pytest.raises(SystemExit):
+        parse_args("send", "--text", "hi")
+    with pytest.raises(SystemExit):
+        parse_args("send", "--chat", "@group")
+
+
+def test_create_without_a_kind_parses_but_names_none():
+    args = parse_args("create")
+
+    assert args.command == "create"
+    assert args.create_kind is None
+
+
+def test_create_group_defaults_to_a_plain_supergroup():
+    args = parse_args("create", "group", "--title", "Hermes")
+
+    assert args.create_kind == "group"
+    assert args.title == "Hermes"
+    assert args.about is None
+    assert args.forum is False
+    assert args.yes is False
+
+
+def test_create_group_accepts_forum():
+    args = parse_args("create", "group", "--title", "Hermes", "--about", "agency", "--forum")
+
+    assert args.forum is True
+    assert args.about == "agency"
+
+
+def test_create_channel_parses_a_title():
+    args = parse_args("create", "channel", "--title", "Alerts")
+
+    assert args.create_kind == "channel"
+    assert args.title == "Alerts"
+
+
+def test_create_topic_requires_a_chat_and_title():
+    args = parse_args("create", "topic", "--chat", "@group", "--title", "Deploys")
+
+    assert args.create_kind == "topic"
+    assert args.chat == "@group"
+    assert args.title == "Deploys"
+
+    with pytest.raises(SystemExit):
+        parse_args("create", "topic", "--title", "Deploys")

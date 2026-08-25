@@ -24,6 +24,8 @@ ROOT_TITLE = "telegram-tools"
 ROOT_ITEMS = (
     "Chats & topics (find IDs)",
     "Search / export messages",
+    "Send a message",
+    "Create a group, channel, or topic",
     "Clear topic messages",
     "My bots",
     "Check setup",
@@ -393,6 +395,146 @@ async def _flow_search(*, session, runner, read, write) -> bool:
             staged[key] = None if answer is CLEAR else answer
 
 
+_NO_TOPIC = "The chat itself (no topic)"
+
+
+def _preview_line(text: str | None, width: int = 40) -> str:
+    """One line of a staged message: newlines shown, long bodies cut."""
+    if not text:
+        return "(nothing yet)"
+    flat = text.replace("\n", " / ")
+    return flat if len(flat) <= width else flat[: width - 1] + "…"
+
+
+async def _ask_send_topic(picked, *, session, read, write) -> Any:
+    """A topic to post into, CLEAR for the chat itself, or BACK to cancel.
+
+    A chat with no topics is an answer here, not the failure it is for `clear`:
+    the message simply goes to the chat.
+    """
+    topics = await session.topics(picked.reference)
+    if not topics:
+        write("That chat has no topics - the message goes to the chat itself.")
+        return CLEAR
+
+    chosen = pick(
+        topics,
+        title=f"Topics in {picked.title}",
+        label=lambda topic: f"{topic.id:<6}  {topic.title}",
+        read=read,
+        write=write,
+        extras=(Extra("chat", _NO_TOPIC),),
+    )
+    if chosen is BACK:
+        return BACK
+    return CLEAR if chosen == "chat" else chosen
+
+
+async def _flow_send(*, session, runner, read, write) -> bool:
+    while True:
+        picked = await _pick_chat(session=session, read=read, write=write)
+        if picked is BACK:
+            return True
+
+        topic_info = None
+        text: str | None = None
+        while True:
+            rows: list[tuple[str, str]] = []
+            if picked.is_forum is not False:
+                topic_shown = "(the chat itself)" if topic_info is None else f"{topic_info.id} {topic_info.title}"
+                rows.append(("topic", f"Topic     [{topic_shown}]"))
+            rows.extend(
+                [
+                    ("text", f"Message   [{_preview_line(text)}]"),
+                    ("send", "Send it (shows the whole message, then asks y/N)"),
+                ]
+            )
+
+            choice = choose(
+                [label for _key, label in rows],
+                title=f"Send to {picked.title}",
+                read=read,
+                write=write,
+                back_label="Back (discards)",
+            )
+            if choice is BACK:
+                break
+            key = rows[choice][0]
+
+            if key == "topic":
+                answer = await _ask_send_topic(picked, session=session, read=read, write=write)
+                if answer is BACK:
+                    continue
+                topic_info = None if answer is CLEAR else answer
+                continue
+
+            if key == "text":
+                # The staged body is shown flattened and cut: `ask_text` puts it in the
+                # prompt itself, where a real multi-line message would wreck the line.
+                # It is display only — blank still cancels and keeps what is there.
+                answer = ask_text("Message", read=read, write=write, current=_preview_line(text) if text else None)
+                if answer is not BACK:
+                    text = answer
+                continue
+
+            if not text:
+                write("Type a message first.")
+                continue
+
+            args = _namespace(
+                command="send",
+                chat=picked.reference,
+                topic=None if topic_info is None else topic_info.id,
+                text=text,
+                # The menu is never the shorter path past a gate: the preview and
+                # its y/N run exactly as they do for the flags.
+                yes=False,
+            )
+            return await _act(args, session=session, runner=runner, read=read, write=write)
+
+
+CREATE_KINDS = (
+    ("group", False, "Group"),
+    ("group", True, "Forum group (a group with topics)"),
+    ("channel", False, "Broadcast channel"),
+    ("topic", False, "Topic in a forum group"),
+)
+
+
+async def _flow_create(*, session, runner, read, write) -> bool:
+    while True:
+        choice = choose([label for _kind, _forum, label in CREATE_KINDS], title="Create", read=read, write=write)
+        if choice is BACK:
+            return True
+        kind, forum, label = CREATE_KINDS[choice]
+
+        if kind == "topic":
+            picked = await _pick_chat(session=session, read=read, write=write, forums_only=True)
+            if picked is BACK:
+                continue
+            title = ask_text("Topic name", read=read, write=write)
+            if title is BACK:
+                continue
+            args = _namespace(command="create", create_kind="topic", chat=picked.reference, title=title, yes=False)
+            return await _act(args, session=session, runner=runner, read=read, write=write)
+
+        title = ask_text(f"{label} name", read=read, write=write)
+        if title is BACK:
+            continue
+        # Blank cancels out of ask_text, which for an optional description is the
+        # same answer as "leave it empty".
+        about = ask_text("Description (blank for none)", read=read, write=write)
+        args = _namespace(
+            command="create",
+            create_kind=kind,
+            title=title,
+            about=None if about is BACK else about,
+            forum=forum,
+            yes=False,
+        )
+        return await _act(args, session=session, runner=runner, read=read, write=write)
+
+
 async def _flow_clear(*, session, runner, read, write) -> bool:
     while True:
         picked = await _pick_chat(session=session, read=read, write=write, forums_only=True)
@@ -694,7 +836,7 @@ async def run_menu(*, read=input, write=print, session=None, runner=None) -> int
     """
     session = session if session is not None else MenuSession()
     runner = runner if runner is not None else cli.run
-    flows = (_flow_discover, _flow_search, _flow_clear, _flow_bots, _flow_doctor)
+    flows = (_flow_discover, _flow_search, _flow_send, _flow_create, _flow_clear, _flow_bots, _flow_doctor)
 
     try:
         while True:
