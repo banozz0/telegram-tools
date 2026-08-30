@@ -4,6 +4,10 @@ All notable changes to this project will be documented here.
 
 This project follows a practical changelog style: user-visible changes, safety changes, and release notes belong here; active task tracking belongs outside the repo.
 
+## 3.5.0 - 2026-08-31
+
+- `discover --admin-only` is gone. It was declared but never read: admin-only has been the default since `--all` arrived, so the flag did nothing and was hidden from `--help`. Nothing that used to work stops working; a script still passing it now gets argparse's usual unknown-flag error, which is the honest answer. The bundled skill never documented it, so `skill/SKILL.md` is unchanged.
+
 ## 3.4.1 - 2026-08-25
 
 - `search`'s printed table marks messages that carry a photo or file with `[media]`. It always recorded `has_media` in the JSON and CSV exports and only the table dropped it, so a photo sent with no caption printed as a blank row and read as "nothing was sent" — which is exactly how it was found, minutes after `send --file` shipped. No export format changed.

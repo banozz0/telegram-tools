@@ -175,7 +175,7 @@ def test_run_uses_a_passed_client_and_leaves_it_connected(monkeypatch):
     monkeypatch.setattr(cli, "create_client", fail_create_client)
 
     client = SimpleNamespace(disconnect=lambda: (_ for _ in ()).throw(AssertionError("must not disconnect")))
-    args = SimpleNamespace(command="discover", json_output=None, all_chats=False, admin_only=True)
+    args = SimpleNamespace(command="discover", json_output=None, all_chats=False)
 
     assert asyncio.run(cli.run(args, client=client, config=SimpleNamespace(bot_tokens={}))) == 0
     assert seen["client"] is client
@@ -199,7 +199,7 @@ def test_run_without_a_client_creates_and_disconnects_one(monkeypatch):
     monkeypatch.setattr(cli, "create_client", lambda _config: FakeClient())
     monkeypatch.setattr(cli, "_run_discover", fake_discover)
 
-    args = SimpleNamespace(command="discover", json_output=None, all_chats=False, admin_only=True)
+    args = SimpleNamespace(command="discover", json_output=None, all_chats=False)
 
     assert asyncio.run(cli.run(args)) == 0
     assert events == ["start", "discover", "disconnect"]

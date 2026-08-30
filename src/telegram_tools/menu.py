@@ -242,7 +242,7 @@ async def _flow_discover(*, session, runner, read, write) -> bool:
                 json_output = path
 
             all_chats = scope == 1
-            args = _namespace(command="discover", json_output=json_output, all_chats=all_chats, admin_only=not all_chats)
+            args = _namespace(command="discover", json_output=json_output, all_chats=all_chats)
             return await _act(args, session=session, runner=runner, read=read, write=write)
 
 

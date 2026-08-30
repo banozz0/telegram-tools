@@ -50,7 +50,6 @@ def build_parser() -> argparse.ArgumentParser:
     discover = subparsers.add_parser("discover", help="List dialogs and forum topics")
     discover.add_argument("--json", dest="json_output", help="Write discovery output to this JSON file")
     discover.add_argument("--all", dest="all_chats", action="store_true", help="Show every chat instead of admin/managed chats only")
-    discover.add_argument("--admin-only", action="store_true", help=argparse.SUPPRESS)
 
     clear_messages = subparsers.add_parser("clear-messages", help="Clear messages from forum topic(s), preserving topics and topic IDs")
     clear_messages.add_argument("--chat", required=True, help="Chat/channel username, link, or ID")

@@ -137,7 +137,7 @@ def test_doctor_runs_without_a_client_and_returns_to_the_menu():
     assert calls[0][2] is None
 
 
-def test_discover_builds_the_admin_only_namespace_and_loops():
+def test_discover_builds_the_managed_chats_namespace_and_loops():
     # 1 = chats & topics, 1 = chats I manage, 1 = print here, Enter = menu, 0 = exit
     code, calls, _output = run_menu(["1", "1", "1", "", "0"])
 
@@ -145,7 +145,7 @@ def test_discover_builds_the_admin_only_namespace_and_loops():
     assert len(calls) == 1
     assert calls[0].command == "discover"
     assert calls[0].all_chats is False
-    assert calls[0].admin_only is True
+    assert not hasattr(calls[0], "admin_only")
     assert calls[0].json_output is None
 
 
@@ -154,7 +154,6 @@ def test_discover_all_chats_to_a_json_file():
 
     assert code == 0
     assert calls[0].all_chats is True
-    assert calls[0].admin_only is False
     assert calls[0].json_output == "/tmp/out.json"
 
 
