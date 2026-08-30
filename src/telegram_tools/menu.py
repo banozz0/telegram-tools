@@ -259,45 +259,34 @@ async def _pick_chat(*, session, read, write, forums_only: bool = False, trail: 
         return picked
 
 
-DISCOVER_SCOPES = ("Chats I manage", "Every chat")
-
-
 async def _flow_discover(*, session, runner, read, write) -> bool:
+    # Two required answers with good defaults: a straight run of questions, not
+    # a form. Sven's try-it on 2026-08-31 found the form version read as broken
+    # -- he picked the scope and waited for the list.
     trail = crumb(MAIN, "Chats & topics")
-    all_chats = False
-    json_output: str | None = None
     while True:
-        rows = [
-            ("scope", f"Which chats    [{DISCOVER_SCOPES[all_chats]}]"),
-            ("where", f"Write to       [{json_output or '(print it here)'}]"),
-            ("run", "Run it"),
-        ]
-        choice = choose([label for _key, label in rows], title=trail, read=read, write=write)
-        if choice is BACK:
+        scope = choose(["Chats I manage", "Every chat"], title=trail, read=read, write=write)
+        if scope is BACK:
             return True
-        key = rows[choice][0]
 
-        if key == "scope":
-            answer = choose(list(DISCOVER_SCOPES), title=crumb(trail, "Which chats"), read=read, write=write)
-            if answer is not BACK:
-                all_chats = answer == 1
-            continue
+        while True:
+            where = choose(["Print it here", "Write a JSON file"], title=crumb(trail, "Where should it go?"), read=read, write=write)
+            if where is BACK:
+                break
 
-        if key == "where":
-            answer = choose(["Print it here", "Write a JSON file"], title=crumb(trail, "Write to"), read=read, write=write)
-            if answer is BACK:
-                continue
-            if answer == 0:
-                json_output = None
-                continue
-            path = ask_text("JSON file path", read=read, write=write, current=json_output)
-            if path is not BACK:
+            json_output = None
+            if where == 1:
+                path = ask_text("JSON file path", read=read, write=write)
+                if path is BACK:
+                    # Cancelling the path steps back one screen, same as every
+                    # other cancel -- not all the way out to the root menu.
+                    continue
                 json_output = path
-            continue
 
-        args = _namespace(command="discover", json_output=json_output, all_chats=all_chats)
-        result = await _act(args, session=session, runner=runner, read=read, write=write, trail=trail)
-        if result is not STAY:
+            args = _namespace(command="discover", json_output=json_output, all_chats=scope == 1)
+            # No Tweak row: with two questions there is no form to go back to,
+            # and Main menu then 1 is the same two keystrokes.
+            result = await _act(args, session=session, runner=runner, read=read, write=write, trail=trail, rows=(RUN_AGAIN,))
             return result is not EXIT
 
 
@@ -599,7 +588,7 @@ async def _flow_send(*, session, runner, read, write) -> bool:
 
 
 # Running a create again would make a second, identical object, so the row after
-# one is "another": the form as filled, change the name, go.
+# one is "another", back at the kind list: a new thing gets a new name anyway.
 CREATE_ANOTHER = (STAY, "Create another")
 
 CREATE_KINDS = (
@@ -612,83 +601,42 @@ CREATE_KINDS = (
 
 async def _flow_create(*, session, runner, read, write) -> bool:
     trail = crumb(MAIN, "Create")
-    kind_labels = [label for _kind, _forum, label in CREATE_KINDS]
     while True:
-        choice = choose(kind_labels, title=trail, read=read, write=write)
+        choice = choose([label for _kind, _forum, label in CREATE_KINDS], title=trail, read=read, write=write)
         if choice is BACK:
             return True
-        kind_index = choice
+        kind, forum, label = CREATE_KINDS[choice]
 
-        # A topic needs its forum group before anything else on the form makes sense.
-        picked = None
-        if CREATE_KINDS[kind_index][0] == "topic":
-            picked = await _pick_chat(session=session, read=read, write=write, forums_only=True, trail=crumb(trail, "Forum group"))
+        if kind == "topic":
+            picked = await _pick_chat(session=session, read=read, write=write, forums_only=True, trail=crumb(trail, "Topic"))
             if picked is BACK:
                 continue
-
-        title: str | None = None
-        about: str | None = None
-        while True:
-            kind, forum, kind_label = CREATE_KINDS[kind_index]
-            rows = [("kind", f"Kind           [{kind_label}]")]
-            if kind == "topic":
-                rows.append(("chat", f"Forum group    [{picked.title if picked is not None else '(pick one)'}]"))
-            rows.append(("title", f"Name           [{_shown(title, '(not set)')}]"))
-            if kind != "topic":
-                rows.append(("about", f"Description    [{_shown(about, '(none)')}]"))
-            rows.append(("create", "Create it (asks first)"))
-
-            choice = choose([label for _key, label in rows], title=crumb(trail, kind_label), read=read, write=write, back_label="Back (discards)")
-            if choice is BACK:
-                if (title or about) and not _confirm_discard(trail, title="Not created yet", said="Discarded the form.", read=read, write=write):
-                    continue
-                break
-            key = rows[choice][0]
-
-            if key == "kind":
-                answer = choose(kind_labels, title=crumb(trail, "Kind"), read=read, write=write)
-                if answer is not BACK:
-                    kind_index = answer
+            title = ask_text("Topic name", read=read, write=write)
+            if title is BACK:
                 continue
-            if key == "chat":
-                answer = await _pick_chat(session=session, read=read, write=write, forums_only=True, trail=crumb(trail, "Forum group"))
-                if answer is not BACK:
-                    picked = answer
-                continue
-            if key == "title":
-                answer = ask_text("Name", read=read, write=write, current=title)
-                if answer is not BACK:
-                    title = answer
-                continue
-            if key == "about":
-                answer = edit_field(
-                    crumb(trail, "Description"),
-                    _shown(about, "(none)"),
-                    read=read,
-                    write=write,
-                    ask=lambda: ask_text("Description", read=read, write=write),
-                    allow_clear=True,
-                    is_set=about is not None,
-                )
-                if answer is CLEAR:
-                    about = None
-                elif answer is not BACK:
-                    about = answer
-                continue
-
-            if not title:
-                write("Give it a name first.")
-                continue
-            if kind == "topic" and picked is None:
-                write("Pick the forum group first.")
-                continue
-            if kind == "topic":
-                args = _namespace(command="create", create_kind="topic", chat=picked.reference, title=title, yes=False)
-            else:
-                args = _namespace(command="create", create_kind=kind, title=title, about=about, forum=forum, yes=False)
-            result = await _act(args, session=session, runner=runner, read=read, write=write, trail=crumb(trail, kind_label), rows=(CREATE_ANOTHER,))
+            args = _namespace(command="create", create_kind="topic", chat=picked.reference, title=title, yes=False)
+            result = await _act(args, session=session, runner=runner, read=read, write=write, trail=crumb(trail, "Topic"), rows=(CREATE_ANOTHER,))
             if result is not STAY:
                 return result is not EXIT
+            continue
+
+        title = ask_text(f"{label} name", read=read, write=write)
+        if title is BACK:
+            continue
+        # Blank cancels out of ask_text, which for an optional description is the
+        # same answer as "leave it empty".
+        about = ask_text("Description (blank for none)", read=read, write=write)
+        args = _namespace(
+            command="create",
+            create_kind=kind,
+            title=title,
+            about=None if about is BACK else about,
+            forum=forum,
+            yes=False,
+        )
+        result = await _act(args, session=session, runner=runner, read=read, write=write, trail=crumb(trail, label), rows=(CREATE_ANOTHER,))
+        if result is not STAY:
+            return result is not EXIT
 
 
 _ALL_TOPICS_ROW = Extra("every", "All topics (no need to tick)")
