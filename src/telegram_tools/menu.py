@@ -12,7 +12,7 @@ from telegram_tools.bots import IMPLICIT_OTHER_RIGHT, format_bot_profile, format
 from telegram_tools.client import SessionInUseError, create_client, start_client
 from telegram_tools.config import ConfigError, load_config, lookup_bot_token
 from telegram_tools.discovery import list_dialog_choices
-from telegram_tools.prompts import BACK, CLEAR, Extra, after_action, ask_int, ask_lines, ask_text, choose, edit_field, pick, pick_many
+from telegram_tools.prompts import BACK, CLEAR, EXIT, MENU, Extra, after_action, after_run, ask_int, ask_lines, ask_text, choose, edit_field, pick, pick_many
 from telegram_tools.resolver import resolve_chat
 from telegram_tools.topics import get_forum_topics
 
@@ -93,22 +93,43 @@ def _namespace(**kwargs) -> argparse.Namespace:
     return argparse.Namespace(**kwargs)
 
 
-async def _call(args, *, session, runner, write) -> bool:
-    """Run one action. False means it errored and the message is already printed."""
+async def _call(args, *, session, runner, write) -> int | None:
+    """Run one action. Returns its exit code, or None when it errored and the
+    message is already printed."""
     try:
         client = await session.client() if session is not None else None
         config = session.config if session is not None else None
-        await runner(args, client=client, config=config)
-        return True
+        return await runner(args, client=client, config=config)
     except MENU_ERRORS as exc:
         write(f"error: {exc}")
-        return False
+        return None
 
 
-async def _act(args, *, session, runner, read, write) -> bool:
-    """Run one action, then ask. False means exit the menu."""
-    await _call(args, session=session, runner=runner, write=write)
-    return after_action(read=read, write=write)
+AGAIN = ("again", "Run it again")
+TWEAK = ("tweak", "Tweak it")
+
+
+async def _act(args, *, session, runner, read, write, rows=(AGAIN, TWEAK)) -> Any:
+    """Run one action, then the after-run screen. Returns a row key, MENU or EXIT.
+
+    The title says what happened: Done on exit code 0, Not done when a confirm
+    was declined (the CLI returns 1), Failed after a printed error. Run it again
+    is answered here on the spot; every other row is the caller's, because what
+    "tweak" means -- the filled form, the bot's field list, the kind list --
+    is the flow's to know.
+    """
+    while True:
+        code = await _call(args, session=session, runner=runner, write=write)
+        title = "Done" if code == 0 else ("Failed" if code is None else "Not done")
+        result = after_run(read=read, write=write, title=title, rows=rows)
+        if result != "again":
+            return result
+
+
+def _leave(result) -> bool:
+    """What a flow returns for an after-run answer that leaves it: True keeps the
+    menu going, False exits it."""
+    return result is not EXIT
 
 
 CHAT_GROUPS = (
@@ -241,14 +262,19 @@ async def _flow_discover(*, session, runner, read, write) -> bool:
                     continue
                 json_output = path
 
-            all_chats = scope == 1
-            args = _namespace(command="discover", json_output=json_output, all_chats=all_chats)
-            return await _act(args, session=session, runner=runner, read=read, write=write)
+            args = _namespace(command="discover", json_output=json_output, all_chats=scope == 1)
+            result = await _act(args, session=session, runner=runner, read=read, write=write)
+            if result != "tweak":
+                return _leave(result)
+            # Tweak: back to the scope screen, the first thing this flow asks.
+            break
 
 
 async def _flow_doctor(*, session, runner, read, write) -> bool:
-    # No session: doctor never opens a connection, which is the point of it.
-    return await _act(_namespace(command="doctor"), session=None, runner=runner, read=read, write=write)
+    # No session: doctor never opens a connection, which is the point of it. And
+    # no after-run screen: running doctor again tells you nothing new.
+    await _call(_namespace(command="doctor"), session=None, runner=runner, write=write)
+    return after_action(read=read, write=write)
 
 
 _ALL_TOPICS = "All topics"
@@ -354,7 +380,11 @@ async def _flow_search(*, session, runner, read, write) -> bool:
                     format=output_format,
                     output=output_path,
                 )
-                return await _act(args, session=session, runner=runner, read=read, write=write)
+                result = await _act(args, session=session, runner=runner, read=read, write=write)
+                if result != "tweak":
+                    return _leave(result)
+                # Tweak: the form again, every staged value still in place.
+                continue
 
             if key == "topic":
                 answer = await _ask_topic(picked, session=session, read=read, write=write)
@@ -486,6 +516,14 @@ async def _flow_send(*, session, runner, read, write) -> bool:
                 back_label="Back (discards)",
             )
             if choice is BACK:
+                if text or files or topic_info is not None:
+                    # A composed message is the one thing in this menu that hurts
+                    # to retype, so backing out of it asks first. Pressing 0 on
+                    # this screen is the second, deliberate press.
+                    keep = choose(["Keep editing"], title="Unsent message", read=read, write=write, back_label="Discard it and go back")
+                    if keep == 0:
+                        continue
+                    write("Discarded the unsent message.")
                 break
             key = rows[choice][0]
 
@@ -525,8 +563,16 @@ async def _flow_send(*, session, runner, read, write) -> bool:
                 # its y/N run exactly as they do for the flags.
                 yes=False,
             )
-            return await _act(args, session=session, runner=runner, read=read, write=write)
+            result = await _act(args, session=session, runner=runner, read=read, write=write)
+            if result != "tweak":
+                return _leave(result)
+            # Tweak: the same message, files and topic, ready to change one thing.
+            continue
 
+
+# Running a create again would make a second, identical object, so the row after
+# one is "another", back at the kind list, rather than a re-run.
+CREATE_ANOTHER = ("tweak", "Create another")
 
 CREATE_KINDS = (
     ("group", False, "Group"),
@@ -551,7 +597,10 @@ async def _flow_create(*, session, runner, read, write) -> bool:
             if title is BACK:
                 continue
             args = _namespace(command="create", create_kind="topic", chat=picked.reference, title=title, yes=False)
-            return await _act(args, session=session, runner=runner, read=read, write=write)
+            result = await _act(args, session=session, runner=runner, read=read, write=write, rows=(CREATE_ANOTHER,))
+            if result != "tweak":
+                return _leave(result)
+            continue
 
         title = ask_text(f"{label} name", read=read, write=write)
         if title is BACK:
@@ -567,10 +616,23 @@ async def _flow_create(*, session, runner, read, write) -> bool:
             forum=forum,
             yes=False,
         )
-        return await _act(args, session=session, runner=runner, read=read, write=write)
+        result = await _act(args, session=session, runner=runner, read=read, write=write, rows=(CREATE_ANOTHER,))
+        if result != "tweak":
+            return _leave(result)
+
+
+_ALL_TOPICS_ROW = Extra("every", "All topics (no need to tick)")
+DEFAULT_BATCH_SIZE = 100
 
 
 async def _flow_clear(*, session, runner, read, write) -> bool:
+    # What was ticked, per chat, so backing out to the chat picker and coming
+    # back does not mean ticking again; which set the last dry-run scanned, so
+    # Continue with the same ticks does not scan it all a second time; and the
+    # batch size, which is an advanced knob that lives on the dry-run screen.
+    ticks: dict[str, list] = {}
+    scanned: tuple | None = None
+    batch_size = DEFAULT_BATCH_SIZE
     while True:
         picked = await _pick_chat(session=session, read=read, write=write, forums_only=True)
         if picked is BACK:
@@ -578,10 +640,10 @@ async def _flow_clear(*, session, runner, read, write) -> bool:
 
         topics = await session.topics(picked.reference)
         if not topics:
+            # One screen back -- the forum picker -- not all the way out.
             write("That chat has no topics.")
-            return True
+            continue
 
-        preselected: list = []
         while True:
             selected = pick_many(
                 topics,
@@ -589,48 +651,70 @@ async def _flow_clear(*, session, runner, read, write) -> bool:
                 label=lambda topic: f"{topic.id:<6}  {topic.title}",
                 read=read,
                 write=write,
-                preselected=preselected,
+                preselected=ticks.get(picked.reference, []),
+                extras=(_ALL_TOPICS_ROW,),
             )
             if selected is BACK:
                 break
 
-            every_topic = len(selected) == len(topics)
+            # The explicit row is the --all-topics flag; ticking every topic by
+            # hand still means the same thing, as it always has.
+            every_topic = selected == _ALL_TOPICS_ROW.key or len(selected) == len(topics)
+            chosen = list(topics) if selected == _ALL_TOPICS_ROW.key else selected
+            ticks[picked.reference] = chosen
+
             dry_run = _namespace(
                 command="clear-messages",
                 chat=picked.reference,
-                topics=None if every_topic else [topic.id for topic in selected],
+                topics=None if every_topic else [topic.id for topic in chosen],
                 all_topics=every_topic,
                 execute=False,
-                batch_size=100,
+                batch_size=batch_size,
             )
 
             # The dry-run always runs first: the menu must never be a shorter path to a
             # deletion than the flags are, and the count is what makes the next screen
             # an informed answer.
-            if not await _call(dry_run, session=session, runner=runner, write=write):
-                return after_action(read=read, write=write)
+            key = (picked.reference, tuple(topic.id for topic in chosen))
+            if key == scanned:
+                write("Same topics as the last dry-run; its count still stands.")
+            else:
+                if await _call(dry_run, session=session, runner=runner, write=write) is None:
+                    return after_action(read=read, write=write)
+                scanned = key
 
-            choice = choose(
-                ["Clear them for real (asks you to type DELETE)"],
-                title="Dry-run done",
-                read=read,
-                write=write,
-                back_label="Back to the topic list",
-            )
-            if choice is BACK:
-                # The ticks survive the trip back: pick_many's own preselected=
-                # is what makes that free.
-                preselected = selected
-                continue
+            while True:
+                choice = choose(
+                    ["Clear them for real (asks you to type DELETE)", f"Batch size [{batch_size}]"],
+                    title="Dry-run done",
+                    read=read,
+                    write=write,
+                    back_label="Back to the topic list",
+                )
+                if choice is BACK:
+                    # The ticks survive the trip back: they are in `ticks`.
+                    break
+                if choice == 1:
+                    answer = ask_int("Messages per delete call", read=read, write=write, current=batch_size)
+                    if answer is not BACK:
+                        batch_size = answer
+                    continue
 
-            for_real = _namespace(
-                **{
-                    **vars(dry_run),
-                    "execute": True,
-                    "topics": list(dry_run.topics) if dry_run.topics is not None else None,
-                }
-            )
-            return await _act(for_real, session=session, runner=runner, read=read, write=write)
+                for_real = _namespace(
+                    **{
+                        **vars(dry_run),
+                        "execute": True,
+                        "batch_size": batch_size,
+                        "topics": list(dry_run.topics) if dry_run.topics is not None else None,
+                    }
+                )
+                result = await _act(for_real, session=session, runner=runner, read=read, write=write, rows=(("tweak", "Clear more topics"),))
+                if result != "tweak":
+                    return _leave(result)
+                # Those topics are empty now: the ticks and the scan are stale.
+                ticks.pop(picked.reference, None)
+                scanned = None
+                break
 
 
 BOT_FIELDS = (
@@ -769,7 +853,7 @@ async def _flow_bot_edit(profile, *, session, runner, read, write) -> Any:
                 write("Nothing staged yet.")
                 continue
             args = _bots_namespace(bot=str(profile.id), **staged)
-            return await _act(args, session=session, runner=runner, read=read, write=write)
+            return await _act(args, session=session, runner=runner, read=read, write=write, rows=(("tweak", "Edit more"),))
 
         field = next(entry for entry in BOT_FIELDS if entry[0] == key)
         _key, title, allow_clear, needs_token = field
@@ -819,44 +903,105 @@ async def _flow_bot_edit(profile, *, session, runner, read, write) -> Any:
             staged.pop("remove_photo", None)
 
 
+_TYPE_A_BOT = Extra("typed", "Type a bot @username or ID")
+_SAVE_BOT_LIST = Extra("save", "Save the bot list to a JSON file")
+
+
+def _bot_label(bot) -> str:
+    return f"{'@' + bot.username if bot.username else '(no username)'}  {bot.name}"
+
+
+def _pick_bot(bots, *, read, write) -> Any:
+    """A bot from the list, an extra's key, or BACK.
+
+    The list only ever holds bots you own. A bot you do not own can still be
+    looked at, read-only, by typing it -- so that row is there even when the
+    list is empty, instead of a dead end.
+    """
+    if bots:
+        return pick(bots, title="My bots", label=_bot_label, read=read, write=write, extras=(_SAVE_BOT_LIST, _TYPE_A_BOT))
+    write("No bots of your own. One you do not own can still be looked up, read-only.")
+    choice = choose([_TYPE_A_BOT.label], title="My bots", read=read, write=write)
+    return BACK if choice is BACK else _TYPE_A_BOT.key
+
+
 async def _flow_bots(*, session, runner, read, write) -> bool:
-    bots = await session.bots()
-    if not bots:
-        write("No bots found.")
-        return True
+    while True:
+        chosen = _pick_bot(await session.bots(), read=read, write=write)
+        if chosen is BACK:
+            return True
 
-    chosen = pick(
-        bots,
-        title="My bots",
-        label=lambda bot: f"{'@' + bot.username if bot.username else '(no username)'}  {bot.name}",
-        read=read,
-        write=write,
-    )
-    if chosen is BACK:
-        return True
+        if chosen == _SAVE_BOT_LIST.key:
+            path = ask_text("JSON file path", read=read, write=write)
+            if path is BACK:
+                continue
+            args = _bots_namespace(json_output=path)
+            result = await _act(args, session=session, runner=runner, read=read, write=write, rows=(("tweak", "Back to the bot list"),))
+            if result != "tweak":
+                return _leave(result)
+            continue
 
-    profile = await session.bot_profile(str(chosen.id))
+        if chosen == _TYPE_A_BOT.key:
+            typed = ask_text("Bot @username or ID", read=read, write=write)
+            if typed is BACK:
+                continue
+            reference = typed
+        else:
+            reference = str(chosen.id)
+
+        try:
+            profile = await session.bot_profile(reference)
+        except MENU_ERRORS as exc:
+            # A typo in a typed username is this screen to redo, not a reason
+            # to drop to the root menu.
+            write(f"error: {exc}")
+            continue
+
+        result = await _flow_bot_screen(profile, session=session, runner=runner, read=read, write=write)
+        if result is BACK:
+            continue
+        return _leave(result)
+
+
+async def _flow_bot_screen(profile, *, session, runner, read, write) -> Any:
+    """One bot: its profile, then edit it or save it. BACK returns to the bot
+    list; anything else is an after-run answer for the caller."""
     # Printed here rather than through run(): the edit screen needs these values
     # anyway, and fetching the same profile twice to print it would be two more
     # API calls for the same text. Every edit still goes through run().
     write(format_bot_profile(profile))
+    if not profile.is_owned:
+        write("Read-only: you do not own this bot, so there is nothing here to edit.")
 
     while True:
+        rows = [("save", "Save this profile to a JSON file")]
+        if profile.is_owned:
+            rows.insert(0, ("edit", "Edit this bot"))
         choice = choose(
-            ["Edit this bot", "Save this profile to a JSON file"],
+            [label for _key, label in rows],
             title=f"@{profile.username}" if profile.username else f"bot {profile.id}",
             read=read,
             write=write,
         )
         if choice is BACK:
-            return True
-        if choice == 1:
+            return BACK
+
+        if rows[choice][0] == "save":
             path = ask_text("JSON file path", read=read, write=write)
             if path is BACK:
                 continue
             args = _bots_namespace(bot=str(profile.id), json_output=path)
-            return await _act(args, session=session, runner=runner, read=read, write=write)
+            result = await _act(args, session=session, runner=runner, read=read, write=write, rows=(("tweak", "Back to this bot"),))
+            if result != "tweak":
+                return result
+            continue
+
         result = await _flow_bot_edit(profile, session=session, runner=runner, read=read, write=write)
+        while result == "tweak":
+            # Edit more: the profile just changed, so fetch it again before the
+            # field list shows current values.
+            profile = await session.bot_profile(str(profile.id))
+            result = await _flow_bot_edit(profile, session=session, runner=runner, read=read, write=write)
         if result is BACK:
             continue
         return result

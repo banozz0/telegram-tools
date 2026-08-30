@@ -220,7 +220,8 @@ def test_a_session_acquisition_error_is_caught_and_returns_to_the_menu():
     assert code == 0
     assert calls == []
     assert "error: TELEGRAM_API_ID is required." in screens(output)
-    assert screens(output).count("0. Exit") == 2
+    assert "Failed" in screens(output)
+    assert screens(output).count("1. Chats & topics (find IDs)") == 2
 
 
 def test_zero_after_an_action_exits():
@@ -463,8 +464,9 @@ def test_search_staging_back_discards_and_says_so():
 
 
 def test_clear_dry_runs_first_then_executes():
-    # 3 = clear, 1 = Hermes, 1 = tick Deploys, 4 = continue, 1 = for real, Enter, 0
-    answers = ["5", "1", "1", "4", "1", "", "0"]
+    # 5 = clear, 1 = Hermes, 1 = tick Deploys, 5 = continue (3 is All topics,
+    # 4 Select all), 1 = for real, Enter = main menu, 0 = exit
+    answers = ["5", "1", "1", "5", "1", "", "0"]
     code, calls, _output = run_menu(answers)
 
     assert code == 0
@@ -480,9 +482,9 @@ def test_clear_dry_runs_first_then_executes():
 
 
 def test_clear_stops_at_the_dry_run_when_you_go_back():
-    # 3 = clear, 1 = Hermes, 1 = tick Deploys, 4 = continue, dry-run runs, 0 = back to
+    # 5 = clear, 1 = Hermes, 1 = tick Deploys, 5 = continue, dry-run runs, 0 = back to
     # the ticker, 0 = back to the chat picker, 0 = back out of the picker to root, 0 = exit
-    answers = ["5", "1", "1", "4", "0", "0", "0", "0"]
+    answers = ["5", "1", "1", "5", "0", "0", "0", "0"]
     code, calls, _output = run_menu(answers)
 
     assert code == 0
@@ -491,20 +493,21 @@ def test_clear_stops_at_the_dry_run_when_you_go_back():
 
 
 def test_clear_zero_at_dry_run_returns_to_the_ticker_with_ticks_preserved():
-    # 3 = clear, 1 = Hermes, 1 = tick Deploys, 4 = continue, dry-run runs, 0 = back
-    # to the ticker (Deploys should still be ticked), 4 = continue again with no
+    # 5 = clear, 1 = Hermes, 1 = tick Deploys, 5 = continue, dry-run runs, 0 = back
+    # to the ticker (Deploys should still be ticked), 5 = continue again with no
     # further ticking, 1 = for real, Enter, 0 = exit
-    answers = ["5", "1", "1", "4", "0", "4", "1", "", "0"]
+    answers = ["5", "1", "1", "5", "0", "5", "1", "", "0"]
     code, calls, output = run_menu(answers)
 
     assert code == 0
-    assert len(calls) == 3
-    # Both dry runs, and the real pass, all cover just Deploys: the tick made
-    # on the first pass through the ticker survived the trip back and forth.
+    # One dry run, not two: the same ticks on the same chat were scanned a
+    # moment ago, so the second Continue goes straight to the dry-run screen.
+    assert len(calls) == 2
     assert calls[0].topics == [141]
+    assert calls[0].execute is False
+    assert calls[1].execute is True
     assert calls[1].topics == [141]
-    assert calls[2].execute is True
-    assert calls[2].topics == [141]
+    assert "Same topics as the last dry-run; its count still stands." in screens(output)
     assert screens(output).count("[x] 141") == 2
 
 
@@ -512,7 +515,7 @@ def test_clear_ticker_accepts_several_numbers_in_one_answer():
     # 3 = clear, 1 = Hermes, "1 2" ticks both topics in a single answer (item rows
     # only, so this is legal), 4 = continue, dry-run covers both, 0 = decline the
     # real pass, 0 = chat picker back, 0 = out of the picker to root, 0 = exit.
-    answers = ["5", "1", "1 2", "4", "0", "0", "0", "0"]
+    answers = ["5", "1", "1 2", "5", "0", "0", "0", "0"]
     code, calls, _output = run_menu(answers)
 
     assert code == 0
@@ -535,7 +538,7 @@ def test_clear_every_topic_uses_all_topics():
 
 def test_clear_does_not_offer_the_real_pass_when_the_dry_run_errors():
     _calls, runner = recorder(error=PermissionError("Current user lacks Telegram delete_messages permission in this chat."))
-    answers = ["5", "1", "1", "4", "0"]
+    answers = ["5", "1", "1", "5", "0"]
     code, _unused, output = run_menu(answers, runner=runner)
 
     assert code == 0
@@ -546,21 +549,25 @@ def test_clear_does_not_offer_the_real_pass_when_the_dry_run_errors():
 
 def test_clear_says_when_a_chat_has_no_topics():
     session = FakeSession(topics=[])
-    answers = ["5", "1", "0"]
+    # 5 = clear, 1 = Hermes has no topics -> back to the forum picker (one screen
+    # back, not the root), 0 = out of the picker, 0 = exit
+    answers = ["5", "1", "0", "0"]
     code, calls, output = run_menu(answers, session=session)
 
     assert code == 0
     assert calls == []
     assert "That chat has no topics." in screens(output)
+    assert screens(output).count("Pick a forum group") == 2
 
 
 def test_clear_offers_manual_entry_when_there_are_no_forum_groups():
     # No forum groups at all: the picker's list is empty, so `pick` would
     # normally bail out before ever showing the manual escape hatch.
     session = FakeSession(chats=[], topics=[])
-    # 3 = clear topic messages, 2 = "Type an ID or @username" (the only rows
-    # on an empty list are the two extras), type an id, 0 = exit.
-    code, calls, output = run_menu(["5", "2", "-100999", "0"], session=session)
+    # 5 = clear topic messages, 2 = "Type an ID or @username" (the only rows
+    # on an empty list are the two extras), type an id, no topics -> the picker
+    # again, 0 = out of it, 0 = exit.
+    code, calls, output = run_menu(["5", "2", "-100999", "0", "0"], session=session)
 
     text = screens(output)
     assert code == 0
@@ -570,8 +577,8 @@ def test_clear_offers_manual_entry_when_there_are_no_forum_groups():
 
 
 def test_bots_lists_and_prints_a_profile():
-    # 4 = my bots, 1 = harrybot, then 0 out of the bot screen, 0 = exit
-    code, calls, output = run_menu(["6", "1", "0", "0"])
+    # 6 = my bots, 1 = harrybot, 0 out of the bot screen to the list, 0 = root, 0 = exit
+    code, calls, output = run_menu(["6", "1", "0", "0", "0"])
 
     text = screens(output)
     assert code == 0
@@ -586,8 +593,8 @@ def test_bots_with_no_username_matches_the_existing_formatters():
     # <id>" in a heading; the menu must follow those, not invent "@<id>".
     bot = BotInfo(id=99999, username=None, name="Nameless", bio=None, description=None, is_owned=True)
     session = FakeSession(bots=[bot], profile=bot)
-    # 4 = my bots, 1 = the only bot, 0 = back out of its screen, 0 = exit
-    code, calls, output = run_menu(["6", "1", "0", "0"], session=session)
+    # 6 = my bots, 1 = the only bot, 0 = back to the list, 0 = root, 0 = exit
+    code, calls, output = run_menu(["6", "1", "0", "0", "0"], session=session)
 
     text = screens(output)
     assert code == 0
@@ -642,8 +649,8 @@ def test_bot_edit_unset_field_skips_the_keep_change_clear_screen():
 
 
 def test_bot_edit_shows_current_values_and_staged_changes():
-    # ... 0 = field list back (to the bot's own screen), 0 = back out of that screen, 0 = exit
-    answers = ["6", "1", "1", "1", "2", "Harry Two", "0", "0", "0"]
+    # ... 0 = field list back (to the bot's own screen), 0 = the list, 0 = root, 0 = exit
+    answers = ["6", "1", "1", "1", "2", "Harry Two", "0", "0", "0", "0"]
     _code, _calls, output = run_menu(answers)
 
     text = screens(output)
@@ -656,7 +663,7 @@ def test_bot_edit_shows_current_values_and_staged_changes():
 def test_bot_edit_staging_the_name_none_is_not_shown_as_cleared():
     # "none" is the sentinel for clearing rights, not an ordinary staged value.
     # Typed as a *name* it must render as the literal value, not "(cleared)".
-    answers = ["6", "1", "1", "1", "2", "none", "0", "0", "0"]
+    answers = ["6", "1", "1", "1", "2", "none", "0", "0", "0", "0"]
     _code, _calls, output = run_menu(answers)
 
     text = screens(output)
@@ -665,8 +672,8 @@ def test_bot_edit_staging_the_name_none_is_not_shown_as_cleared():
 
 
 def test_bot_edit_refuses_token_fields_without_a_token():
-    # ... 0 = field list back (to the bot's own screen), 0 = back out of that screen, 0 = exit
-    answers = ["6", "1", "1", "4", "0", "0", "0"]
+    # ... 0 = field list back (to the bot's own screen), 0 = the list, 0 = root, 0 = exit
+    answers = ["6", "1", "1", "4", "0", "0", "0", "0"]
     _code, calls, output = run_menu(answers)
 
     text = screens(output)
@@ -698,8 +705,8 @@ def test_bot_edit_clears_rights_with_none():
 
 
 def test_bot_edit_apply_with_nothing_staged_says_so():
-    # ... 0 = field list back (to the bot's own screen), 0 = back out of that screen, 0 = exit
-    answers = ["6", "1", "1", "8", "0", "0", "0"]
+    # ... 0 = field list back (to the bot's own screen), 0 = the list, 0 = root, 0 = exit
+    answers = ["6", "1", "1", "8", "0", "0", "0", "0"]
     _code, calls, output = run_menu(answers)
 
     assert calls == []
@@ -964,3 +971,229 @@ def test_send_cancelling_the_file_path_stages_nothing():
 
     assert code == 0
     assert calls[0].files is None
+
+
+# --- after an action: Run it again / Tweak it / Main menu ---------------------
+
+
+def test_after_run_runs_the_same_search_again():
+    # 2 = search, 1 = forum groups, 1 = Hermes, 7 = run, 1 = run it again, Enter, 0
+    code, calls, output = run_menu(["2", "1", "1", "7", "1", "", "0"])
+
+    assert code == 0
+    assert [call.chat for call in calls] == ["-100111", "-100111"]
+    assert "1. Run it again" in screens(output)
+    assert "2. Tweak it" in screens(output)
+    assert "3. Main menu" in screens(output)
+
+
+def test_search_tweak_returns_to_the_form_with_the_filters_kept():
+    # ... 2 = contains (unset, so straight to the prompt), "hello", 7 = run,
+    # 2 = tweak, 6 = limit, 5, 7 = run again, Enter, 0
+    answers = ["2", "1", "1", "2", "hello", "7", "2", "6", "5", "7", "", "0"]
+    _code, calls, output = run_menu(answers)
+
+    assert len(calls) == 2
+    assert calls[0].keyword == "hello"
+    assert calls[0].limit is None
+    assert calls[1].keyword == "hello"
+    assert calls[1].limit == 5
+    assert "Contains       [hello]" in screens(output)
+
+
+def test_after_run_says_not_done_when_the_action_was_declined_and_failed_on_an_error():
+    _calls, declined = recorder(result=1)
+    _code, _unused, output = run_menu(["2", "1", "1", "7", "", "0"], runner=declined)
+    assert "Not done" in screens(output)
+
+    _calls, broken = recorder(error=ValueError("no"))
+    _code, _unused, output = run_menu(["2", "1", "1", "7", "", "0"], runner=broken)
+    assert "Failed" in screens(output)
+
+
+def test_discover_tweak_returns_to_the_scope_screen():
+    # 1 = discover, 1 = managed, 1 = print, 2 = tweak -> scope again, 2 = every chat, 1 = print, Enter, 0
+    _code, calls, output = run_menu(["1", "1", "1", "2", "2", "1", "", "0"])
+
+    assert [call.all_chats for call in calls] == [False, True]
+    assert screens(output).count("1. Chats I manage") == 2
+
+
+def test_doctor_keeps_the_plain_enter_or_zero_prompt():
+    _code, calls, output = run_menu(["7", "", "0"])
+
+    assert [call.command for call in calls] == ["doctor"]
+    assert "Run it again" not in screens(output)
+    assert "Main menu" not in screens(output)
+
+
+def test_send_tweak_keeps_the_message_files_and_topic():
+    # 3 = send, 1 = forum groups, 1 = Hermes, 2 = message, "hi", ".", 4 = send,
+    # 2 = tweak, 4 = send again, Enter, 0
+    answers = ["3", "1", "1", "2", "hi", ".", "4", "2", "4", "", "0"]
+    _code, calls, output = run_menu(answers)
+
+    assert [call.text for call in calls] == ["hi", "hi"]
+    assert screens(output).count("Message   [hi]") >= 2
+
+
+def test_create_offers_another_instead_of_a_rerun():
+    # 4 = create, 1 = group, "Team", blank description, 1 = create another -> the
+    # kind list, 3 = channel, "News", blank description, Enter, 0
+    answers = ["4", "1", "Team", "", "1", "3", "News", "", "", "0"]
+    _code, calls, output = run_menu(answers)
+
+    assert [(call.create_kind, call.title) for call in calls] == [("group", "Team"), ("channel", "News")]
+    assert "1. Create another" in screens(output)
+    assert "Run it again" not in screens(output)
+
+
+# --- send: back asks before discarding ---------------------------------------
+
+
+def test_send_back_with_a_message_asks_before_discarding():
+    # ... 2 = message, "hi", ".", 0 = back -> asks, 1 = keep editing, 0 = back -> asks
+    # again, 0 = discard -> the chat picker, 0 = root, 0 = exit
+    answers = ["3", "1", "1", "2", "hi", ".", "0", "1", "0", "0", "0", "0"]
+    _code, calls, output = run_menu(answers)
+
+    text = screens(output)
+    assert calls == []
+    assert text.count("Unsent message") == 2
+    assert "1. Keep editing" in text
+    assert "0. Discard it and go back" in text
+    # Keep editing showed the form again with the message still staged.
+    assert text.count("Message   [hi]") == 2
+    assert "Discarded the unsent message." in text
+
+
+def test_send_back_with_nothing_staged_does_not_ask():
+    _code, calls, output = run_menu(["3", "1", "1", "0", "0", "0"])
+
+    assert calls == []
+    assert "Unsent message" not in screens(output)
+
+
+# --- clear: the audit gaps and what it remembers ------------------------------
+
+
+def test_clear_all_topics_row_is_the_all_topics_flag():
+    # 5 = clear, 1 = Hermes, 3 = All topics (the row after the two topics), dry-run,
+    # 1 = for real, Enter, 0
+    _code, calls, output = run_menu(["5", "1", "3", "1", "", "0"])
+
+    assert "3. All topics (no need to tick)" in screens(output)
+    assert calls[0].all_topics is True
+    assert calls[0].topics is None
+    assert calls[1].execute is True
+    assert calls[1].all_topics is True
+
+
+def test_clear_batch_size_is_an_advanced_row_on_the_dry_run_screen():
+    # ... 5 = continue, dry-run, 2 = batch size, 25, 1 = for real, Enter, 0
+    _code, calls, output = run_menu(["5", "1", "1", "5", "2", "25", "1", "", "0"])
+
+    text = screens(output)
+    assert "2. Batch size [100]" in text
+    assert "2. Batch size [25]" in text
+    assert calls[0].batch_size == 100
+    assert calls[1].execute is True
+    assert calls[1].batch_size == 25
+
+
+def test_clear_remembers_the_ticks_when_the_same_chat_is_picked_again():
+    # 5 = clear, 1 = Hermes, 1 = tick Deploys, 5 = continue (dry-run), 0 = back to
+    # the ticker, 0 = back to the picker, 1 = Hermes again (still ticked),
+    # 5 = continue (same ticks: no second scan), 0 = ticker, 0 = picker, 0 = root, 0
+    answers = ["5", "1", "1", "5", "0", "0", "1", "5", "0", "0", "0", "0"]
+    _code, calls, output = run_menu(answers)
+
+    assert len(calls) == 1
+    assert calls[0].topics == [141]
+    # Ticked once, shown ticked four times: after the tick, back from the dry-run
+    # screen, after re-picking the chat, and back from the dry-run screen again.
+    assert screens(output).count("[x] 141") == 4
+    assert "Same topics as the last dry-run; its count still stands." in screens(output)
+
+
+def test_clear_more_topics_after_the_real_pass_starts_from_a_clean_ticker():
+    # ... 1 = for real, 1 = clear more topics -> the ticker with nothing ticked, 0, 0, 0
+    _code, calls, output = run_menu(["5", "1", "1", "5", "1", "1", "0", "0", "0", "0"])
+
+    text = screens(output)
+    assert calls[1].execute is True
+    assert "1. Clear more topics" in text
+    assert text.count("[x] 141") == 1
+    assert text.count("[ ] 141") == 2
+
+
+# --- bots: the audit gaps ------------------------------------------------------
+
+
+def test_bots_saves_the_whole_bot_list_to_json():
+    # 6 = my bots, 2 = save the list (row after the one bot), path, Enter, 0
+    _code, calls, output = run_menu(["6", "2", "/tmp/bots.json", "", "0"])
+
+    assert "2. Save the bot list to a JSON file" in screens(output)
+    assert calls[0].command == "bots"
+    assert calls[0].bot is None
+    assert calls[0].json_output == "/tmp/bots.json"
+
+
+def test_bots_typed_username_shows_a_bot_you_do_not_own_read_only():
+    other = BotInfo(id=777, username="otherbot", name="Other", bio="Not mine", description=None, is_owned=False)
+    session = FakeSession(profile=other)
+    # 6 = my bots, 3 = type a bot, "@otherbot", 0 = back to the list, 0 = root, 0 = exit
+    _code, calls, output = run_menu(["6", "3", "@otherbot", "0", "0", "0"], session=session)
+
+    text = screens(output)
+    assert calls == []
+    assert "3. Type a bot @username or ID" in text
+    assert "Bio: Not mine" in text
+    assert "Read-only: you do not own this bot" in text
+    assert "Edit this bot" not in text
+    assert "1. Save this profile to a JSON file" in text
+
+
+def test_bots_typo_in_a_typed_username_returns_to_the_list_not_the_root():
+    class Session(FakeSession):
+        async def bot_profile(self, reference):
+            raise ValueError(f"{reference!r} is not a bot.")
+
+    _code, calls, output = run_menu(["6", "3", "nope", "0", "0"], session=Session())
+
+    text = screens(output)
+    assert calls == []
+    assert "error: 'nope' is not a bot." in text
+    assert text.count("1. @harrybot  Harry") == 2
+
+
+def test_bots_with_none_of_your_own_still_offers_the_lookup():
+    session = FakeSession(bots=[])
+    _code, calls, output = run_menu(["6", "0", "0"], session=session)
+
+    text = screens(output)
+    assert calls == []
+    assert "No bots of your own" in text
+    assert "1. Type a bot @username or ID" in text
+
+
+def test_bot_edit_more_fetches_the_profile_again():
+    class Session(FakeSession):
+        def __init__(self):
+            super().__init__()
+            self.profile_calls = 0
+
+        async def bot_profile(self, reference):
+            self.profile_calls += 1
+            return self._profile
+
+    session = Session()
+    # 6, 1 = harrybot, 1 = edit, 1 = name, 2 = change, "Harry Two", 8 = apply,
+    # 1 = edit more (fresh profile), 0 = field list back, 0 = the list, 0 = root, 0
+    answers = ["6", "1", "1", "1", "2", "Harry Two", "8", "1", "0", "0", "0", "0"]
+    _code, calls, output = run_menu(answers, session=session)
+
+    assert calls[0].name == "Harry Two"
+    assert "1. Edit more" in screens(output)
+    assert session.profile_calls == 2
