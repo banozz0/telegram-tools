@@ -58,14 +58,51 @@ def test_pick_returns_the_chosen_item():
     assert result is items[1]
 
 
-def test_pick_pages_forward_and_back():
+def test_pick_pages_forward_and_back_on_letters():
     items = [item(f"chat-{index}", index) for index in range(12)]
     output = []
-    # Page 1 shows 9 items and a next row (10); page 2 shows 3 items, a previous row (4), then pick item 1.
-    result = prompts.pick(items, title="Pick", label=lambda value: value.name, read=reader("10", "4", "1"), write=output.append)
+    # Page 1 shows 9 items and n; page 2 shows 3 items and p; back on page 1, pick item 1.
+    result = prompts.pick(items, title="Pick", label=lambda value: value.name, read=reader("n", "p", "1"), write=output.append)
     assert result is items[0]
-    assert "10. Next page (3 more)" in screens(output)
-    assert "4. Previous page" in screens(output)
+    assert "n. Next page (3 more)" in screens(output)
+    assert "p. Previous page" in screens(output)
+
+
+def test_pick_numbers_items_across_pages_not_per_page():
+    items = [item(f"chat-{index}", index) for index in range(12)]
+    output = []
+    result = prompts.pick(items, title="Pick", label=lambda value: value.name, read=reader("n", "12"), write=output.append)
+    assert result is items[11]
+    text = screens(output)
+    assert "9. chat-8" in text
+    assert "10. chat-9" in text
+    assert "12. chat-11" in text
+    assert "1. chat-9" not in text
+
+
+def test_pick_takes_a_number_from_another_page_without_paging_to_it():
+    items = [item(f"chat-{index}", index) for index in range(12)]
+    result = prompts.pick(items, title="Pick", label=lambda value: value.name, read=reader("12"), write=lambda _: None)
+    assert result is items[11]
+
+
+def test_pick_extras_keep_their_number_on_every_page():
+    items = [item(f"chat-{index}", index) for index in range(12)]
+    extras = (Extra("filter", "Filter by name"),)
+    output = []
+    # 12 items, so the extra is 13 on page 1 and still 13 on page 2.
+    result = prompts.pick(items, title="Pick", label=lambda value: value.name, read=reader("n", "13"), write=output.append, extras=extras)
+    assert result == "filter"
+    assert screens(output).count("13. Filter by name") == 2
+
+
+def test_pick_says_when_there_is_no_next_or_previous_page():
+    items = [item("a", 1)]
+    output = []
+    result = prompts.pick(items, title="Pick", label=lambda value: value.name, read=reader("n", "p", "N", "0"), write=output.append)
+    assert result is BACK
+    assert screens(output).count("This is the last page.") == 2
+    assert "This is the first page." in screens(output)
 
 
 def test_pick_returns_an_extra_key():
@@ -131,11 +168,29 @@ def test_pick_many_single_number_still_pages_forward_and_back():
     # easily have broken.
     items = [item(f"i{n}", n) for n in range(10)]
     output = []
-    # Page 1: 9 items + Next (row 10). Page 2: 1 item + Previous (row 2). Back from there.
-    result = prompts.pick_many(items, title="Topics", label=lambda value: value.name, read=reader("10", "2", "0"), write=output.append)
+    # Page 1: 9 items, n to page. Page 2: item 10, p to page back. Select all and
+    # Continue are 11 and 12 on both pages. Back from page 1.
+    result = prompts.pick_many(items, title="Topics", label=lambda value: value.name, read=reader("n", "p", "0"), write=output.append)
     assert result is BACK
-    assert "10. Next page (1 more)" in screens(output)
-    assert "2. Previous page" in screens(output)
+    text = screens(output)
+    assert "n. Next page (1 more)" in text
+    assert "p. Previous page" in text
+    assert "10. [ ] i9" in text
+    assert text.count("11. Select all") == 3
+    assert text.count("12. Continue (0 selected)") == 3
+
+
+def test_pick_many_extras_are_rows_after_the_items_and_return_their_key():
+    items = [item("a", 1), item("b", 2)]
+    output = []
+    extras = (Extra("every", "All topics"),)
+    # Rows: a(1) b(2) All topics(3) Select all(4) Continue(5).
+    result = prompts.pick_many(items, title="Topics", label=lambda value: value.name, read=reader("3"), write=output.append, extras=extras)
+    assert result == "every"
+    text = screens(output)
+    assert "3. All topics" in text
+    assert "4. Select all" in text
+    assert "5. Continue (0 selected)" in text
 
 
 def test_pick_many_rejects_several_numbers_that_include_a_control_row():
@@ -145,7 +200,7 @@ def test_pick_many_rejects_several_numbers_that_include_a_control_row():
     result = prompts.pick_many(items, title="Topics", label=lambda value: value.name, read=reader("2 4", "0"), write=output.append)
     assert result is BACK
     text = screens(output)
-    assert "Several at once must all be item numbers, not a page or Continue row." in text
+    assert "Several at once must all be item numbers, not a control row." in text
     # Nothing was partially applied: both rows still show unticked on the redraw.
     assert "1. [ ] a" in text
     assert "2. [ ] b" in text
@@ -301,3 +356,26 @@ def test_ask_lines_trailing_blank_lines_are_dropped():
     value = ask_lines("Message", read=reader("body", "", "", "."), write=lambda _line: None)
 
     assert value == "body"
+
+
+def test_after_run_enter_is_the_main_menu():
+    output = []
+    result = prompts.after_run(read=reader(""), write=output.append, title="Done", rows=(("again", "Run it again"),))
+    assert result is prompts.MENU
+    text = screens(output)
+    assert "1. Run it again" in text
+    assert "2. Main menu" in text
+    assert "0. Exit" in text
+
+
+def test_after_run_zero_exits_and_a_row_returns_its_key():
+    assert prompts.after_run(read=reader("0"), write=lambda _: None) is prompts.EXIT
+    assert prompts.after_run(read=reader("1"), write=lambda _: None, rows=(("tweak", "Tweak it"),)) == "tweak"
+    assert prompts.after_run(read=reader("2"), write=lambda _: None, rows=(("tweak", "Tweak it"),)) is prompts.MENU
+
+
+def test_after_run_reprints_after_a_bad_answer():
+    output = []
+    result = prompts.after_run(read=reader("9", "1"), write=output.append, rows=(("again", "Run it again"),))
+    assert result == "again"
+    assert "Pick one of the numbers listed." in screens(output)

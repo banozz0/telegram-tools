@@ -284,8 +284,9 @@ def test_pick_chat_typed_reference_is_not_assumed_to_be_a_forum():
 def test_pick_chat_filters_by_name():
     chats = [ChatChoice(id=index, title=f"Group {index}", username=None, type="supergroup") for index in range(12)]
     session = FakeSession(chats=chats)
-    # 1 = Groups, then 9 chat rows + "Next page" (10) + "Filter by name" (11) + manual (12).
-    picked, _output = pick_chat(["1", "11", "Group 11", "1"], session=session)
+    # 1 = Groups, then 12 chats numbered across both pages, so "Filter by name"
+    # is 13 (and manual 14) on page 1 and page 2 alike.
+    picked, _output = pick_chat(["1", "13", "Group 11", "1"], session=session)
 
     assert picked.reference == "11"
 
@@ -680,8 +681,9 @@ def test_bot_edit_refuses_token_fields_without_a_token():
 def test_bot_edit_rights_toggle_with_a_token():
     session = FakeSession(bot_tokens={"harry": "12345:AAtoken"})
     # 6 = group rights, 2 = change, then the toggle: post_messages is preselected
-    # (row 2 of page 1), tick change_info (row 1), continue is the last row.
-    answers = ["6", "1", "1", "6", "2", "1", "12", "8", "", "0"]
+    # (row 2 of page 1), tick change_info (row 1), Continue is numbered after
+    # every right (16 of them) on every page.
+    answers = ["6", "1", "1", "6", "2", "1", "18", "8", "", "0"]
     _code, calls, _output = run_menu(answers, session=session)
 
     assert calls[0].group_rights == "change_info,post_messages"
