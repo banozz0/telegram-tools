@@ -159,11 +159,22 @@ telegram-tools
 0. Exit
 ```
 
-`0` always steps back one screen — the same whether you're paging through a picker or
-backing out of a flow's own screen — and exits once you're back at the root. Chats,
-topics, bots, and admin rights come from live pick-lists rather than prompts asking
-you to type an ID. Bot fields show their current value and offer keep / change /
-clear. After every job it returns to the menu.
+`0` always steps back one screen — inside a picker or on a flow's own screen alike —
+and exits once you're back at the root; on a text prompt a blank line does the same.
+Every screen below the root carries its trail (`Main › Search › Hermes › From`), so
+you always know where you are. Chats, topics, bots, and admin rights come from live
+pick-lists rather than prompts asking you to type an ID; long lists page on `n` and
+`p`, and an item keeps its number on every page. Bot fields show their current value
+and offer keep / change / clear.
+
+After every job the menu offers *Run it again*, *Tweak it* (back to the filled-in
+form, nothing retyped) and *Main menu*; Enter is still the menu and `0` still exits.
+Backing out of a message you have composed asks first. Every flag has a row: the
+clear screen offers *All topics* and a batch size, the bots screen can save the whole
+bot list to JSON and look up a bot you do not own, read-only.
+
+The menu is in colour when it is talking to a terminal, and plain text in a pipe, under
+`NO_COLOR`, or with `TERM=dumb`.
 
 The message box takes several lines — end it with a `.` on its own line — so pasting
 a multi-line message works instead of feeding its later lines to the menu as answers.

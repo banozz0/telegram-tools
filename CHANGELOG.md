@@ -6,6 +6,15 @@ This project follows a practical changelog style: user-visible changes, safety c
 
 ## 3.5.0 - 2026-08-31
 
+The menu release: every flag reachable, back that stops forgetting, and a look.
+
+- Every screen below the root carries a breadcrumb trail (`Main › Clear › Hermes › Dry-run done`), and the menu is in colour when it is talking to a terminal: an accent on the numbers and the current screen, dim hints and back rows, a red `error:` line. It is plain text in a pipe, under `NO_COLOR`, or with `TERM=dumb`, and the colour is applied at the one place the menu prints, so prompts still hand back plain strings.
+- After every job the menu offers *Run it again*, *Tweak it* and *Main menu* instead of only a way back to the root. Tweak returns to the filled-in form — the search filters, the composed message with its files and topic — so re-running with one change is one change. Enter is still the menu and `0` still exits; `doctor` keeps the plain prompt, since running it twice tells you nothing new. Create offers *Create another* rather than a re-run, because a re-run would make a second, identical object.
+- Backing out of a message you have composed now asks first (`Keep editing` / `Discard it and go back`) instead of dropping text, files and topic silently.
+- Two dead ends step back one screen instead of bouncing to the root: a forum group with no topics on the clear screen returns to the picker, and the bot list with no bots of your own still offers the lookup row. Backing out of a bot's screen returns to the bot list, not the root.
+- Long pick-lists page on the letters `n` and `p`, and an item keeps its number on every page — typing a number you saw on the previous page picks it without paging back. The rows after a list (Filter, Select all, Continue) keep their numbers too.
+- Clear: an explicit *All topics* row is the `--all-topics` flag (ticking every topic by hand still means the same). A *Batch size* row on the dry-run screen is `--batch-size`, default 100. The ticks are remembered per chat, so backing out to the picker and coming back does not mean ticking again, and Continue with the same ticks goes straight to the dry-run screen instead of scanning every topic a second time. The dry-run-first gate and the typed `DELETE` are unchanged.
+- Bots: *Save the bot list to a JSON file* is `bots --json` for the whole list. *Type a bot @username or ID* routes to the read-only view the flags already had for a bot you do not own: its profile shows, the edit row does not. A typo there prints the error and returns to the bot list.
 - `discover --admin-only` is gone. It was declared but never read: admin-only has been the default since `--all` arrived, so the flag did nothing and was hidden from `--help`. Nothing that used to work stops working; a script still passing it now gets argparse's usual unknown-flag error, which is the honest answer. The bundled skill never documented it, so `skill/SKILL.md` is unchanged.
 
 ## 3.4.1 - 2026-08-25
