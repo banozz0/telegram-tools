@@ -167,11 +167,14 @@ pick-lists rather than prompts asking you to type an ID; long lists page on `n` 
 `p`, and an item keeps its number on every page. Bot fields show their current value
 and offer keep / change / clear.
 
-After every job the menu offers *Run it again*, *Tweak it* (back to the filled-in
-form, nothing retyped) and *Main menu*; Enter is still the menu and `0` still exits.
-Backing out of a message you have composed asks first. Every flag has a row: the
-clear screen offers *All topics* and a batch size, the bots screen can save the whole
-bot list to JSON and look up a bot you do not own, read-only.
+After a job the menu offers a way back to the filled-in form — *Tweak it* on search,
+send and chats & topics, *Create another* with the form as you left it, *Clear more
+topics*, *Edit more* — plus *Main menu*, and *Run it again* where a re-run makes sense
+(chats & topics, search, send). Enter is still the menu, `0` still exits, and `doctor`
+keeps the plain Enter/`0` prompt. Backing out of a form with something typed in it — a
+message, search filters, bot edits, a create form — asks first. Every flag has a row:
+the clear screen offers *All topics* and a batch size, the bots screen can save the
+whole bot list to JSON and look up a bot you do not own, read-only.
 
 The menu is in colour when it is talking to a terminal, and plain text in a pipe, under
 `NO_COLOR`, or with `TERM=dumb`.

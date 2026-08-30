@@ -138,8 +138,9 @@ def test_doctor_runs_without_a_client_and_returns_to_the_menu():
 
 
 def test_discover_builds_the_managed_chats_namespace_and_loops():
-    # 1 = chats & topics, 1 = chats I manage, 1 = print here, Enter = menu, 0 = exit
-    code, calls, _output = run_menu(["1", "1", "1", "", "0"])
+    # 1 = chats & topics, 3 = run it (the form defaults: chats I manage, print here),
+    # Enter = menu, 0 = exit
+    code, calls, _output = run_menu(["1", "3", "", "0"])
 
     assert code == 0
     assert len(calls) == 1
@@ -150,7 +151,12 @@ def test_discover_builds_the_managed_chats_namespace_and_loops():
 
 
 def test_discover_all_chats_to_a_json_file():
-    code, calls, _output = run_menu(["1", "2", "2", "/tmp/out.json", "0"])
+    # 1 = chats & topics, 1 = which chats, 2 = every chat, 2 = write to, 2 = a JSON
+    # file, the path, 3 = run it, 0 = exit
+    code, calls, output = run_menu(["1", "1", "2", "2", "2", "/tmp/out.json", "3", "0"])
+
+    assert "Which chats    [Every chat]" in screens(output)
+    assert "Write to       [/tmp/out.json]" in screens(output)
 
     assert code == 0
     assert calls[0].all_chats is True
@@ -165,30 +171,28 @@ def test_zero_at_the_first_flow_screen_returns_to_the_root_menu():
     assert screens(output).count("1. Chats & topics (find IDs)") == 2
 
 
-def test_discover_zero_at_where_screen_returns_to_scope_not_root():
-    # 1 = discover, 1 = chats I manage, 0 = "where" back -> scope screen again,
-    # 2 = every chat this time, 1 = print here, Enter = menu, 0 = exit
-    answers = ["1", "1", "0", "2", "1", "", "0"]
+def test_discover_zero_on_a_field_screen_returns_to_the_form_not_root():
+    # 1 = discover, 2 = write to, 0 = back -> the form again, 1 = which chats,
+    # 2 = every chat, 3 = run it, Enter = menu, 0 = exit
+    answers = ["1", "2", "0", "1", "2", "3", "", "0"]
     code, calls, output = run_menu(answers)
 
     assert code == 0
-    # Proves the second pass through the scope screen (not the root) is what
-    # produced the call: an "every chat" answer only reaches here if 0 at
-    # "Where should it go?" landed back on the scope screen.
+    # An "every chat" answer only reaches the call if 0 at "Write to" landed
+    # back on the form, not the root.
     assert calls[0].all_chats is True
-    assert screens(output).count("1. Chats I manage") == 2
+    assert screens(output).count("Main › Chats & topics\n") == 3
 
 
-def test_discover_blank_json_path_returns_to_where_screen_not_root():
-    # 1 = discover, 1 = chats I manage, 2 = write a JSON file, "" = blank
-    # cancels the path prompt -> back to "Where should it go?" (not root),
-    # 1 = print here this time, Enter = menu, 0 = exit.
-    answers = ["1", "1", "2", "", "1", "", "0"]
+def test_discover_blank_json_path_leaves_the_destination_alone():
+    # 1 = discover, 2 = write to, 2 = a JSON file, "" = blank cancels the path
+    # prompt -> the form again, still printing here, 3 = run it, Enter, 0 = exit.
+    answers = ["1", "2", "2", "", "3", "", "0"]
     code, calls, output = run_menu(answers)
 
     assert code == 0
     assert calls[0].json_output is None
-    assert screens(output).count("Where should it go?") == 2
+    assert screens(output).count("Write to       [(print it here)]") == 2
 
 
 def test_two_actions_in_one_session():
@@ -215,7 +219,7 @@ def test_a_session_acquisition_error_is_caught_and_returns_to_the_menu():
         async def client(self):
             raise ConfigError("TELEGRAM_API_ID is required.")
 
-    code, calls, output = run_menu(["1", "1", "1", "", "0"], session=BrokenSession())
+    code, calls, output = run_menu(["1", "3", "", "0"], session=BrokenSession())
 
     assert code == 0
     assert calls == []
@@ -451,15 +455,16 @@ def test_search_zero_at_staging_returns_to_the_chat_picker_not_root():
 
 def test_search_staging_back_discards_and_says_so():
     # 2 = search, 1 = forum groups, 1 = Hermes, 2 = Contains (unset -> straight to
-    # the value prompt), "deploy" = the value, 0 = staging back (discards it and
-    # says so), 0 = chat picker back, 0 = exit.
-    answers = ["2", "1", "1", "2", "deploy", "0", "0", "0"]
+    # the value prompt), "deploy" = the value, 0 = staging back -> asks first,
+    # 0 = discard (says so) -> chat picker, 0 = chat picker back, 0 = exit.
+    answers = ["2", "1", "1", "2", "deploy", "0", "0", "0", "0"]
     code, calls, output = run_menu(answers)
 
     text = screens(output)
     assert code == 0
     assert calls == []
     assert "0. Back (discards)" in text
+    assert "Main › Search › Hermes › 1 staged change\n" in text
     assert "Discarded 1 staged change." in text
 
 
@@ -649,8 +654,9 @@ def test_bot_edit_unset_field_skips_the_keep_change_clear_screen():
 
 
 def test_bot_edit_shows_current_values_and_staged_changes():
-    # ... 0 = field list back (to the bot's own screen), 0 = the list, 0 = root, 0 = exit
-    answers = ["6", "1", "1", "1", "2", "Harry Two", "0", "0", "0", "0"]
+    # ... 0 = field list back -> asks first, 0 = discard (to the bot's own screen),
+    # 0 = the list, 0 = root, 0 = exit
+    answers = ["6", "1", "1", "1", "2", "Harry Two", "0", "0", "0", "0", "0"]
     _code, _calls, output = run_menu(answers)
 
     text = screens(output)
@@ -663,7 +669,7 @@ def test_bot_edit_shows_current_values_and_staged_changes():
 def test_bot_edit_staging_the_name_none_is_not_shown_as_cleared():
     # "none" is the sentinel for clearing rights, not an ordinary staged value.
     # Typed as a *name* it must render as the literal value, not "(cleared)".
-    answers = ["6", "1", "1", "1", "2", "none", "0", "0", "0", "0"]
+    answers = ["6", "1", "1", "1", "2", "none", "0", "0", "0", "0", "0"]
     _code, _calls, output = run_menu(answers)
 
     text = screens(output)
@@ -824,8 +830,9 @@ def test_send_shows_a_long_message_on_one_line():
 
 
 def test_create_group_asks_for_a_title_and_description():
-    # 4 = create, 1 = Group
-    answers = ["4", "1", "Hermes", "the agency", "", "0"]
+    # 4 = create, 1 = Group, then the form: 2 = name, 3 = description (unset, so
+    # straight to the prompt), 4 = create it, Enter, 0
+    answers = ["4", "1", "2", "Hermes", "3", "the agency", "4", "", "0"]
     code, calls, _output = run_menu(answers)
 
     assert code == 0
@@ -839,8 +846,8 @@ def test_create_group_asks_for_a_title_and_description():
 
 
 def test_create_forum_group_sets_forum():
-    # 2 = Forum group; a blank description means none
-    answers = ["4", "2", "Hermes", "", "", "0"]
+    # 2 = Forum group; no description staged means none
+    answers = ["4", "2", "2", "Hermes", "4", "", "0"]
     code, calls, _output = run_menu(answers)
 
     assert code == 0
@@ -849,7 +856,7 @@ def test_create_forum_group_sets_forum():
 
 
 def test_create_channel_asks_for_a_broadcast():
-    answers = ["4", "3", "Alerts", "", "", "0"]
+    answers = ["4", "3", "2", "Alerts", "4", "", "0"]
     code, calls, _output = run_menu(answers)
 
     assert code == 0
@@ -858,8 +865,9 @@ def test_create_channel_asks_for_a_broadcast():
 
 
 def test_create_topic_picks_a_forum_group_first():
-    # 4 = Topic in a forum group, 1 = Hermes (the only forum group)
-    answers = ["4", "4", "1", "Deploys", "", "0"]
+    # 4 = Topic in a forum group, 1 = Hermes (the only forum group), then the
+    # form: 3 = name, 4 = create it, Enter, 0
+    answers = ["4", "4", "1", "3", "Deploys", "4", "", "0"]
     code, calls, _output = run_menu(answers)
 
     assert code == 0
@@ -869,13 +877,35 @@ def test_create_topic_picks_a_forum_group_first():
     assert args.title == "Deploys"
 
 
-def test_create_cancelling_the_title_returns_to_the_kind_list():
-    answers = ["4", "1", "", "0", "0"]
+def test_create_cancelling_the_name_keeps_the_form_and_back_returns_to_the_kind_list():
+    # 4 = create, 1 = Group, 2 = name, "" cancels -> the form, 0 = back (nothing
+    # typed, so no question) -> the kind list, 0 = root, 0 = exit
+    answers = ["4", "1", "2", "", "0", "0", "0"]
     code, calls, output = run_menu(answers)
 
     assert code == 0
     assert calls == []
-    assert screens(output).count("1. Group") == 2
+    assert screens(output).count("Name           [(not set)]") == 2
+    assert screens(output).count("1. Group\n") == 2
+
+
+def test_create_refuses_to_create_without_a_name():
+    _code, calls, output = run_menu(["4", "1", "4", "0", "0", "0"])
+
+    assert calls == []
+    assert "Give it a name first." in screens(output)
+
+
+def test_create_back_with_a_name_typed_asks_first():
+    # ... 2 = name, "Team", 0 = back -> asks, 1 = keep editing, 0 = back -> asks,
+    # 0 = discard -> the kind list, 0 = root, 0 = exit
+    _code, calls, output = run_menu(["4", "1", "2", "Team", "0", "1", "0", "0", "0", "0"])
+
+    text = screens(output)
+    assert calls == []
+    assert text.count("Main › Create › Not created yet\n") == 2
+    assert text.count("Name           [Team]") == 2
+    assert "Discarded the form." in text
 
 
 def test_send_reoffers_the_staged_message_in_the_header():
@@ -1011,12 +1041,15 @@ def test_after_run_says_not_done_when_the_action_was_declined_and_failed_on_an_e
     assert "Failed" in screens(output)
 
 
-def test_discover_tweak_returns_to_the_scope_screen():
-    # 1 = discover, 1 = managed, 1 = print, 2 = tweak -> scope again, 2 = every chat, 1 = print, Enter, 0
-    _code, calls, output = run_menu(["1", "1", "1", "2", "2", "1", "", "0"])
+def test_discover_tweak_returns_to_the_form_with_the_path_kept():
+    # 1 = discover, 2 = write to, 2 = JSON, path, 3 = run, 2 = tweak -> the form
+    # with the path still there, 1 = which chats, 2 = every chat, 3 = run, Enter, 0
+    answers = ["1", "2", "2", "/tmp/o.json", "3", "2", "1", "2", "3", "", "0"]
+    _code, calls, output = run_menu(answers)
 
     assert [call.all_chats for call in calls] == [False, True]
-    assert screens(output).count("1. Chats I manage") == 2
+    assert [call.json_output for call in calls] == ["/tmp/o.json", "/tmp/o.json"]
+    assert screens(output).count("Write to       [/tmp/o.json]") >= 2
 
 
 def test_doctor_keeps_the_plain_enter_or_zero_prompt():
@@ -1037,15 +1070,17 @@ def test_send_tweak_keeps_the_message_files_and_topic():
     assert screens(output).count("Message   [hi]") >= 2
 
 
-def test_create_offers_another_instead_of_a_rerun():
-    # 4 = create, 1 = group, "Team", blank description, 1 = create another -> the
-    # kind list, 3 = channel, "News", blank description, Enter, 0
-    answers = ["4", "1", "Team", "", "1", "3", "News", "", "", "0"]
+def test_create_another_returns_to_the_form_as_filled():
+    # 4 = create, 1 = group, 2 = name, "Team", 4 = create it, 1 = create another
+    # -> the form with Team still there, 2 = name, "Team 2", 4 = create it, Enter, 0
+    answers = ["4", "1", "2", "Team", "4", "1", "2", "Team 2", "4", "", "0"]
     _code, calls, output = run_menu(answers)
 
-    assert [(call.create_kind, call.title) for call in calls] == [("group", "Team"), ("channel", "News")]
-    assert "1. Create another" in screens(output)
-    assert "Run it again" not in screens(output)
+    text = screens(output)
+    assert [(call.create_kind, call.title) for call in calls] == [("group", "Team"), ("group", "Team 2")]
+    assert "1. Create another" in text
+    assert "Run it again" not in text
+    assert text.count("Name           [Team]") == 2
 
 
 # --- send: back asks before discarding ---------------------------------------
@@ -1148,9 +1183,9 @@ def test_bots_typed_username_shows_a_bot_you_do_not_own_read_only():
 
     text = screens(output)
     assert calls == []
-    assert "3. Type a bot @username or ID" in text
+    assert "3. Type a bot @username, ID or nickname" in text
     assert "Bio: Not mine" in text
-    assert "Read-only: you do not own this bot" in text
+    assert "Note: not owned by you - read-only." in text
     assert "Edit this bot" not in text
     assert "1. Save this profile to a JSON file" in text
 
@@ -1175,7 +1210,24 @@ def test_bots_with_none_of_your_own_still_offers_the_lookup():
     text = screens(output)
     assert calls == []
     assert "No bots of your own" in text
-    assert "1. Type a bot @username or ID" in text
+    assert "1. Type a bot @username, ID or nickname" in text
+
+
+def test_bots_typed_nickname_resolves_through_the_token_like_the_flags_do():
+    class Session(FakeSession):
+        def __init__(self):
+            super().__init__(bot_tokens={"harry": "12345:AAtoken"})
+            self.references = []
+
+        async def bot_profile(self, reference):
+            self.references.append(reference)
+            return self._profile
+
+    session = Session()
+    _code, _calls, _output = run_menu(["6", "3", "harry", "0", "0", "0"], session=session)
+
+    # The nickname never reaches Telegram: the token's own bot id does.
+    assert session.references == ["12345"]
 
 
 def test_bot_edit_more_fetches_the_profile_again():

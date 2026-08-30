@@ -77,3 +77,12 @@ def test_writer_paints_and_reader_paints_the_prompt_when_colour_is_on(capsys, mo
     monkeypatch.setattr(builtins, "input", lambda prompt: seen.setdefault("prompt", prompt) and "1")
     assert ui.reader(enabled=True)("Name (blank cancels): ") == "1"
     assert seen["prompt"] == f"Name {ui.DIM}(blank cancels){ui.RESET}: "
+
+
+def test_paint_only_titles_the_first_line_of_a_write():
+    # format_bot_profile prints a heading over the same rule further down its own
+    # output; that is a command's output, not a screen, and stays plain.
+    text = "Bot ID: 1\n\nCommands\n" + prompts.RULE + "\n/start  Start"
+    painted = ui.paint(text).split("\n")
+    assert painted[2] == "Commands"
+    assert painted[3] == f"{ui.DIM}{prompts.RULE}{ui.RESET}"
