@@ -8,13 +8,15 @@ from typing import Any
 from telethon.errors import ChannelForumMissingError, RPCError
 
 from telegram_tools import cli
-from telegram_tools.bots import IMPLICIT_OTHER_RIGHT, format_bot_profile, format_edit_heading, get_bot_profile, list_bots, resolve_bot, right_names
+from telegram_tools.bots import IMPLICIT_OTHER_RIGHT, format_bot_profile, get_bot_profile, list_bots, resolve_bot, right_names
 from telegram_tools.client import SessionInUseError, create_client, start_client
 from telegram_tools.config import ConfigError, load_config, lookup_bot_token
 from telegram_tools.discovery import list_dialog_choices
 from telegram_tools.prompts import BACK, CLEAR, EXIT, MENU, Extra, after_action, after_run, ask_int, ask_lines, ask_text, choose, edit_field, pick, pick_many
 from telegram_tools.resolver import resolve_chat
 from telegram_tools.topics import get_forum_topics
+from telegram_tools import ui
+from telegram_tools.ui import crumb
 
 # What the menu turns into a printed line instead of an exit. EntityResolutionError
 # is a ValueError and PermissionError is an OSError, so both are already covered;
@@ -22,6 +24,8 @@ from telegram_tools.topics import get_forum_topics
 MENU_ERRORS = (ConfigError, SessionInUseError, ValueError, OSError, RPCError)
 
 ROOT_TITLE = "telegram-tools"
+# The first crumb of every screen below the root.
+MAIN = "Main"
 ROOT_ITEMS = (
     "Chats & topics (find IDs)",
     "Search / export messages",
@@ -109,7 +113,7 @@ AGAIN = ("again", "Run it again")
 TWEAK = ("tweak", "Tweak it")
 
 
-async def _act(args, *, session, runner, read, write, rows=(AGAIN, TWEAK)) -> Any:
+async def _act(args, *, session, runner, read, write, trail: str = MAIN, rows=(AGAIN, TWEAK)) -> Any:
     """Run one action, then the after-run screen. Returns a row key, MENU or EXIT.
 
     The title says what happened: Done on exit code 0, Not done when a confirm
@@ -120,8 +124,8 @@ async def _act(args, *, session, runner, read, write, rows=(AGAIN, TWEAK)) -> An
     """
     while True:
         code = await _call(args, session=session, runner=runner, write=write)
-        title = "Done" if code == 0 else ("Failed" if code is None else "Not done")
-        result = after_run(read=read, write=write, title=title, rows=rows)
+        outcome = "Done" if code == 0 else ("Failed" if code is None else "Not done")
+        result = after_run(read=read, write=write, title=crumb(trail, outcome), rows=rows)
         if result != "again":
             return result
 
@@ -209,13 +213,13 @@ def _pick_from_group(chats, *, title, read, write) -> Any:
         return ChatPick(reference=str(chosen.id), title=chosen.title, is_forum=chosen.is_forum)
 
 
-async def _pick_chat(*, session, read, write, forums_only: bool = False) -> Any:
+async def _pick_chat(*, session, read, write, forums_only: bool = False, trail: str = MAIN) -> Any:
     chats = await session.chats()
 
     if forums_only:
         return _pick_from_group(
             [chat for chat in chats if chat.is_forum],
-            title="Pick a forum group",
+            title=crumb(trail, "Pick a forum group"),
             read=read,
             write=write,
         )
@@ -225,7 +229,7 @@ async def _pick_chat(*, session, read, write, forums_only: bool = False) -> Any:
 
     while True:
         labels = [f"{name} ({len(members)})" for name, members in groups]
-        choice = choose(labels + [_TYPE_A_CHAT], title="Pick a chat", read=read, write=write)
+        choice = choose(labels + [_TYPE_A_CHAT], title=crumb(trail, "Pick a chat"), read=read, write=write)
         if choice is BACK:
             return BACK
 
@@ -236,20 +240,21 @@ async def _pick_chat(*, session, read, write, forums_only: bool = False) -> Any:
             return typed
 
         name, members = groups[choice]
-        picked = _pick_from_group(members, title=f"Pick a chat  >  {name}", read=read, write=write)
+        picked = _pick_from_group(members, title=crumb(trail, "Pick a chat", name), read=read, write=write)
         if picked is BACK:
             continue
         return picked
 
 
 async def _flow_discover(*, session, runner, read, write) -> bool:
+    trail = crumb(MAIN, "Chats & topics")
     while True:
-        scope = choose(["Chats I manage", "Every chat"], title="Chats & topics", read=read, write=write)
+        scope = choose(["Chats I manage", "Every chat"], title=trail, read=read, write=write)
         if scope is BACK:
             return True
 
         while True:
-            where = choose(["Print it here", "Write a JSON file"], title="Where should it go?", read=read, write=write)
+            where = choose(["Print it here", "Write a JSON file"], title=crumb(trail, "Where should it go?"), read=read, write=write)
             if where is BACK:
                 break
 
@@ -263,7 +268,7 @@ async def _flow_discover(*, session, runner, read, write) -> bool:
                 json_output = path
 
             args = _namespace(command="discover", json_output=json_output, all_chats=scope == 1)
-            result = await _act(args, session=session, runner=runner, read=read, write=write)
+            result = await _act(args, session=session, runner=runner, read=read, write=write, trail=trail)
             if result != "tweak":
                 return _leave(result)
             # Tweak: back to the scope screen, the first thing this flow asks.
@@ -284,7 +289,7 @@ def _shown(value, empty: str) -> str:
     return empty if value in (None, "") else str(value)
 
 
-async def _ask_topic(picked, *, session, read, write) -> Any:
+async def _ask_topic(picked, *, session, read, write, trail: str) -> Any:
     topics = await session.topics(picked.reference)
     if not topics:
         write("That chat has no topics.")
@@ -292,7 +297,7 @@ async def _ask_topic(picked, *, session, read, write) -> Any:
 
     chosen = pick(
         topics,
-        title=f"Topics in {picked.title}",
+        title=crumb(trail, "Topic"),
         label=lambda topic: f"{topic.id:<6}  {topic.title}",
         read=read,
         write=write,
@@ -305,8 +310,8 @@ async def _ask_topic(picked, *, session, read, write) -> Any:
     return chosen
 
 
-def _ask_from_user(*, read, write) -> Any:
-    choice = choose(["Anyone", "Me", "Someone else"], title="From", read=read, write=write)
+def _ask_from_user(*, read, write, trail: str) -> Any:
+    choice = choose(["Anyone", "Me", "Someone else"], title=crumb(trail, "From"), read=read, write=write)
     if choice is BACK:
         return BACK
     if choice == 0:
@@ -317,11 +322,13 @@ def _ask_from_user(*, read, write) -> Any:
 
 
 async def _flow_search(*, session, runner, read, write) -> bool:
+    trail = crumb(MAIN, "Search")
     while True:
-        picked = await _pick_chat(session=session, read=read, write=write)
+        picked = await _pick_chat(session=session, read=read, write=write, trail=trail)
         if picked is BACK:
             return True
 
+        form = crumb(trail, picked.title)
         staged: dict[str, Any] = {"topic": None, "keyword": None, "from_user": None, "since": None, "until": None, "limit": None}
         topic_info = None  # The picked TopicInfo, kept only for display; staged["topic"] holds its id.
 
@@ -344,7 +351,7 @@ async def _flow_search(*, session, runner, read, write) -> bool:
 
             choice = choose(
                 [label for _key, label in rows],
-                title=f"Search in {picked.title}",
+                title=form,
                 read=read,
                 write=write,
                 back_label="Back (discards)",
@@ -363,7 +370,7 @@ async def _flow_search(*, session, runner, read, write) -> bool:
                     output_path = ask_text("Export file path", read=read, write=write)
                     if output_path is BACK:
                         continue
-                    fmt = choose(["JSON", "CSV"], title="Format", read=read, write=write)
+                    fmt = choose(["JSON", "CSV"], title=crumb(form, "Format"), read=read, write=write)
                     if fmt is BACK:
                         continue
                     output_format = ("json", "csv")[fmt]
@@ -380,14 +387,14 @@ async def _flow_search(*, session, runner, read, write) -> bool:
                     format=output_format,
                     output=output_path,
                 )
-                result = await _act(args, session=session, runner=runner, read=read, write=write)
+                result = await _act(args, session=session, runner=runner, read=read, write=write, trail=form)
                 if result != "tweak":
                     return _leave(result)
                 # Tweak: the form again, every staged value still in place.
                 continue
 
             if key == "topic":
-                answer = await _ask_topic(picked, session=session, read=read, write=write)
+                answer = await _ask_topic(picked, session=session, read=read, write=write, trail=form)
                 if answer is BACK:
                     continue
                 topic_info = None if answer is CLEAR else answer
@@ -395,10 +402,10 @@ async def _flow_search(*, session, runner, read, write) -> bool:
                 continue
 
             if key == "from_user":
-                answer = _ask_from_user(read=read, write=write)
+                answer = _ask_from_user(read=read, write=write, trail=form)
             elif key == "limit":
                 answer = edit_field(
-                    "Limit",
+                    crumb(form, "Limit"),
                     _shown(staged["limit"], "(no limit)"),
                     read=read,
                     write=write,
@@ -410,7 +417,7 @@ async def _flow_search(*, session, runner, read, write) -> bool:
                 labels = {"keyword": ("Contains", "(anything)"), "since": ("Since", "(any date)"), "until": ("Until", "(any date)")}
                 title, empty = labels[key]
                 answer = edit_field(
-                    title,
+                    crumb(form, title),
                     _shown(staged[key], empty),
                     read=read,
                     write=write,
@@ -442,7 +449,7 @@ def _files_label(files: list[str]) -> str:
     return first if len(files) == 1 else f"{first} +{len(files) - 1} more"
 
 
-def _ask_files(files: list[str], *, read, write) -> Any:
+def _ask_files(files: list[str], *, read, write, trail: str) -> Any:
     """The new attachment list, or BACK to leave it alone."""
     if not files:
         path = ask_text("File path", read=read, write=write)
@@ -450,7 +457,7 @@ def _ask_files(files: list[str], *, read, write) -> Any:
 
     choice = choose(
         ["Add another file", "Remove them all"],
-        title=f"Files ({len(files)})",
+        title=crumb(trail, f"Files ({len(files)})"),
         read=read,
         write=write,
     )
@@ -462,7 +469,7 @@ def _ask_files(files: list[str], *, read, write) -> Any:
     return BACK if path is BACK else [*files, path]
 
 
-async def _ask_send_topic(picked, *, session, read, write) -> Any:
+async def _ask_send_topic(picked, *, session, read, write, trail: str) -> Any:
     """A topic to post into, CLEAR for the chat itself, or BACK to cancel.
 
     A chat with no topics is an answer here, not the failure it is for `clear`:
@@ -475,7 +482,7 @@ async def _ask_send_topic(picked, *, session, read, write) -> Any:
 
     chosen = pick(
         topics,
-        title=f"Topics in {picked.title}",
+        title=crumb(trail, "Topic"),
         label=lambda topic: f"{topic.id:<6}  {topic.title}",
         read=read,
         write=write,
@@ -487,11 +494,13 @@ async def _ask_send_topic(picked, *, session, read, write) -> Any:
 
 
 async def _flow_send(*, session, runner, read, write) -> bool:
+    trail = crumb(MAIN, "Send")
     while True:
-        picked = await _pick_chat(session=session, read=read, write=write)
+        picked = await _pick_chat(session=session, read=read, write=write, trail=trail)
         if picked is BACK:
             return True
 
+        form = crumb(trail, picked.title)
         topic_info = None
         text: str | None = None
         files: list[str] = []
@@ -510,7 +519,7 @@ async def _flow_send(*, session, runner, read, write) -> bool:
 
             choice = choose(
                 [label for _key, label in rows],
-                title=f"Send to {picked.title}",
+                title=form,
                 read=read,
                 write=write,
                 back_label="Back (discards)",
@@ -520,7 +529,7 @@ async def _flow_send(*, session, runner, read, write) -> bool:
                     # A composed message is the one thing in this menu that hurts
                     # to retype, so backing out of it asks first. Pressing 0 on
                     # this screen is the second, deliberate press.
-                    keep = choose(["Keep editing"], title="Unsent message", read=read, write=write, back_label="Discard it and go back")
+                    keep = choose(["Keep editing"], title=crumb(form, "Unsent message"), read=read, write=write, back_label="Discard it and go back")
                     if keep == 0:
                         continue
                     write("Discarded the unsent message.")
@@ -528,7 +537,7 @@ async def _flow_send(*, session, runner, read, write) -> bool:
             key = rows[choice][0]
 
             if key == "topic":
-                answer = await _ask_send_topic(picked, session=session, read=read, write=write)
+                answer = await _ask_send_topic(picked, session=session, read=read, write=write, trail=form)
                 if answer is BACK:
                     continue
                 topic_info = None if answer is CLEAR else answer
@@ -544,7 +553,7 @@ async def _flow_send(*, session, runner, read, write) -> bool:
                 continue
 
             if key == "files":
-                answer = _ask_files(files, read=read, write=write)
+                answer = _ask_files(files, read=read, write=write, trail=form)
                 if answer is not BACK:
                     files = answer
                 continue
@@ -563,7 +572,7 @@ async def _flow_send(*, session, runner, read, write) -> bool:
                 # its y/N run exactly as they do for the flags.
                 yes=False,
             )
-            result = await _act(args, session=session, runner=runner, read=read, write=write)
+            result = await _act(args, session=session, runner=runner, read=read, write=write, trail=form)
             if result != "tweak":
                 return _leave(result)
             # Tweak: the same message, files and topic, ready to change one thing.
@@ -583,21 +592,22 @@ CREATE_KINDS = (
 
 
 async def _flow_create(*, session, runner, read, write) -> bool:
+    trail = crumb(MAIN, "Create")
     while True:
-        choice = choose([label for _kind, _forum, label in CREATE_KINDS], title="Create", read=read, write=write)
+        choice = choose([label for _kind, _forum, label in CREATE_KINDS], title=trail, read=read, write=write)
         if choice is BACK:
             return True
         kind, forum, label = CREATE_KINDS[choice]
 
         if kind == "topic":
-            picked = await _pick_chat(session=session, read=read, write=write, forums_only=True)
+            picked = await _pick_chat(session=session, read=read, write=write, forums_only=True, trail=crumb(trail, "Topic"))
             if picked is BACK:
                 continue
             title = ask_text("Topic name", read=read, write=write)
             if title is BACK:
                 continue
             args = _namespace(command="create", create_kind="topic", chat=picked.reference, title=title, yes=False)
-            result = await _act(args, session=session, runner=runner, read=read, write=write, rows=(CREATE_ANOTHER,))
+            result = await _act(args, session=session, runner=runner, read=read, write=write, trail=crumb(trail, "Topic"), rows=(CREATE_ANOTHER,))
             if result != "tweak":
                 return _leave(result)
             continue
@@ -616,7 +626,7 @@ async def _flow_create(*, session, runner, read, write) -> bool:
             forum=forum,
             yes=False,
         )
-        result = await _act(args, session=session, runner=runner, read=read, write=write, rows=(CREATE_ANOTHER,))
+        result = await _act(args, session=session, runner=runner, read=read, write=write, trail=crumb(trail, label), rows=(CREATE_ANOTHER,))
         if result != "tweak":
             return _leave(result)
 
@@ -633,10 +643,12 @@ async def _flow_clear(*, session, runner, read, write) -> bool:
     ticks: dict[str, list] = {}
     scanned: tuple | None = None
     batch_size = DEFAULT_BATCH_SIZE
+    trail = crumb(MAIN, "Clear")
     while True:
-        picked = await _pick_chat(session=session, read=read, write=write, forums_only=True)
+        picked = await _pick_chat(session=session, read=read, write=write, forums_only=True, trail=trail)
         if picked is BACK:
             return True
+        chat = crumb(trail, picked.title)
 
         topics = await session.topics(picked.reference)
         if not topics:
@@ -647,7 +659,7 @@ async def _flow_clear(*, session, runner, read, write) -> bool:
         while True:
             selected = pick_many(
                 topics,
-                title=f"Topics in {picked.title} - tick what to clear",
+                title=crumb(chat, "Tick what to clear"),
                 label=lambda topic: f"{topic.id:<6}  {topic.title}",
                 read=read,
                 write=write,
@@ -686,7 +698,7 @@ async def _flow_clear(*, session, runner, read, write) -> bool:
             while True:
                 choice = choose(
                     ["Clear them for real (asks you to type DELETE)", f"Batch size [{batch_size}]"],
-                    title="Dry-run done",
+                    title=crumb(chat, "Dry-run done"),
                     read=read,
                     write=write,
                     back_label="Back to the topic list",
@@ -708,7 +720,7 @@ async def _flow_clear(*, session, runner, read, write) -> bool:
                         "topics": list(dry_run.topics) if dry_run.topics is not None else None,
                     }
                 )
-                result = await _act(for_real, session=session, runner=runner, read=read, write=write, rows=(("tweak", "Clear more topics"),))
+                result = await _act(for_real, session=session, runner=runner, read=read, write=write, trail=chat, rows=(("tweak", "Clear more topics"),))
                 if result != "tweak":
                     return _leave(result)
                 # Those topics are empty now: the ticks and the scan are stale.
@@ -801,6 +813,7 @@ def _bot_field_is_set(profile, key: str) -> bool:
 
 
 def _ask_rights(title: str, current: list[str], *, read, write) -> Any:
+    """`title` is the full crumb: this screen is one step below a field."""
     names = [name for name in right_names() if name != IMPLICIT_OTHER_RIGHT]
     chosen = pick_many(
         names,
@@ -815,12 +828,13 @@ def _ask_rights(title: str, current: list[str], *, read, write) -> Any:
     return ",".join(chosen)
 
 
-async def _flow_bot_edit(profile, *, session, runner, read, write) -> Any:
-    """True/False when an edit is applied (the session's normal keep-going contract);
-    BACK when the field list is backed out of untouched, so the caller can redisplay
-    the bot's own screen instead of bubbling all the way up to the root menu."""
+async def _flow_bot_edit(profile, *, session, runner, read, write, trail: str) -> Any:
+    """An after-run answer once an edit is applied; BACK when the field list is
+    backed out of untouched, so the caller can redisplay the bot's own screen
+    instead of bubbling all the way up to the root menu."""
     token = lookup_bot_token(session.config.bot_tokens, profile.id)
     staged: dict[str, Any] = {}
+    edit = crumb(trail, "Edit")
 
     while True:
         rows: list[tuple[str, str]] = []
@@ -837,8 +851,7 @@ async def _flow_bot_edit(profile, *, session, runner, read, write) -> Any:
             rows.append((key, f"{title:<16} [{value}]{gate}"))
         rows.append(("apply", "Review & apply"))
 
-        heading = format_edit_heading(profile)
-        choice = choose([label for _key, label in rows], title=heading, read=read, write=write, back_label="Back (discards)")
+        choice = choose([label for _key, label in rows], title=edit, read=read, write=write, back_label="Back (discards)")
 
         if choice is BACK:
             if staged:
@@ -853,7 +866,7 @@ async def _flow_bot_edit(profile, *, session, runner, read, write) -> Any:
                 write("Nothing staged yet.")
                 continue
             args = _bots_namespace(bot=str(profile.id), **staged)
-            return await _act(args, session=session, runner=runner, read=read, write=write, rows=(("tweak", "Edit more"),))
+            return await _act(args, session=session, runner=runner, read=read, write=write, trail=edit, rows=(("tweak", "Edit more"),))
 
         field = next(entry for entry in BOT_FIELDS if entry[0] == key)
         _key, title, allow_clear, needs_token = field
@@ -865,14 +878,14 @@ async def _flow_bot_edit(profile, *, session, runner, read, write) -> Any:
                 continue
 
         if key in ("group_rights", "channel_rights"):
-            ask = lambda: _ask_rights(title, getattr(profile, key), read=read, write=write)
+            ask = lambda: _ask_rights(crumb(edit, title), getattr(profile, key), read=read, write=write)
         elif key in ("commands", "photo"):
             ask = lambda: ask_text(f"{title} file path", read=read, write=write)
         else:
             ask = lambda: ask_text(title, read=read, write=write)
 
         answer = edit_field(
-            title,
+            crumb(edit, title),
             _current_bot_value(profile, key),
             read=read,
             write=write,
@@ -911,7 +924,7 @@ def _bot_label(bot) -> str:
     return f"{'@' + bot.username if bot.username else '(no username)'}  {bot.name}"
 
 
-def _pick_bot(bots, *, read, write) -> Any:
+def _pick_bot(bots, *, read, write, trail: str) -> Any:
     """A bot from the list, an extra's key, or BACK.
 
     The list only ever holds bots you own. A bot you do not own can still be
@@ -919,15 +932,16 @@ def _pick_bot(bots, *, read, write) -> Any:
     list is empty, instead of a dead end.
     """
     if bots:
-        return pick(bots, title="My bots", label=_bot_label, read=read, write=write, extras=(_SAVE_BOT_LIST, _TYPE_A_BOT))
+        return pick(bots, title=trail, label=_bot_label, read=read, write=write, extras=(_SAVE_BOT_LIST, _TYPE_A_BOT))
     write("No bots of your own. One you do not own can still be looked up, read-only.")
-    choice = choose([_TYPE_A_BOT.label], title="My bots", read=read, write=write)
+    choice = choose([_TYPE_A_BOT.label], title=trail, read=read, write=write)
     return BACK if choice is BACK else _TYPE_A_BOT.key
 
 
 async def _flow_bots(*, session, runner, read, write) -> bool:
+    trail = crumb(MAIN, "My bots")
     while True:
-        chosen = _pick_bot(await session.bots(), read=read, write=write)
+        chosen = _pick_bot(await session.bots(), read=read, write=write, trail=trail)
         if chosen is BACK:
             return True
 
@@ -936,7 +950,7 @@ async def _flow_bots(*, session, runner, read, write) -> bool:
             if path is BACK:
                 continue
             args = _bots_namespace(json_output=path)
-            result = await _act(args, session=session, runner=runner, read=read, write=write, rows=(("tweak", "Back to the bot list"),))
+            result = await _act(args, session=session, runner=runner, read=read, write=write, trail=trail, rows=(("tweak", "Back to the bot list"),))
             if result != "tweak":
                 return _leave(result)
             continue
@@ -957,13 +971,13 @@ async def _flow_bots(*, session, runner, read, write) -> bool:
             write(f"error: {exc}")
             continue
 
-        result = await _flow_bot_screen(profile, session=session, runner=runner, read=read, write=write)
+        result = await _flow_bot_screen(profile, session=session, runner=runner, read=read, write=write, trail=trail)
         if result is BACK:
             continue
         return _leave(result)
 
 
-async def _flow_bot_screen(profile, *, session, runner, read, write) -> Any:
+async def _flow_bot_screen(profile, *, session, runner, read, write, trail: str) -> Any:
     """One bot: its profile, then edit it or save it. BACK returns to the bot
     list; anything else is an after-run answer for the caller."""
     # Printed here rather than through run(): the edit screen needs these values
@@ -973,16 +987,12 @@ async def _flow_bot_screen(profile, *, session, runner, read, write) -> Any:
     if not profile.is_owned:
         write("Read-only: you do not own this bot, so there is nothing here to edit.")
 
+    bot = crumb(trail, f"@{profile.username}" if profile.username else f"bot {profile.id}")
     while True:
         rows = [("save", "Save this profile to a JSON file")]
         if profile.is_owned:
             rows.insert(0, ("edit", "Edit this bot"))
-        choice = choose(
-            [label for _key, label in rows],
-            title=f"@{profile.username}" if profile.username else f"bot {profile.id}",
-            read=read,
-            write=write,
-        )
+        choice = choose([label for _key, label in rows], title=bot, read=read, write=write)
         if choice is BACK:
             return BACK
 
@@ -991,29 +1001,35 @@ async def _flow_bot_screen(profile, *, session, runner, read, write) -> Any:
             if path is BACK:
                 continue
             args = _bots_namespace(bot=str(profile.id), json_output=path)
-            result = await _act(args, session=session, runner=runner, read=read, write=write, rows=(("tweak", "Back to this bot"),))
+            result = await _act(args, session=session, runner=runner, read=read, write=write, trail=bot, rows=(("tweak", "Back to this bot"),))
             if result != "tweak":
                 return result
             continue
 
-        result = await _flow_bot_edit(profile, session=session, runner=runner, read=read, write=write)
+        result = await _flow_bot_edit(profile, session=session, runner=runner, read=read, write=write, trail=bot)
         while result == "tweak":
             # Edit more: the profile just changed, so fetch it again before the
             # field list shows current values.
             profile = await session.bot_profile(str(profile.id))
-            result = await _flow_bot_edit(profile, session=session, runner=runner, read=read, write=write)
+            result = await _flow_bot_edit(profile, session=session, runner=runner, read=read, write=write, trail=bot)
         if result is BACK:
             continue
         return result
 
 
-async def run_menu(*, read=input, write=print, session=None, runner=None) -> int:
+async def run_menu(*, read=None, write=None, session=None, runner=None) -> int:
     """The looping menu. Returns 0 on a normal exit.
 
     The exit code belongs to the session, not to any one action inside it: a
     session can run a dozen actions and there is no honest way to fold their
     codes into one number.
+
+    Colour is applied here and nowhere else: the default read and write paint
+    what the prompts hand them, so a caller that injects its own (every test)
+    gets plain text.
     """
+    read = ui.reader() if read is None else read
+    write = ui.writer() if write is None else write
     session = session if session is not None else MenuSession()
     runner = runner if runner is not None else cli.run
     flows = (_flow_discover, _flow_search, _flow_send, _flow_create, _flow_clear, _flow_bots, _flow_doctor)

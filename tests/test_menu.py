@@ -432,7 +432,7 @@ def test_search_topic_picker_says_the_chat_has_no_topics():
     assert "That chat has no topics." in text
     # It returned to the staging screen rather than crashing or exiting: the
     # screen renders once before the Topic row is chosen, once again after.
-    assert text.count("Search in Hermes") == 2
+    assert text.count("Main › Search › Hermes\n") == 2
 
 
 def test_search_zero_at_staging_returns_to_the_chat_picker_not_root():
@@ -1197,3 +1197,52 @@ def test_bot_edit_more_fetches_the_profile_again():
     assert calls[0].name == "Harry Two"
     assert "1. Edit more" in screens(output)
     assert session.profile_calls == 2
+
+
+# --- breadcrumbs and the colour boundary ---------------------------------------
+
+
+def test_every_screen_below_the_root_carries_its_trail():
+    # 2 = search, 1 = forum groups, 1 = Hermes, 3 = From, 0 = back to the form,
+    # 0 = back to the picker, 0 = root, 0 = exit
+    _code, _calls, output = run_menu(["2", "1", "1", "3", "0", "0", "0", "0"])
+    text = screens(output)
+    assert "Main › Search › Pick a chat\n" in text
+    assert "Main › Search › Pick a chat › Forum groups\n" in text
+    assert "Main › Search › Hermes\n" in text
+    assert "Main › Search › Hermes › From\n" in text
+
+    # 6 = my bots, 1 = harrybot, 1 = edit, 1 = name, then back out four times and exit
+    _code, _calls, output = run_menu(["6", "1", "1", "1", "0", "0", "0", "0", "0"])
+    text = screens(output)
+    assert "Main › My bots\n" in text
+    assert "Main › My bots › @harrybot\n" in text
+    assert "Main › My bots › @harrybot › Edit\n" in text
+    assert "Main › My bots › @harrybot › Edit › Name\n" in text
+
+    # 5 = clear, 1 = Hermes, 1 = tick, 5 = continue, 1 = for real, Enter, 0
+    _code, _calls, output = run_menu(["5", "1", "1", "5", "1", "", "0"])
+    text = screens(output)
+    assert "Main › Clear › Pick a forum group\n" in text
+    assert "Main › Clear › Hermes › Tick what to clear\n" in text
+    assert "Main › Clear › Hermes › Dry-run done\n" in text
+    assert "Main › Clear › Hermes › Done\n" in text
+
+
+def test_the_root_screen_keeps_the_tool_name_as_its_title():
+    _code, _calls, output = run_menu(["0"])
+    assert output[0].startswith("telegram-tools\n")
+
+
+def test_run_menu_defaults_to_the_ui_reader_and_writer(monkeypatch):
+    # Colour is applied by ui's reader/writer and nowhere else: the menu asks ui
+    # for both only when the caller injects neither.
+    answers = iter(["0"])
+    seen = []
+    monkeypatch.setattr(menu.ui, "reader", lambda: lambda _prompt: next(answers))
+    monkeypatch.setattr(menu.ui, "writer", lambda: seen.append)
+
+    code = asyncio.run(menu.run_menu(session=FakeSession(), runner=recorder()[1]))
+
+    assert code == 0
+    assert "0. Exit" in screens(seen)
