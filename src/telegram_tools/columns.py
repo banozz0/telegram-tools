@@ -10,8 +10,8 @@ The rules below were measured against a real terminal on 2026-08-31 by
 printing each shape and asking the terminal where the cursor landed, over
 plain text, CJK, a combining mark, emoji with and without U+FE0F, a flag, a
 skin-tone modifier and two ZWJ sequences -- all fourteen agree. The sibling
-discord-tools carries an older copy of this file that still adds a column for
-U+FE0F and mis-measures a flag; it is wrong and has not been corrected yet.
+discord-tools carries the same rules and the same measured table (0.5.1), and
+the two are meant to stay identical.
 """
 
 from __future__ import annotations
