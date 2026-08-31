@@ -9,12 +9,23 @@ class TopicInfo:
     id: int
     title: str
     top_message: int | None = None
+    icon_emoji: str | None = None
+
+    @property
+    def display_title(self) -> str:
+        """The title with the topic's emoji in front, the way Telegram draws it.
+
+        Deliberately not `title`: `--topic` matching and every export key on that,
+        so the emoji stays out of it and lives only on the screen.
+        """
+        return f"{self.icon_emoji} {self.title}" if self.icon_emoji else self.title
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "title": self.title,
             "top_message": self.top_message,
+            "icon_emoji": self.icon_emoji,
         }
 
 
