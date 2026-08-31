@@ -137,8 +137,8 @@ Admin: yes
 
 Topics
 --------------------------------------------
-141   Deploys
-217   Support
+141   💻 Deploys
+217   🔎 Support
 16    General
 ```
 
