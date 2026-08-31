@@ -4,6 +4,10 @@ All notable changes to this project will be documented here.
 
 This project follows a practical changelog style: user-visible changes, safety changes, and release notes belong here; active task tracking belongs outside the repo.
 
+## 3.6.0 - 2026-08-31
+
+- Topic listings show the emoji Telegram shows: `💻 Dobby`, `🔎 Researcher`, `‼️ Alerts`. A forum topic's title is plain text and the emoji in front of it is a separate custom-emoji document ID, so a tool that reads only the title prints titles that look like the emoji has gone missing — which is exactly how this was found. Every topic ID on a page is now resolved in one `messages.GetCustomEmojiDocuments` call, never one per topic, and the character goes in front of the title at the four places a topic is drawn: `discover`'s table and the menu's search, send and clear pickers. A topic with no icon, an ID Telegram will not resolve, or a failed call all print the bare title rather than an error. The `title` field itself is untouched — `--topic` matching and both export formats key on it — and `discover --json` gains an additive `icon_emoji` alongside it, so an existing reader keeps working.
+
 ## 3.5.0 - 2026-08-31
 
 The menu release: every flag reachable, back that stops forgetting, and a look.
