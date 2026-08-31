@@ -41,6 +41,18 @@ def test_preview_names_destination_sender_and_body_verbatim():
     assert "ship it\nsecond line" in preview
 
 
+def test_preview_shows_the_topic_emoji_telegram_draws():
+    target = SendTarget(
+        chat_id=-100111,
+        chat_title="Hermes",
+        topic=TopicInfo(id=80, title="Dobby", top_message=900, icon_emoji="\U0001f4bb"),
+    )
+
+    preview = format_send_preview(target, "ship it", sender="Sven")
+
+    assert "Topic   80 \U0001f4bb Dobby" in preview
+
+
 def test_preview_says_no_topic_when_the_chat_has_none():
     preview = format_send_preview(WHOLE_CHAT, "hi", sender="Sven")
 

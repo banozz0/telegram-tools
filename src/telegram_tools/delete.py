@@ -72,7 +72,7 @@ async def delete_topic_messages(
     ids: list[int] = []
     seen: set[int] = set()
     for topic in topics:
-        progress(f"Scanning topic {topic.id} ({topic.title})")
+        progress(f"Scanning topic {topic.id} ({topic.display_title})")
         for message_id in await _collect_topic_message_ids(client, chat, topic):
             if message_id not in seen:
                 seen.add(message_id)

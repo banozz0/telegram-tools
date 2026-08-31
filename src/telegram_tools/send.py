@@ -59,7 +59,7 @@ def format_send_preview(
     target: SendTarget, text: str | None, *, sender: str, files: Sequence[str] = ()
 ) -> str:
     """The whole message and its destination, so a y/N is never answered blind."""
-    topic = "(no topic - the chat itself)" if target.topic is None else f"{target.topic.id} {target.topic.title}"
+    topic = "(no topic - the chat itself)" if target.topic is None else f"{target.topic.id} {target.topic.display_title}"
     lines = [
         "Sending as " + sender,
         RULE,
