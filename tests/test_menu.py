@@ -1,6 +1,7 @@
 import asyncio
 
 from telegram_tools import menu
+from telegram_tools.columns import width
 from telegram_tools.config import ConfigError
 from telegram_tools.models import BotCommandInfo, BotInfo, ChatChoice, TopicInfo
 
@@ -325,6 +326,22 @@ def test_pick_chat_forums_only_skips_the_group_screen():
     assert picked.reference == "-100111"
     assert "Forum groups (1)" not in screens(output)
     assert "Pick a forum group" in screens(output)
+
+
+def test_pick_chat_lines_the_id_column_up_after_an_emoji_title():
+    # The two titles draw the same width and len() calls them different, so a
+    # len()-padded label puts one ID a column left of the other.
+    chats = [
+        ChatChoice(id=-100111, title="📚 Vaults", username=None, type="supergroup"),
+        ChatChoice(id=-100222, title="⚙️ Alerts", username=None, type="supergroup"),
+    ]
+    session = FakeSession(chats=chats)
+    _picked, output = pick_chat(["1", "0", "0"], session=session)
+
+    rows = [line for line in screens(output).splitlines() if "-100" in line]
+    assert len(rows) == 2
+    # "1. " + a 32-column name + two spaces: both IDs start at column 37.
+    assert [width(row[: row.index("-100")]) for row in rows] == [37, 37]
 
 
 def test_search_runs_with_no_filters():

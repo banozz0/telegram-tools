@@ -10,6 +10,7 @@ from telethon.errors import ChannelForumMissingError, RPCError
 from telegram_tools import cli
 from telegram_tools.bots import IMPLICIT_OTHER_RIGHT, format_bot_profile, get_bot_profile, list_bots, resolve_bot, right_names
 from telegram_tools.client import SessionInUseError, create_client, start_client
+from telegram_tools.columns import cell
 from telegram_tools.config import ConfigError, load_config, lookup_bot_token, resolve_bot_token
 from telegram_tools.discovery import list_dialog_choices
 from telegram_tools.prompts import BACK, CLEAR, EXIT, Extra, after_action, after_run, ask_int, ask_lines, ask_text, choose, edit_field, pick, pick_many
@@ -173,7 +174,9 @@ class ChatPick:
 
 
 def _chat_label(chat) -> str:
-    return f"{chat.title[:32]:<32}  {chat.id}"
+    # `cell`, not a slice and a `:<32}`: an emoji title measures wider on
+    # screen than `len()` says, and the ID column has to line up.
+    return f"{cell(chat.title, 32)}  {chat.id}"
 
 
 def _ask_reference(*, read, write) -> Any:
