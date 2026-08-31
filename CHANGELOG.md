@@ -4,6 +4,10 @@ All notable changes to this project will be documented here.
 
 This project follows a practical changelog style: user-visible changes, safety changes, and release notes belong here; active task tracking belongs outside the repo.
 
+## 3.5.1 - 2026-08-31
+
+- The menu's chat picker lines its ID column up after an emoji title. Padding counted codepoints while the terminal draws columns, so `📚 Vaults` and `⚙️ Alerts` — which the terminal draws at the same width — had their IDs a column apart, and a picker with a few emoji titles read as ragged. A new `columns` helper measures a title the way the terminal does (an emoji is two columns from one codepoint; a variation selector U+FE0F draws nothing of its own and hands its column to the character before it) and cuts a long title on a column boundary rather than through an emoji. Ported from the sibling discord-tools, where the same bug was found in a live picker. Nothing else in the repo pads a name: every other column pads a numeric ID or puts the name last.
+
 ## 3.5.0 - 2026-08-31
 
 The menu release: every flag reachable, back that stops forgetting, and a look.
