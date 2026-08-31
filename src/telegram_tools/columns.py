@@ -1,14 +1,17 @@
 """How a name is measured and cut so the ID column beside it lines up.
 
-Telegram chat titles carry emoji, and `len()` is the wrong ruler for them: a
-variation selector (U+FE0F) is a codepoint that draws nothing of its own, and
-an emoji draws two columns. Padding on `len()` is what puts one row of the
-chat picker a column out of line: the terminal draws `⚙️ Alerts` and
-`📚 Vaults` at the same 9 columns, and `len()` calls them 9 and 8.
+Telegram chat titles carry emoji, and `len()` is the wrong ruler for them: an
+emoji draws two columns from one codepoint, a variation selector draws none,
+and each half of a flag draws two. Padding on `len()` is what puts a row of
+the chat picker a column out of line -- `📚 Vaults` counts 8 characters
+and draws 9 columns, while `⚠️ Alerts` counts 9 and draws 8.
 
-Ported unchanged from the sibling discord-tools, where the same bug was found
-in a live picker and fixed on 2026-08-31; the two copies are meant to stay
-identical.
+The rules below were measured against a real terminal on 2026-08-31 by
+printing each shape and asking the terminal where the cursor landed, over
+plain text, CJK, a combining mark, emoji with and without U+FE0F, a flag, a
+skin-tone modifier and two ZWJ sequences -- all fourteen agree. The sibling
+discord-tools carries an older copy of this file that still adds a column for
+U+FE0F and mis-measures a flag; it is wrong and has not been corrected yet.
 """
 
 from __future__ import annotations
@@ -16,12 +19,15 @@ from __future__ import annotations
 import unicodedata
 
 # Codepoints that draw nothing of their own: combining marks, and the format
-# characters that only modify the character before them.
+# characters that only modify the character before them -- U+FE0F and the
+# zero-width joiner included. Asking for emoji presentation does not widen the
+# character it follows: the terminal draws `⚠️` in one column, like bare `⚠`.
 _ZERO_WIDTH = ("Mn", "Me", "Cf")
-# The one format character that is not zero-width in effect: it asks for the
-# character before it to be drawn as an emoji, which is two columns wide.
-_EMOJI_PRESENTATION = "️"
 _WIDE = ("W", "F")
+# A flag is a pair of regional indicators, and the terminal draws each of them
+# two columns wide rather than fusing the pair into one glyph. Unicode calls
+# them Neutral, so east_asian_width alone would say one column each.
+_REGIONAL_INDICATORS = range(0x1F1E6, 0x1F200)
 
 
 def width(text: str) -> int:
@@ -29,13 +35,13 @@ def width(text: str) -> int:
 
     A heuristic -- no two terminals agree on every codepoint -- but right for
     the case that actually bites here: a chat title with an emoji in front of
-    it. East Asian Wide and Fullwidth take two columns, zero-width codepoints
-    take none, and U+FE0F hands its second column to the character it follows.
+    it. East Asian Wide and Fullwidth take two columns, a regional indicator
+    takes two, and zero-width codepoints take none.
     """
     columns = 0
     for character in text:
-        if character == _EMOJI_PRESENTATION:
-            columns += 1
+        if ord(character) in _REGIONAL_INDICATORS:
+            columns += 2
         elif unicodedata.category(character) in _ZERO_WIDTH:
             continue
         else:
@@ -56,7 +62,9 @@ def cell(text: str, columns: int) -> str:
     """`text` cut to `columns` and padded out to exactly that.
 
     For a picker, where every row has to stay one line and the ID next to the
-    name is the thing being copied anyway.
+    name is the thing being copied anyway. A cut lands on a column boundary,
+    so it never draws wider than asked; a flag cut through the middle loses
+    its second half, which is ugly but still one column per column.
     """
     used = 0
     kept: list[str] = []

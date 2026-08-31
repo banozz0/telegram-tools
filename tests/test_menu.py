@@ -329,8 +329,8 @@ def test_pick_chat_forums_only_skips_the_group_screen():
 
 
 def test_pick_chat_lines_the_id_column_up_after_an_emoji_title():
-    # The two titles draw the same width and len() calls them different, so a
-    # len()-padded label puts one ID a column left of the other.
+    # len() ranks these two titles one way and the terminal draws them the
+    # other, so a len()-padded label puts their IDs two columns apart.
     chats = [
         ChatChoice(id=-100111, title="📚 Vaults", username=None, type="supergroup"),
         ChatChoice(id=-100222, title="⚙️ Alerts", username=None, type="supergroup"),
