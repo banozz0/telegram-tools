@@ -92,7 +92,7 @@ def _format_chat(chat: ChatInfo) -> str:
                 "--------------------------------------------",
             ]
         )
-        lines.extend(f"{topic.id:<{width}}  {topic.title}" for topic in chat.topics)
+        lines.extend(f"{topic.id:<{width}}  {topic.display_title}" for topic in chat.topics)
 
     return "\n".join(lines)
 

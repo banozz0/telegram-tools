@@ -313,7 +313,7 @@ async def _ask_topic(picked, *, session, read, write, trail: str) -> Any:
     chosen = pick(
         topics,
         title=crumb(trail, "Topic"),
-        label=lambda topic: f"{topic.id:<6}  {topic.title}",
+        label=lambda topic: f"{topic.id:<6}  {topic.display_title}",
         read=read,
         write=write,
         extras=(Extra("all", _ALL_TOPICS),),
@@ -497,7 +497,7 @@ async def _ask_send_topic(picked, *, session, read, write, trail: str) -> Any:
     chosen = pick(
         topics,
         title=crumb(trail, "Topic"),
-        label=lambda topic: f"{topic.id:<6}  {topic.title}",
+        label=lambda topic: f"{topic.id:<6}  {topic.display_title}",
         read=read,
         write=write,
         extras=(Extra("chat", _NO_TOPIC),),
@@ -668,7 +668,7 @@ async def _flow_clear(*, session, runner, read, write) -> bool:
             selected = pick_many(
                 topics,
                 title=crumb(chat, "Tick what to clear"),
-                label=lambda topic: f"{topic.id:<6}  {topic.title}",
+                label=lambda topic: f"{topic.id:<6}  {topic.display_title}",
                 read=read,
                 write=write,
                 preselected=ticks.get(picked.reference, []),

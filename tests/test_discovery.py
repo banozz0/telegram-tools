@@ -66,6 +66,22 @@ def test_format_discovery_table_shows_human_readable_chats_and_topics():
     assert "217  Support" in text
 
 
+def test_discovery_shows_the_topic_emoji_telegram_draws_and_leaves_a_bare_topic_bare():
+    info = dialog_to_chat_info(
+        SimpleNamespace(id=-1004297050934, title="Hermes", entity=SimpleNamespace(megagroup=True, forum=True)),
+        is_admin=True,
+        topics=[
+            TopicInfo(id=141, title="Dobby", top_message=141, icon_emoji="\U0001f4bb"),
+            TopicInfo(id=217, title="Support", top_message=217),
+        ],
+    )
+
+    text = format_discovery_table([info])
+
+    assert "141  \U0001f4bb Dobby" in text
+    assert "217  Support" in text
+
+
 def test_format_discovery_table_groups_managed_chats():
     forum = dialog_to_chat_info(
         SimpleNamespace(id=-1001, title="Forum", entity=SimpleNamespace(megagroup=True, forum=True)),

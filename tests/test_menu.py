@@ -25,6 +25,12 @@ TOPICS = [
     TopicInfo(id=217, title="Support", top_message=901),
 ]
 
+ICON_TOPICS = [
+    TopicInfo(id=141, title="Dobby", top_message=900, icon_emoji="\U0001f4bb"),
+    TopicInfo(id=217, title="Support", top_message=901),
+]
+
+
 BOTS = [BotInfo(id=12345, username="harrybot", name="Harry", bio=None, description=None, is_owned=True)]
 
 PROFILE = BotInfo(
@@ -433,6 +439,30 @@ def test_search_topic_picker_says_the_chat_has_no_topics():
     # It returned to the staging screen rather than crashing or exiting: the
     # screen renders once before the Topic row is chosen, once again after.
     assert text.count("Main › Search › Hermes\n") == 2
+
+
+def test_the_topic_picker_shows_the_emoji_telegram_draws_and_leaves_a_bare_topic_bare():
+    # 2 = search, 1 = forum groups, 1 = Hermes, 1 = the Topic row, then back out.
+    answers = ["2", "1", "1", "1", "0", "0", "0", "0"]
+    code, _calls, output = run_menu(answers, session=FakeSession(topics=ICON_TOPICS))
+
+    assert code == 0
+    text = screens(output)
+    assert "1. 141     \U0001f4bb Dobby" in text
+    assert "2. 217     Support" in text
+
+
+def test_the_clear_ticker_shows_the_topic_emoji_too():
+    # 5 = clear, 1 = Hermes, 0 = back out of the ticker, 0 = back out of the picker,
+    # 0 = exit. Nothing is ticked, so no dry-run and no DELETE gate is reached.
+    answers = ["5", "1", "0", "0", "0"]
+    code, calls, output = run_menu(answers, session=FakeSession(topics=ICON_TOPICS))
+
+    assert code == 0
+    assert calls == []
+    text = screens(output)
+    assert "1. [ ] 141     \U0001f4bb Dobby" in text
+    assert "2. [ ] 217     Support" in text
 
 
 def test_search_zero_at_staging_returns_to_the_chat_picker_not_root():
