@@ -37,7 +37,7 @@ dev = [
 telegram-tools = "telegram_tools.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/banozz0/telegram-tools"
+Homepage = "https://cli-tools-site.vercel.app/"
 Repository = "https://github.com/banozz0/telegram-tools"
 Issues = "https://github.com/banozz0/telegram-tools/issues"
 Changelog = "https://github.com/banozz0/telegram-tools/blob/main/CHANGELOG.md"

@@ -1,5 +1,7 @@
 # telegram-tools
 
+[![Site: cli-tools-site.vercel.app](https://img.shields.io/badge/site-cli--tools--site.vercel.app-00afff?style=flat-square&labelColor=09090b)](https://cli-tools-site.vercel.app/)
+
 A local CLI for operating your own Telegram chats: find the real IDs of your groups, channels, and forum topics, search and export messages, send a message into a chat or topic, create groups/channels/topics, and clear all messages out of forum topics without destroying the topics themselves.
 
 Built on [Telethon](https://github.com/LonamiWebs/Telethon). Everything runs on your machine with your own Telegram API credentials — no server, no third party, nothing leaves your computer except the Telegram API calls you asked for.
