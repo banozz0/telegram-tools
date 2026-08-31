@@ -22,6 +22,24 @@ class FakeClient:
         return [SimpleNamespace(pts_count=len(ids))]
 
 
+def test_the_scanning_line_shows_the_topic_emoji_telegram_draws():
+    client = FakeClient([SimpleNamespace(id=10), SimpleNamespace(id=11)])
+    lines = []
+
+    asyncio.run(
+        delete_topic_messages(
+            client,
+            "@group",
+            [TopicInfo(id=80, title="Dobby", top_message=80, icon_emoji="\U0001f4bb")],
+            execute=False,
+            progress=lines.append,
+            confirm=lambda: "DELETE",
+        )
+    )
+
+    assert "Scanning topic 80 (\U0001f4bb Dobby)" in lines
+
+
 def test_dry_run_collects_topic_messages_without_deleting():
     client = FakeClient(
         [
