@@ -728,7 +728,7 @@ async def _flow_delete(*, session, runner, read, write) -> bool:
             return after_action(read=read, write=write)
 
         choice = choose(
-            [f"Delete it for real (asks you to type {target_title})"],
+            ["Delete it for real - the next screen asks for its exact title"],
             title=crumb(where, "Dry-run done"),
             read=read,
             write=write,

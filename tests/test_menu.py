@@ -1362,10 +1362,11 @@ def test_delete_flow_backing_out_never_executes():
     assert executed == []
 
 
-def test_delete_flow_names_the_target_before_the_point_of_no_return():
+def test_delete_flow_says_the_title_prompt_is_on_the_next_screen():
+    """The old label read as "type it here", and that is what a tester did."""
     _code, _calls, output = run_menu([DELETE, "1", "1", "1", "1", "0"])
 
-    assert "Delete it for real (asks you to type Hermes)" in screens(output)
+    assert "the next screen asks for its exact title" in screens(output)
 
 
 def test_delete_flow_refuses_a_chat_create_could_not_make_back():

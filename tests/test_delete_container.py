@@ -232,3 +232,57 @@ def test_previews_tell_the_truth_about_reach():
     topic = format_delete_preview("topic", "Deploys", -100111, where="Hermes")
     assert "rest of the group is untouched" in topic
     assert "In      Hermes" in topic
+
+
+# -- what the dry-run and the confirm each say ----------------------------
+
+
+def test_the_dry_run_does_not_print_the_confirm_banner():
+    """Seen twice in one menu flow, a warning banner becomes wallpaper."""
+    client = FakeClient()
+    lines = []
+    asyncio.run(
+        delete_chat(
+            client,
+            "peer",
+            kind="group",
+            title="Hermes",
+            chat_id=-100111,
+            confirm=never_asked,
+            progress=lines.append,
+        )
+    )
+    printed = "\n".join(lines)
+    assert "WARNING: DELETE" not in printed
+    # The consequences still show; only the box is gone.
+    assert "EVERY member" in printed
+    assert "Nothing has been deleted" in printed
+
+
+def test_the_confirm_still_carries_the_full_banner():
+    client = FakeClient()
+    seen = {}
+
+    def confirm(preview, title):
+        seen["preview"] = preview
+        return title
+
+    asyncio.run(
+        delete_chat(
+            client, "peer", kind="group", title="Hermes", chat_id=-100111, execute=True, confirm=confirm
+        )
+    )
+    assert "WARNING: DELETE GROUP" in seen["preview"]
+
+
+def test_a_topic_dry_run_names_the_group_it_is_in():
+    client = FakeClient()
+    lines = []
+    asyncio.run(
+        delete_topic(
+            client, "peer", DEPLOYS, chat_id=-100111, chat_title="Hermes", confirm=never_asked, progress=lines.append
+        )
+    )
+    printed = "\n".join(lines)
+    assert "in Hermes" in printed
+    assert "WARNING: DELETE" not in printed

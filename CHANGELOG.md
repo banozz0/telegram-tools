@@ -4,7 +4,12 @@ All notable changes to this project will be documented here.
 
 This project follows a practical changelog style: user-visible changes, safety changes, and release notes belong here; active task tracking belongs outside the repo.
 
-## 3.7.0 - 2026-09-01
+## 3.7.1 - 2026-09-01
+
+- `delete` printed its warning banner twice in one menu flow — once for the dry-run, once to confirm — which is exactly how a person learns to skim it. Found in the sibling's try-it and fixed the same way here: the dry-run prints a compact line plus the same GONE/OK consequences, and the banner belongs to the confirm alone, the screen that can still be stopped. A topic's dry-run also names the group it is in.
+
+- The row before the point of no return read `Delete it for real (asks you to type Hermes)`, and a tester typed the title at that screen, where only a row number is an answer. It now reads `Delete it for real - the next screen asks for its exact title`, which says when.
+
 
 - `delete` removes the group, channel or topic itself, not just the messages inside it. The tool could make all three and take none of them back, so a forum scaffolded with telegram-tools could only be unscaffolded in the Telegram app. `telegram-tools delete group|channel|topic` closes that with a gate one notch tighter than `clear-messages`: dry-run by default, and the real run wants `--execute` **and** the target's own title typed back, not the word `DELETE`. For a whole chat the mistake worth catching is deleting the *wrong* one, and only the title catches that. There is deliberately no `--yes` anywhere on the path: an agent can search, send and clear unattended, and can never delete a chat.
 

@@ -151,6 +151,24 @@ def format_delete_preview(kind: str, title: str, chat_id: int, *, where: str | N
     return "\n".join(lines)
 
 
+def format_delete_summary(kind: str, title: str, chat_id: int, *, where: str | None = None) -> str:
+    """The dry-run's version: what it is and what would go, without the banner.
+
+    The banner belongs to the confirm. Printing it twice in one menu flow --
+    once for the dry-run, once to confirm -- is how people learn to skim it.
+    """
+    target = f"{kind} {title} ({chat_id})"
+    if where is not None:
+        target += f", in {where}"
+    return "\n".join(
+        [
+            f"Dry-run: {target}.",
+            DELETE_CONSEQUENCES[kind],
+            "Nothing has been deleted. Re-run with --execute to do it for real.",
+        ]
+    )
+
+
 def confirm_delete(
     preview: str, title: str, *, read: Callable[[str], str] = input, write: Callable[[str], None] = print
 ) -> str:
@@ -191,12 +209,11 @@ async def delete_chat(
     """Delete a supergroup or broadcast channel after a dry-run and a typed title."""
     progress = progress or (lambda _message: None)
 
-    preview = format_delete_preview(kind, title, chat_id)
-
     if not execute:
-        progress(preview)
-        progress(f"Dry-run: {kind} {title} ({chat_id}) would be deleted. Re-run with --execute to do it.")
+        progress(format_delete_summary(kind, title, chat_id))
         return ContainerDeleteResult(kind=kind, id=chat_id, title=title, dry_run=True)
+
+    preview = format_delete_preview(kind, title, chat_id)
 
     if not _titles_match(confirm(preview, title), title):
         progress(f"Delete {kind} cancelled - the typed title did not match.")
@@ -232,17 +249,13 @@ async def delete_topic(
             "Use `clear-messages` to empty it instead."
         )
 
-    preview = format_delete_preview("topic", topic.title, chat_id, where=chat_title)
-
     if not execute:
-        progress(preview)
-        progress(
-            f"Dry-run: topic {topic.title} ({topic.id}) in {chat_title} would be deleted. "
-            "Re-run with --execute to do it."
-        )
+        progress(format_delete_summary("topic", topic.title, topic.id, where=chat_title))
         return ContainerDeleteResult(
             kind="topic", id=chat_id, topic_id=topic.id, title=topic.title, dry_run=True
         )
+
+    preview = format_delete_preview("topic", topic.title, chat_id, where=chat_title)
 
     if not _titles_match(confirm(preview, topic.title), topic.title):
         progress("Delete topic cancelled - the typed title did not match.")
