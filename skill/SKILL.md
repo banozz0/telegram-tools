@@ -40,7 +40,7 @@ their own message history searched, filtered or exported. It is the fastest way 
 settle "which thread does this go to?", which is the single most common cause of a
 message being delivered into a topic nobody reads.
 
-It can also **send** a message and **create** a group, channel or topic. Those write
+It can also **send** a message and **create** — or **delete** — a group, channel or topic. Those write
 to Telegram as the user, so rules 2 and 3 below govern them — read those before
 running either. It still does not run bots, download media, or delete topics.
 
@@ -63,18 +63,25 @@ visible objects in the user's Telegram — other people see them appear. Create 
 when the user asked for that specific thing in this conversation, and never invent a
 title. `create` outside an explicit ask is theirs to run, not yours.
 
-**4. Never run `clear-messages`.** It deletes real messages out of their forum topics
+**4. Never run `delete`.** It removes the group, channel or forum topic itself,
+for everyone in it, not just the messages inside. There is no `--yes`: the
+destructive path needs `--execute` plus the target's exact title typed at a
+prompt, which no agent can answer. That is deliberate, not an obstacle to route
+around — do not drive it through the menu, a pty, or a piped answer. If the user
+wants something gone, hand them the exact command and let them run it.
+
+**5. Never run `clear-messages`.** It deletes real messages out of their forum topics
 and Telegram does not undo that. Dry-run is its default and the destructive path
 needs both `--execute` and a typed confirmation, so you will not trip it by accident
 — but do not run it at all, in any form, even to preview. If the answer is "those
 messages should go", say so and let the user run it.
 
-**5. Never print the credentials.** `TELEGRAM_API_ID`, `TELEGRAM_API_HASH` and the
+**6. Never print the credentials.** `TELEGRAM_API_ID`, `TELEGRAM_API_HASH` and the
 `.session` file are secrets. Point at where they live; never read them out, copy
 them, or paste them into a reply. `doctor` exists precisely so setup can be checked
 without any of that reaching the screen.
 
-**6. If the CLI errors, say so.** A login prompt, a flood-wait, an expired session —
+**7. If the CLI errors, say so.** A login prompt, a flood-wait, an expired session —
 that *is* the answer. Never guess a chat ID. A made-up `-100…` sends the user's next
 alert into the void, and they will not find out until something they needed never
 arrived.
@@ -95,6 +102,7 @@ arrived.
 | "send them that file" (allowlisted) | `telegram-tools send --chat <id> --file /path/to/file --text "caption" --yes` |
 | "make me a group with topics" (they asked) | `telegram-tools create group --title "..." --forum --yes` |
 | "add a topic to that group" (they asked) | `telegram-tools create topic --chat <id> --title "..." --yes` |
+| "delete that topic/group" | hand them `telegram-tools delete topic --chat <id> --topic <id> --execute` — rule 4, they run it |
 | "is telegram-tools set up?" | `telegram-tools doctor` |
 
 - **`discover` defaults to admin/managed chats only** — the ones the user runs. Add
@@ -132,7 +140,10 @@ arrived.
 
 ## Never run these
 
-- **`clear-messages`** — irreversible deletion of the user's messages. Rule 4 above.
+- **`delete`** — it removes the group, channel or topic itself, for everyone in
+  it. Rule 4 above. It refuses to run unattended by construction; hand the user
+  the command instead.
+- **`clear-messages`** — irreversible deletion of the user's messages. Rule 5 above.
 - **`create` on your own initiative** — rule 3. If a new group or topic looks like
   the right answer, propose it and let the user say yes; do not create it and report
   back.

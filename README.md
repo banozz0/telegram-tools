@@ -2,7 +2,7 @@
 
 [![Site: cli-tools-site.vercel.app](https://img.shields.io/badge/site-cli--tools--site.vercel.app-00afff?style=flat-square&labelColor=09090b)](https://cli-tools-site.vercel.app/)
 
-A local CLI for your own Telegram chats: find the real IDs of your groups, channels and forum topics, search and export messages, send a message into a chat or topic, and create groups, channels and topics.
+A local CLI for your own Telegram chats: find the real IDs of your groups, channels and forum topics, search and export messages, send a message into a chat or topic, and create and delete groups, channels and topics.
 
 It also empties a forum topic without destroying the topic itself — the one job the app will not do.
 
@@ -15,6 +15,7 @@ Built on [Telethon](https://github.com/LonamiWebs/Telethon). Everything runs on 
 - **`clear-messages`** — deletes all messages inside selected forum topic(s) while preserving the topics and their IDs. Dry-run by default; deleting requires both `--execute` *and* typing `DELETE` at a prompt.
 - **`send`** — posts a message, a file, or both to a chat or into one forum topic. Shows you the whole message and its destination, then asks `y/N`.
 - **`create`** — makes a supergroup (optionally with topics already on), a broadcast channel, or a topic inside a forum group, and prints the new ID.
+- **`delete`** — removes a supergroup, a broadcast channel, or a forum topic: the thing itself, not just its messages. Dry-run by default; deleting requires `--execute` *and* typing the target's exact title at a prompt. It deletes exactly what `create` can make, so nothing this tool removes is beyond making again.
 - **`bots`** — lists the bots you own with their numeric IDs, and edits what @BotFather edits: display name, bio, description, commands, profile photo, and default admin rights.
 - **`doctor`** — checks your local setup without printing any secrets.
 
@@ -116,6 +117,10 @@ telegram-tools send --chat -1001234567890 --file shot.png --file notes.pdf --tex
 telegram-tools create group --title "Agency" --forum
 telegram-tools create topic --chat -1001234567890 --title "Deploys"
 
+# Take one back. Both dry-run first; --execute then asks you to type the title.
+telegram-tools delete topic --chat -1001234567890 --topic 141
+telegram-tools delete group --chat -1001234567890 --execute
+
 # Which bots do I own, and what are their IDs?
 telegram-tools bots
 
@@ -187,9 +192,10 @@ The message box takes several lines — end it with a `.` on its own line — so
 a multi-line message works instead of feeding its later lines to the menu as answers.
 
 The safety gates are the same as the flags', not looser: clearing topic messages
-dry-runs first and still asks you to type `DELETE`, sending shows the whole message
-and asks `y/N`, and bot edits still print a diff and ask before writing. The menu has
-no equivalent of `--yes` at all. With no terminal attached it prints this help instead.
+dry-runs first and still asks you to type `DELETE`, deleting a group, channel or topic
+dry-runs first and still asks you to type its exact title, sending shows the whole
+message and asks `y/N`, and bot edits still print a diff and ask before writing. The
+menu has no equivalent of `--yes` at all. With no terminal attached it prints this help instead.
 
 ## Safety model
 
@@ -200,6 +206,7 @@ no equivalent of `--yes` at all. With no terminal attached it prints this help i
 | `send` | Outward-facing — posts publicly as you (text, files, or both), after showing the whole message and asking `y/N`. `--yes` skips the prompt only for destinations in `TELEGRAM_SEND_ALLOWLIST` |
 | `bots` | No — changes settings on bots you own, after a diff and a `y/N` unless you pass `--yes`; reversible if you still have the old values, but `--remove-photo` and `--clear-commands` discard data Telegram will not hand back |
 | `clear-messages` | Yes — but only with `--execute` **and** a typed `DELETE`, only messages, never topics |
+| `delete` | Yes, and further than `clear-messages` goes — the group, channel or topic itself, for everyone in it. Only with `--execute` **and** the target's exact title typed back; there is no `--yes`, so it never runs unattended. It removes only what `create` can make: a basic group is refused, because this tool cannot make one back |
 
 `clear-messages` also verifies you actually hold the delete-messages permission in the chat before doing anything, skips topic starter messages, and handles Telegram flood-wait limits automatically.
 

@@ -295,3 +295,140 @@ def test_send_attaches_a_real_file(monkeypatch, tmp_path):
     assert status == 0
     assert client.files_sent[0]["file"] == [str(path)]
     assert client.files_sent[0]["caption"] is None
+
+
+# -- delete ---------------------------------------------------------------
+
+
+def _resolver(entity, peer=None, chat_id=-1001234567890):
+    peer = peer if peer is not None else SimpleNamespace(kind="resolved-input")
+
+    async def fake_resolve_chat(client, reference):
+        return ResolvedChat(id=chat_id, entity=entity, input_entity=peer)
+
+    return fake_resolve_chat, peer
+
+
+def _delete_args(kind, **overrides):
+    base = {"delete_kind": kind, "chat": "-1001234567890", "execute": False}
+    base.update(overrides)
+    return argparse.Namespace(**base)
+
+
+def test_delete_without_a_kind_says_which_kinds_exist():
+    with pytest.raises(ValueError) as excinfo:
+        asyncio.run(cli._run_delete(FakeClient(), _delete_args(None)))
+    assert "group, channel, topic" in str(excinfo.value)
+
+
+def test_delete_group_reaches_delete_chat(monkeypatch):
+    entity = SimpleNamespace(title="Hermes", megagroup=True, broadcast=False)
+    resolver, peer = _resolver(entity)
+    seen = {}
+
+    async def fake_delete_chat(client, target, **kwargs):
+        seen.update(kwargs)
+        seen["peer"] = target
+        from telegram_tools.models import ContainerDeleteResult
+
+        return ContainerDeleteResult(kind=kwargs["kind"], id=kwargs["chat_id"], title=kwargs["title"], dry_run=True)
+
+    monkeypatch.setattr(cli, "resolve_chat", resolver)
+    monkeypatch.setattr(cli, "delete_chat", fake_delete_chat)
+
+    assert asyncio.run(cli._run_delete(FakeClient(), _delete_args("group"))) == 0
+    assert seen["peer"] is peer
+    assert seen["kind"] == "group"
+    assert seen["title"] == "Hermes"
+    assert seen["execute"] is False
+
+
+def test_delete_group_accepts_a_forum_group(monkeypatch):
+    entity = SimpleNamespace(title="Hermes", megagroup=True, forum=True)
+    resolver, _peer = _resolver(entity)
+    seen = {}
+
+    async def fake_delete_chat(client, target, **kwargs):
+        seen.update(kwargs)
+        from telegram_tools.models import ContainerDeleteResult
+
+        return ContainerDeleteResult(kind="group", id=kwargs["chat_id"], title=kwargs["title"], dry_run=True)
+
+    monkeypatch.setattr(cli, "resolve_chat", resolver)
+    monkeypatch.setattr(cli, "delete_chat", fake_delete_chat)
+    assert asyncio.run(cli._run_delete(FakeClient(), _delete_args("group"))) == 0
+    assert seen["kind"] == "group"
+
+
+def test_delete_group_refuses_a_broadcast_channel(monkeypatch):
+    entity = SimpleNamespace(title="Alerts", broadcast=True)
+    resolver, _peer = _resolver(entity)
+    monkeypatch.setattr(cli, "resolve_chat", resolver)
+
+    def exploding(*_args, **_kwargs):
+        raise AssertionError("a kind mismatch must be refused before anything is deleted")
+
+    monkeypatch.setattr(cli, "delete_chat", exploding)
+    with pytest.raises(ValueError) as excinfo:
+        asyncio.run(cli._run_delete(FakeClient(), _delete_args("group", execute=True)))
+    assert "channel" in str(excinfo.value)
+
+
+def test_delete_refuses_a_basic_group_because_create_cannot_make_one(monkeypatch):
+    entity = SimpleNamespace(title="Old Crew")  # no megagroup, no broadcast
+    resolver, _peer = _resolver(entity)
+    monkeypatch.setattr(cli, "resolve_chat", resolver)
+
+    def exploding(*_args, **_kwargs):
+        raise AssertionError("a basic group must never reach the delete call")
+
+    monkeypatch.setattr(cli, "delete_chat", exploding)
+    with pytest.raises(ValueError) as excinfo:
+        asyncio.run(cli._run_delete(FakeClient(), _delete_args("group", execute=True)))
+    message = str(excinfo.value)
+    assert "does not delete" in message
+    assert "create" in message
+
+
+def test_delete_topic_looks_the_topic_up_first(monkeypatch):
+    entity = SimpleNamespace(title="Hermes", megagroup=True, forum=True)
+    resolver, peer = _resolver(entity)
+    seen = {}
+
+    async def fake_get_topics(client, target, topic_ids):
+        seen["ids"] = topic_ids
+        return [TopicInfo(id=141, title="Deploys")]
+
+    async def fake_delete_topic(client, target, topic, **kwargs):
+        seen["topic"] = topic
+        seen["peer"] = target
+        from telegram_tools.models import ContainerDeleteResult
+
+        return ContainerDeleteResult(
+            kind="topic", id=kwargs["chat_id"], topic_id=topic.id, title=topic.title, dry_run=True
+        )
+
+    monkeypatch.setattr(cli, "resolve_chat", resolver)
+    monkeypatch.setattr(cli, "get_forum_topics_by_ids", fake_get_topics)
+    monkeypatch.setattr(cli, "delete_topic", fake_delete_topic)
+
+    assert asyncio.run(cli._run_delete(FakeClient(), _delete_args("topic", topic=141))) == 0
+    assert seen["ids"] == [141]
+    assert seen["topic"].id == 141
+    assert seen["peer"] is peer
+
+
+def test_delete_topic_that_does_not_exist_is_an_error_not_a_no_op(monkeypatch):
+    entity = SimpleNamespace(title="Hermes", megagroup=True, forum=True)
+    resolver, _peer = _resolver(entity)
+
+    async def fake_get_topics(client, target, topic_ids):
+        return []
+
+    monkeypatch.setattr(cli, "resolve_chat", resolver)
+    monkeypatch.setattr(cli, "get_forum_topics_by_ids", fake_get_topics)
+    monkeypatch.setattr(cli, "delete_topic", lambda *a, **k: pytest.fail("must not delete"))
+
+    with pytest.raises(ValueError) as excinfo:
+        asyncio.run(cli._run_delete(FakeClient(), _delete_args("topic", topic=999, execute=True)))
+    assert "999" in str(excinfo.value)

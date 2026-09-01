@@ -26,8 +26,16 @@ from telegram_tools.bots import (
 from telegram_tools.client import create_client, start_client
 from telegram_tools.config import ConfigError, bot_id_from_token, load_config, lookup_bot_token, resolve_bot_token
 from telegram_tools.create import confirm_create, create_channel, create_group, create_topic, format_create_preview
-from telegram_tools.delete import confirm_clear_topic_messages, delete_topic_messages
-from telegram_tools.discovery import discover_chats, filter_chats, format_discovery_table
+from telegram_tools.delete import (
+    DELETE_KIND_TYPES,
+    confirm_clear_topic_messages,
+    confirm_delete,
+    delete_chat,
+    delete_topic,
+    delete_topic_messages,
+    kind_for_type,
+)
+from telegram_tools.discovery import classify_entity, discover_chats, filter_chats, format_discovery_table
 from telegram_tools.doctor import run_doctor
 from telegram_tools.exporters import write_records
 from telegram_tools.resolver import EntityResolutionError, resolve_chat
@@ -116,6 +124,22 @@ def build_parser() -> argparse.ArgumentParser:
 
     for kind_parser in (create_group_parser, create_channel_parser, create_topic_parser):
         kind_parser.add_argument("--yes", action="store_true", help="Skip the confirmation prompt")
+
+    delete_parser = subparsers.add_parser(
+        "delete", help="Delete a group, channel, or forum topic (dry-run by default)"
+    )
+    delete_kinds = delete_parser.add_subparsers(dest="delete_kind")
+
+    delete_group_parser = delete_kinds.add_parser("group", help="Delete a supergroup, for everyone in it")
+    delete_channel_parser = delete_kinds.add_parser("channel", help="Delete a broadcast channel, for every subscriber")
+    delete_topic_parser = delete_kinds.add_parser("topic", help="Delete a topic in a forum group")
+    delete_topic_parser.add_argument("--topic", required=True, type=positive_int, help="Topic ID to delete")
+
+    for kind_parser in (delete_group_parser, delete_channel_parser, delete_topic_parser):
+        kind_parser.add_argument("--chat", required=True, help="Chat username, link, or ID")
+        kind_parser.add_argument(
+            "--execute", action="store_true", help="Actually delete it after typing its exact title"
+        )
 
     subparsers.add_parser("doctor", help="Check local setup without printing secrets")
 
@@ -285,6 +309,60 @@ async def _run_create(client, args) -> int:
     return 1 if created.cancelled else 0
 
 
+async def _run_delete(client, args) -> int:
+    if args.delete_kind is None:
+        raise ValueError("delete needs one of: group, channel, topic.")
+
+    resolved = await resolve_chat(client, args.chat)
+    peer = resolved.input_entity
+    title = _entity_title(resolved.entity, args.chat)
+
+    if args.delete_kind == "topic":
+        topics = await get_forum_topics_by_ids(client, peer, [args.topic])
+        if not topics:
+            raise ValueError(f"No topic {args.topic} in {title} - list them with `discover`.")
+        result = await delete_topic(
+            client,
+            peer,
+            topics[0],
+            chat_id=resolved.id,
+            chat_title=title,
+            execute=args.execute,
+            confirm=confirm_delete,
+            progress=print,
+        )
+    else:
+        # The kind names what the user believes this chat is. Checking it against
+        # what Telegram says is the second lock on the gate, and it is also how a
+        # basic group gets refused rather than silently mishandled.
+        chat_type = classify_entity(resolved.entity)
+        actual = kind_for_type(chat_type)
+        if actual != args.delete_kind:
+            if actual is None:
+                raise ValueError(
+                    f"{title} is a {chat_type}, which telegram-tools does not delete - "
+                    "`create` cannot make one back, so `delete` will not take one away. "
+                    "Delete it in Telegram itself."
+                )
+            raise ValueError(
+                f"{title} is a {chat_type}, not a {args.delete_kind}. "
+                f"`delete {args.delete_kind}` accepts: {', '.join(DELETE_KIND_TYPES[args.delete_kind])}."
+            )
+        result = await delete_chat(
+            client,
+            peer,
+            kind=args.delete_kind,
+            title=title,
+            chat_id=resolved.id,
+            execute=args.execute,
+            confirm=confirm_delete,
+            progress=print,
+        )
+
+    print(json.dumps(result.to_dict(), indent=2))
+    return 1 if result.cancelled else 0
+
+
 EDIT_FLAGS = ("name", "bio", "description", "commands", "clear_commands", "photo", "remove_photo", "group_rights", "channel_rights")
 
 
@@ -428,6 +506,8 @@ async def run(args, *, client=None, config=None) -> int:
             return await _run_send(client, args, config)
         if args.command == "create":
             return await _run_create(client, args)
+        if args.command == "delete":
+            return await _run_delete(client, args)
         raise ValueError(f"Unknown command: {args.command}")
     finally:
         if owns_client:

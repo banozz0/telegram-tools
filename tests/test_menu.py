@@ -92,6 +92,14 @@ def recorder(result=0, error=None):
     return calls, runner
 
 
+# Root rows, so a test says which screen it is on instead of a bare number.
+# fmt: off
+(
+    DISCOVER, SEARCH, SEND, CREATE, DELETE, CLEAR, BOTS, DOCTOR,
+) = (str(number) for number in range(1, 9))
+# fmt: on
+
+
 def run_menu(answers, *, session=None, runner=None, output=None):
     output = [] if output is None else output
     calls = []
@@ -117,9 +125,10 @@ def test_root_menu_lists_every_command_and_exits_on_zero():
     assert "2. Search / export messages" in text
     assert "3. Send a message" in text
     assert "4. Create a group, channel, or topic" in text
-    assert "5. Clear topic messages" in text
-    assert "6. My bots" in text
-    assert "7. Check setup" in text
+    assert "5. Delete a group, channel, or topic" in text
+    assert "6. Clear topic messages" in text
+    assert "7. My bots" in text
+    assert "8. Check setup" in text
     assert "0. Exit" in text
 
 
@@ -136,7 +145,7 @@ def test_doctor_runs_without_a_client_and_returns_to_the_menu():
         calls.append((args, client, config))
         return 0
 
-    code, _unused, _output = run_menu(["7", "", "0"], runner=runner)
+    code, _unused, _output = run_menu([DOCTOR, "", "0"], runner=runner)
 
     assert code == 0
     assert calls[0][0].command == "doctor"
@@ -146,7 +155,7 @@ def test_doctor_runs_without_a_client_and_returns_to_the_menu():
 
 def test_discover_builds_the_managed_chats_namespace_and_loops():
     # 1 = chats & topics, 1 = chats I manage, 1 = print here, Enter = menu, 0 = exit
-    code, calls, _output = run_menu(["1", "1", "1", "", "0"])
+    code, calls, _output = run_menu([DISCOVER, "1", "1", "", "0"])
 
     assert code == 0
     assert len(calls) == 1
@@ -157,7 +166,7 @@ def test_discover_builds_the_managed_chats_namespace_and_loops():
 
 
 def test_discover_all_chats_to_a_json_file():
-    code, calls, _output = run_menu(["1", "2", "2", "/tmp/out.json", "0"])
+    code, calls, _output = run_menu([DISCOVER, "2", "2", "/tmp/out.json", "0"])
 
     assert code == 0
     assert calls[0].all_chats is True
@@ -165,7 +174,7 @@ def test_discover_all_chats_to_a_json_file():
 
 
 def test_zero_at_the_first_flow_screen_returns_to_the_root_menu():
-    code, calls, output = run_menu(["1", "0", "0"])
+    code, calls, output = run_menu([DISCOVER, "0", "0"])
 
     assert code == 0
     assert calls == []
@@ -175,7 +184,7 @@ def test_zero_at_the_first_flow_screen_returns_to_the_root_menu():
 def test_discover_zero_at_where_screen_returns_to_scope_not_root():
     # 1 = discover, 1 = chats I manage, 0 = "where" back -> scope screen again,
     # 2 = every chat this time, 1 = print here, Enter = menu, 0 = exit
-    answers = ["1", "1", "0", "2", "1", "", "0"]
+    answers = [DISCOVER, "1", "0", "2", "1", "", "0"]
     code, calls, output = run_menu(answers)
 
     assert code == 0
@@ -190,7 +199,7 @@ def test_discover_blank_json_path_returns_to_where_screen_not_root():
     # 1 = discover, 1 = chats I manage, 2 = write a JSON file, "" = blank
     # cancels the path prompt -> back to "Where should it go?" (not root),
     # 1 = print here this time, Enter = menu, 0 = exit.
-    answers = ["1", "1", "2", "", "1", "", "0"]
+    answers = [DISCOVER, "1", "2", "", "1", "", "0"]
     code, calls, output = run_menu(answers)
 
     assert code == 0
@@ -199,7 +208,7 @@ def test_discover_blank_json_path_returns_to_where_screen_not_root():
 
 
 def test_two_actions_in_one_session():
-    code, calls, _output = run_menu(["7", "", "7", "", "0"])
+    code, calls, _output = run_menu([DOCTOR, "", DOCTOR, "", "0"])
 
     assert code == 0
     assert [call.command for call in calls] == ["doctor", "doctor"]
@@ -207,7 +216,7 @@ def test_two_actions_in_one_session():
 
 def test_an_action_error_prints_and_returns_to_the_menu():
     _calls, runner = recorder(error=ValueError("Cannot resolve chat 'nope'."))
-    code, _unused, output = run_menu(["7", "", "0"], runner=runner)
+    code, _unused, output = run_menu([DOCTOR, "", "0"], runner=runner)
 
     assert code == 0
     assert "error: Cannot resolve chat 'nope'." in screens(output)
@@ -222,7 +231,7 @@ def test_a_session_acquisition_error_is_caught_and_returns_to_the_menu():
         async def client(self):
             raise ConfigError("TELEGRAM_API_ID is required.")
 
-    code, calls, output = run_menu(["1", "1", "1", "", "0"], session=BrokenSession())
+    code, calls, output = run_menu([DISCOVER, "1", "1", "", "0"], session=BrokenSession())
 
     assert code == 0
     assert calls == []
@@ -232,7 +241,7 @@ def test_a_session_acquisition_error_is_caught_and_returns_to_the_menu():
 
 
 def test_zero_after_an_action_exits():
-    code, calls, _output = run_menu(["7", "0"])
+    code, calls, _output = run_menu([DOCTOR, "0"])
 
     assert code == 0
     assert len(calls) == 1
@@ -352,7 +361,7 @@ def test_pick_chat_lines_the_id_column_up_after_an_emoji_title():
 
 def test_search_runs_with_no_filters():
     # 2 = search, 1 = forum groups, 1 = Hermes, 7 = run it, Enter = menu, 0 = exit
-    code, calls, _output = run_menu(["2", "1", "1", "7", "", "0"])
+    code, calls, _output = run_menu([SEARCH, "1", "1", "7", "", "0"])
 
     assert code == 0
     args = calls[0]
@@ -370,7 +379,7 @@ def test_search_runs_with_no_filters():
 
 def test_search_stages_every_filter_then_runs():
     answers = [
-        "2", "1", "1",          # search > forum groups > Hermes
+        SEARCH, "1", "1",       # search > forum groups > Hermes
         "1", "1",               # Topic > Deploys (a picker, not keep/change/clear)
         "2", "deploy",          # Contains: unset -> straight to the value prompt
         "3", "2",               # From > Me (a three-way list, not keep/change/clear)
@@ -395,7 +404,7 @@ def test_search_stages_every_filter_then_runs():
 
 def test_search_shows_staged_values_and_clears_one():
     answers = [
-        "2", "1", "1",
+        SEARCH, "1", "1",
         "2", "deploy",         # Contains: unset -> straight to the value prompt = deploy
         "2", "3",              # Contains is set now -> keep/change/clear > clear
         "7", "0",
@@ -412,7 +421,7 @@ def test_search_shows_staged_values_and_clears_one():
 
 def test_search_export_asks_for_a_path_and_a_format():
     # ... 8 = export, path, 2 = csv
-    answers = ["2", "1", "1", "8", "/tmp/out.csv", "2", "0"]
+    answers = [SEARCH, "1", "1", "8", "/tmp/out.csv", "2", "0"]
     code, calls, _output = run_menu(answers)
 
     assert code == 0
@@ -422,7 +431,7 @@ def test_search_export_asks_for_a_path_and_a_format():
 
 def test_search_hides_the_topic_row_for_a_non_forum_chat():
     # 2 = search, 2 = Channels, 1 = Alerts (a channel, so no topics)
-    answers = ["2", "2", "1", "6", "0"]
+    answers = [SEARCH, "2", "1", "6", "0"]
     code, calls, output = run_menu(answers)
 
     text = screens(output)
@@ -434,7 +443,7 @@ def test_search_hides_the_topic_row_for_a_non_forum_chat():
 
 def test_search_topic_picker_offers_all_topics():
     # Topic > "All topics" is the row after the two topics
-    answers = ["2", "1", "1", "1", "3", "7", "0"]
+    answers = [SEARCH, "1", "1", "1", "3", "7", "0"]
     code, calls, _output = run_menu(answers)
 
     assert code == 0
@@ -446,7 +455,7 @@ def test_search_topic_picker_says_the_chat_has_no_topics():
     # 2 = search, 1 = forum groups, 1 = Hermes, 1 = Topic row (no topics), 0 = back to
     # the staging screen, 0 = back to the chat picker, 0 = back out of the picker to
     # root, 0 = exit
-    answers = ["2", "1", "1", "1", "0", "0", "0"]
+    answers = [SEARCH, "1", "1", "1", "0", "0", "0"]
     code, calls, output = run_menu(answers, session=session)
 
     assert code == 0
@@ -460,7 +469,7 @@ def test_search_topic_picker_says_the_chat_has_no_topics():
 
 def test_the_topic_picker_shows_the_emoji_telegram_draws_and_leaves_a_bare_topic_bare():
     # 2 = search, 1 = forum groups, 1 = Hermes, 1 = the Topic row, then back out.
-    answers = ["2", "1", "1", "1", "0", "0", "0", "0"]
+    answers = [SEARCH, "1", "1", "1", "0", "0", "0", "0"]
     code, _calls, output = run_menu(answers, session=FakeSession(topics=ICON_TOPICS))
 
     assert code == 0
@@ -472,7 +481,7 @@ def test_the_topic_picker_shows_the_emoji_telegram_draws_and_leaves_a_bare_topic
 def test_the_clear_ticker_shows_the_topic_emoji_too():
     # 5 = clear, 1 = Hermes, 0 = back out of the ticker, 0 = back out of the picker,
     # 0 = exit. Nothing is ticked, so no dry-run and no DELETE gate is reached.
-    answers = ["5", "1", "0", "0", "0"]
+    answers = [CLEAR, "1", "0", "0", "0"]
     code, calls, output = run_menu(answers, session=FakeSession(topics=ICON_TOPICS))
 
     assert code == 0
@@ -486,7 +495,7 @@ def test_search_zero_at_staging_returns_to_the_chat_picker_not_root():
     # 2 = search, 1 = forum groups, 1 = Hermes, 0 = staging back -> chat picker,
     # 4 = type an ID/username this time, a new chat, 7 = run it (topic row is
     # shown since the typed chat's forum-ness is unknown), Enter, 0 = exit
-    answers = ["2", "1", "1", "0", "4", "@newchat", "7", "", "0"]
+    answers = [SEARCH, "1", "1", "0", "4", "@newchat", "7", "", "0"]
     code, calls, _output = run_menu(answers)
 
     assert code == 0
@@ -500,7 +509,7 @@ def test_search_staging_back_discards_and_says_so():
     # 2 = search, 1 = forum groups, 1 = Hermes, 2 = Contains (unset -> straight to
     # the value prompt), "deploy" = the value, 0 = staging back -> asks first,
     # 0 = discard (says so) -> chat picker, 0 = chat picker back, 0 = exit.
-    answers = ["2", "1", "1", "2", "deploy", "0", "0", "0", "0"]
+    answers = [SEARCH, "1", "1", "2", "deploy", "0", "0", "0", "0"]
     code, calls, output = run_menu(answers)
 
     text = screens(output)
@@ -514,7 +523,7 @@ def test_search_staging_back_discards_and_says_so():
 def test_clear_dry_runs_first_then_executes():
     # 5 = clear, 1 = Hermes, 1 = tick Deploys, 5 = continue (3 is All topics,
     # 4 Select all), 1 = for real, Enter = main menu, 0 = exit
-    answers = ["5", "1", "1", "5", "1", "", "0"]
+    answers = [CLEAR, "1", "1", "5", "1", "", "0"]
     code, calls, _output = run_menu(answers)
 
     assert code == 0
@@ -532,7 +541,7 @@ def test_clear_dry_runs_first_then_executes():
 def test_clear_stops_at_the_dry_run_when_you_go_back():
     # 5 = clear, 1 = Hermes, 1 = tick Deploys, 5 = continue, dry-run runs, 0 = back to
     # the ticker, 0 = back to the chat picker, 0 = back out of the picker to root, 0 = exit
-    answers = ["5", "1", "1", "5", "0", "0", "0", "0"]
+    answers = [CLEAR, "1", "1", "5", "0", "0", "0", "0"]
     code, calls, _output = run_menu(answers)
 
     assert code == 0
@@ -544,7 +553,7 @@ def test_clear_zero_at_dry_run_returns_to_the_ticker_with_ticks_preserved():
     # 5 = clear, 1 = Hermes, 1 = tick Deploys, 5 = continue, dry-run runs, 0 = back
     # to the ticker (Deploys should still be ticked), 5 = continue again with no
     # further ticking, 1 = for real, Enter, 0 = exit
-    answers = ["5", "1", "1", "5", "0", "5", "1", "", "0"]
+    answers = [CLEAR, "1", "1", "5", "0", "5", "1", "", "0"]
     code, calls, output = run_menu(answers)
 
     assert code == 0
@@ -563,7 +572,7 @@ def test_clear_ticker_accepts_several_numbers_in_one_answer():
     # 3 = clear, 1 = Hermes, "1 2" ticks both topics in a single answer (item rows
     # only, so this is legal), 4 = continue, dry-run covers both, 0 = decline the
     # real pass, 0 = chat picker back, 0 = out of the picker to root, 0 = exit.
-    answers = ["5", "1", "1 2", "5", "0", "0", "0", "0"]
+    answers = [CLEAR, "1", "1 2", "5", "0", "0", "0", "0"]
     code, calls, _output = run_menu(answers)
 
     assert code == 0
@@ -576,7 +585,7 @@ def test_clear_ticker_accepts_several_numbers_in_one_answer():
 
 def test_clear_every_topic_uses_all_topics():
     # 3 = select all (two topics + select all), 4 = continue
-    answers = ["5", "1", "3", "4", "1", "", "0"]
+    answers = [CLEAR, "1", "3", "4", "1", "", "0"]
     code, calls, _output = run_menu(answers)
 
     assert calls[0].all_topics is True
@@ -586,7 +595,7 @@ def test_clear_every_topic_uses_all_topics():
 
 def test_clear_does_not_offer_the_real_pass_when_the_dry_run_errors():
     _calls, runner = recorder(error=PermissionError("Current user lacks Telegram delete_messages permission in this chat."))
-    answers = ["5", "1", "1", "5", "0"]
+    answers = [CLEAR, "1", "1", "5", "0"]
     code, _unused, output = run_menu(answers, runner=runner)
 
     assert code == 0
@@ -599,7 +608,7 @@ def test_clear_says_when_a_chat_has_no_topics():
     session = FakeSession(topics=[])
     # 5 = clear, 1 = Hermes has no topics -> back to the forum picker (one screen
     # back, not the root), 0 = out of the picker, 0 = exit
-    answers = ["5", "1", "0", "0"]
+    answers = [CLEAR, "1", "0", "0"]
     code, calls, output = run_menu(answers, session=session)
 
     assert code == 0
@@ -615,7 +624,7 @@ def test_clear_offers_manual_entry_when_there_are_no_forum_groups():
     # 5 = clear topic messages, 2 = "Type an ID or @username" (the only rows
     # on an empty list are the two extras), type an id, no topics -> the picker
     # again, 0 = out of it, 0 = exit.
-    code, calls, output = run_menu(["5", "2", "-100999", "0", "0"], session=session)
+    code, calls, output = run_menu([CLEAR, "2", "-100999", "0", "0"], session=session)
 
     text = screens(output)
     assert code == 0
@@ -626,7 +635,7 @@ def test_clear_offers_manual_entry_when_there_are_no_forum_groups():
 
 def test_bots_lists_and_prints_a_profile():
     # 6 = my bots, 1 = harrybot, 0 out of the bot screen to the list, 0 = root, 0 = exit
-    code, calls, output = run_menu(["6", "1", "0", "0", "0"])
+    code, calls, output = run_menu([BOTS, "1", "0", "0", "0"])
 
     text = screens(output)
     assert code == 0
@@ -642,7 +651,7 @@ def test_bots_with_no_username_matches_the_existing_formatters():
     bot = BotInfo(id=99999, username=None, name="Nameless", bio=None, description=None, is_owned=True)
     session = FakeSession(bots=[bot], profile=bot)
     # 6 = my bots, 1 = the only bot, 0 = back to the list, 0 = root, 0 = exit
-    code, calls, output = run_menu(["6", "1", "0", "0", "0"], session=session)
+    code, calls, output = run_menu([BOTS, "1", "0", "0", "0"], session=session)
 
     text = screens(output)
     assert code == 0
@@ -653,7 +662,7 @@ def test_bots_with_no_username_matches_the_existing_formatters():
 
 
 def test_bots_saves_a_profile_to_json():
-    code, calls, _output = run_menu(["6", "1", "2", "/tmp/bot.json", "0"])
+    code, calls, _output = run_menu([BOTS, "1", "2", "/tmp/bot.json", "0"])
 
     assert calls[0].command == "bots"
     assert calls[0].bot == "12345"
@@ -662,7 +671,7 @@ def test_bots_saves_a_profile_to_json():
 
 def test_bot_edit_stages_a_name_and_applies_without_yes():
     # 4, 1 = bot, 1 = edit, 1 = Name, 2 = change, text, 8 = review & apply
-    answers = ["6", "1", "1", "1", "2", "Harry Two", "8", "", "0"]
+    answers = [BOTS, "1", "1", "1", "2", "Harry Two", "8", "", "0"]
     code, calls, _output = run_menu(answers)
 
     args = calls[0]
@@ -674,7 +683,7 @@ def test_bot_edit_stages_a_name_and_applies_without_yes():
 
 
 def test_bot_edit_clears_a_bio_with_an_empty_string():
-    answers = ["6", "1", "1", "2", "3", "8", "", "0"]
+    answers = [BOTS, "1", "1", "2", "3", "8", "", "0"]
     code, calls, _output = run_menu(answers)
 
     assert calls[0].bio == ""
@@ -688,7 +697,7 @@ def test_bot_edit_unset_field_skips_the_keep_change_clear_screen():
     # 4 = my bots, 1 = harrybot, 1 = edit, 2 = Bio (unset -> straight to the value
     # prompt, no keep/change/clear screen), "hello" = the typed value, 8 = apply,
     # Enter, 0 = exit.
-    answers = ["6", "1", "1", "2", "hello", "8", "", "0"]
+    answers = [BOTS, "1", "1", "2", "hello", "8", "", "0"]
     code, calls, output = run_menu(answers, session=session)
 
     assert code == 0
@@ -699,7 +708,7 @@ def test_bot_edit_unset_field_skips_the_keep_change_clear_screen():
 def test_bot_edit_shows_current_values_and_staged_changes():
     # ... 0 = field list back -> asks first, 0 = discard (to the bot's own screen),
     # 0 = the list, 0 = root, 0 = exit
-    answers = ["6", "1", "1", "1", "2", "Harry Two", "0", "0", "0", "0", "0"]
+    answers = [BOTS, "1", "1", "1", "2", "Harry Two", "0", "0", "0", "0", "0"]
     _code, _calls, output = run_menu(answers)
 
     text = screens(output)
@@ -712,7 +721,7 @@ def test_bot_edit_shows_current_values_and_staged_changes():
 def test_bot_edit_staging_the_name_none_is_not_shown_as_cleared():
     # "none" is the sentinel for clearing rights, not an ordinary staged value.
     # Typed as a *name* it must render as the literal value, not "(cleared)".
-    answers = ["6", "1", "1", "1", "2", "none", "0", "0", "0", "0", "0"]
+    answers = [BOTS, "1", "1", "1", "2", "none", "0", "0", "0", "0", "0"]
     _code, _calls, output = run_menu(answers)
 
     text = screens(output)
@@ -722,7 +731,7 @@ def test_bot_edit_staging_the_name_none_is_not_shown_as_cleared():
 
 def test_bot_edit_refuses_token_fields_without_a_token():
     # ... 0 = field list back (to the bot's own screen), 0 = the list, 0 = root, 0 = exit
-    answers = ["6", "1", "1", "4", "0", "0", "0", "0"]
+    answers = [BOTS, "1", "1", "4", "0", "0", "0", "0"]
     _code, calls, output = run_menu(answers)
 
     text = screens(output)
@@ -739,7 +748,7 @@ def test_bot_edit_rights_toggle_with_a_token():
     # 6 = group rights, 2 = change, then the toggle: post_messages is preselected
     # (row 2 of page 1), tick change_info (row 1), Continue is numbered after
     # every right (16 of them) on every page.
-    answers = ["6", "1", "1", "6", "2", "1", "18", "8", "", "0"]
+    answers = [BOTS, "1", "1", "6", "2", "1", "18", "8", "", "0"]
     _code, calls, _output = run_menu(answers, session=session)
 
     assert calls[0].group_rights == "change_info,post_messages"
@@ -747,7 +756,7 @@ def test_bot_edit_rights_toggle_with_a_token():
 
 def test_bot_edit_clears_rights_with_none():
     session = FakeSession(bot_tokens={"harry": "12345:AAtoken"})
-    answers = ["6", "1", "1", "6", "3", "8", "", "0"]
+    answers = [BOTS, "1", "1", "6", "3", "8", "", "0"]
     _code, calls, _output = run_menu(answers, session=session)
 
     assert calls[0].group_rights == "none"
@@ -755,7 +764,7 @@ def test_bot_edit_clears_rights_with_none():
 
 def test_bot_edit_apply_with_nothing_staged_says_so():
     # ... 0 = field list back (to the bot's own screen), 0 = the list, 0 = root, 0 = exit
-    answers = ["6", "1", "1", "8", "0", "0", "0", "0"]
+    answers = [BOTS, "1", "1", "8", "0", "0", "0", "0"]
     _code, calls, output = run_menu(answers)
 
     assert calls == []
@@ -766,7 +775,7 @@ def test_bot_edit_zero_at_field_list_returns_to_the_bots_own_screen_not_root():
     # 4 = bots, 1 = harrybot, 1 = edit, 0 = field list back (nothing staged) ->
     # the bot's own screen, 2 = save profile (proves we landed there, not root),
     # path, Enter, 0 = exit
-    answers = ["6", "1", "1", "0", "2", "/tmp/bot.json", "", "0"]
+    answers = [BOTS, "1", "1", "0", "2", "/tmp/bot.json", "", "0"]
     code, calls, _output = run_menu(answers)
 
     assert code == 0
@@ -781,7 +790,7 @@ def test_a_picker_error_prints_and_returns_to_the_menu():
         async def chats(self):
             raise ValueError("Cannot resolve chat.")
 
-    code, calls, output = run_menu(["2", "", "0"], session=ExplodingSession())
+    code, calls, output = run_menu([SEARCH, "", "0"], session=ExplodingSession())
 
     assert code == 0
     assert calls == []
@@ -794,7 +803,7 @@ def test_a_picker_error_prints_and_returns_to_the_menu():
 def test_send_stages_a_topic_and_a_message():
     # 3 = send, 1 = forum groups, 1 = Hermes, 1 = Topic row, 1 = Deploys,
     # 2 = Message, 3 = Send it
-    answers = ["3", "1", "1", "1", "1", "2", "ship it", ".", "4", "", "0"]
+    answers = [SEND, "1", "1", "1", "1", "2", "ship it", ".", "4", "", "0"]
     code, calls, output = run_menu(answers)
 
     assert code == 0
@@ -809,7 +818,7 @@ def test_send_stages_a_topic_and_a_message():
 
 
 def test_send_without_choosing_a_topic_goes_to_the_chat_itself():
-    answers = ["3", "1", "1", "2", "hi", ".", "4", "", "0"]
+    answers = [SEND, "1", "1", "2", "hi", ".", "4", "", "0"]
     code, calls, output = run_menu(answers)
 
     assert code == 0
@@ -819,7 +828,7 @@ def test_send_without_choosing_a_topic_goes_to_the_chat_itself():
 
 def test_send_topic_picker_offers_the_chat_itself():
     # Topic > row 3 is the extra after the two topics
-    answers = ["3", "1", "1", "1", "3", "2", "hi", ".", "4", "", "0"]
+    answers = [SEND, "1", "1", "1", "3", "2", "hi", ".", "4", "", "0"]
     code, calls, output = run_menu(answers)
 
     assert code == 0
@@ -829,7 +838,7 @@ def test_send_topic_picker_offers_the_chat_itself():
 
 def test_send_hides_the_topic_row_for_a_non_forum_chat():
     # 3 = send, 2 = Channels, 1 = Alerts, 1 = Message, 2 = Send it
-    answers = ["3", "2", "1", "1", "hi", ".", "3", "", "0"]
+    answers = [SEND, "2", "1", "1", "hi", ".", "3", "", "0"]
     code, calls, output = run_menu(answers)
 
     assert code == 0
@@ -839,7 +848,7 @@ def test_send_hides_the_topic_row_for_a_non_forum_chat():
 
 def test_send_says_a_chat_with_no_topics_goes_to_the_chat():
     session = FakeSession(topics=[])
-    answers = ["3", "1", "1", "1", "2", "hi", ".", "4", "", "0"]
+    answers = [SEND, "1", "1", "1", "2", "hi", ".", "4", "", "0"]
     code, calls, output = run_menu(answers, session=session)
 
     assert code == 0
@@ -849,7 +858,7 @@ def test_send_says_a_chat_with_no_topics_goes_to_the_chat():
 
 def test_send_refuses_to_run_without_a_message():
     # 4 = Send it with nothing staged, then 0 back out of each screen to the root.
-    answers = ["3", "1", "1", "4", "0", "0", "0"]
+    answers = [SEND, "1", "1", "4", "0", "0", "0"]
     code, calls, output = run_menu(answers)
 
     assert code == 0
@@ -859,7 +868,7 @@ def test_send_refuses_to_run_without_a_message():
 
 def test_send_shows_a_long_message_on_one_line():
     body = "line one\nline two that keeps going well past the width of the row"
-    answers = ["3", "1", "1", "2", body, ".", "4", "", "0"]
+    answers = [SEND, "1", "1", "2", body, ".", "4", "", "0"]
     code, calls, output = run_menu(answers)
 
     assert code == 0
@@ -874,7 +883,7 @@ def test_send_shows_a_long_message_on_one_line():
 
 def test_create_group_asks_for_a_title_and_description():
     # 4 = create, 1 = Group
-    answers = ["4", "1", "Hermes", "the agency", "", "0"]
+    answers = [CREATE, "1", "Hermes", "the agency", "", "0"]
     code, calls, _output = run_menu(answers)
 
     assert code == 0
@@ -889,7 +898,7 @@ def test_create_group_asks_for_a_title_and_description():
 
 def test_create_forum_group_sets_forum():
     # 2 = Forum group; a blank description means none
-    answers = ["4", "2", "Hermes", "", "", "0"]
+    answers = [CREATE, "2", "Hermes", "", "", "0"]
     code, calls, _output = run_menu(answers)
 
     assert code == 0
@@ -898,7 +907,7 @@ def test_create_forum_group_sets_forum():
 
 
 def test_create_channel_asks_for_a_broadcast():
-    answers = ["4", "3", "Alerts", "", "", "0"]
+    answers = [CREATE, "3", "Alerts", "", "", "0"]
     code, calls, _output = run_menu(answers)
 
     assert code == 0
@@ -908,7 +917,7 @@ def test_create_channel_asks_for_a_broadcast():
 
 def test_create_topic_picks_a_forum_group_first():
     # 4 = Topic in a forum group, 1 = Hermes (the only forum group)
-    answers = ["4", "4", "1", "Deploys", "", "0"]
+    answers = [CREATE, "4", "1", "Deploys", "", "0"]
     code, calls, _output = run_menu(answers)
 
     assert code == 0
@@ -919,7 +928,7 @@ def test_create_topic_picks_a_forum_group_first():
 
 
 def test_create_cancelling_the_title_returns_to_the_kind_list():
-    answers = ["4", "1", "", "0", "0"]
+    answers = [CREATE, "1", "", "0", "0"]
     code, calls, output = run_menu(answers)
 
     assert code == 0
@@ -930,7 +939,7 @@ def test_create_cancelling_the_title_returns_to_the_kind_list():
 def test_send_reoffers_the_staged_message_in_the_header():
     # 2 = Message twice: the second header must carry what was already typed, so
     # keeping it does not mean typing it again. A blank first line keeps it.
-    answers = ["3", "1", "1", "2", "hiiiii", ".", "2", "", "4", "", "0"]
+    answers = [SEND, "1", "1", "2", "hiiiii", ".", "2", "", "4", "", "0"]
     code, calls, output = run_menu(answers)
 
     assert code == 0
@@ -939,7 +948,7 @@ def test_send_reoffers_the_staged_message_in_the_header():
 
 
 def test_send_message_header_is_bare_before_anything_is_typed():
-    answers = ["3", "1", "1", "2", "hi", ".", "4", "", "0"]
+    answers = [SEND, "1", "1", "2", "hi", ".", "4", "", "0"]
     _code, _calls, output = run_menu(answers)
 
     assert "Message (blank cancels, . on its own line ends it):" in screens(output)
@@ -947,7 +956,7 @@ def test_send_message_header_is_bare_before_anything_is_typed():
 
 def test_send_shows_a_long_staged_message_cut_in_the_header():
     body = "line one\nline two that keeps going well past the width of the row"
-    answers = ["3", "1", "1", "2", body, ".", "2", "", "4", "", "0"]
+    answers = [SEND, "1", "1", "2", body, ".", "2", "", "4", "", "0"]
     _code, calls, output = run_menu(answers)
 
     assert calls[0].text == body
@@ -957,7 +966,7 @@ def test_send_shows_a_long_staged_message_cut_in_the_header():
 
 
 def test_send_takes_a_multi_line_message_from_the_menu():
-    answers = ["3", "1", "1", "2", "deploy is green", "all 300 tests pass", ".", "4", "", "0"]
+    answers = [SEND, "1", "1", "2", "deploy is green", "all 300 tests pass", ".", "4", "", "0"]
     code, calls, _output = run_menu(answers)
 
     assert code == 0
@@ -966,7 +975,7 @@ def test_send_takes_a_multi_line_message_from_the_menu():
 
 def test_send_pasted_lines_become_body_not_menu_answers():
     # The hazard this replaced: line two used to be read as the next menu choice.
-    answers = ["3", "1", "1", "2", "one", "2", "3", ".", "4", "", "0"]
+    answers = [SEND, "1", "1", "2", "one", "2", "3", ".", "4", "", "0"]
     code, calls, _output = run_menu(answers)
 
     assert code == 0
@@ -975,7 +984,7 @@ def test_send_pasted_lines_become_body_not_menu_answers():
 
 def test_send_attaches_a_file_from_the_menu():
     # 3 = Files row, then a path; 4 = Send it
-    answers = ["3", "1", "1", "3", "/tmp/shot.png", "4", "", "0"]
+    answers = [SEND, "1", "1", "3", "/tmp/shot.png", "4", "", "0"]
     code, calls, output = run_menu(answers)
 
     assert code == 0
@@ -987,7 +996,7 @@ def test_send_attaches_a_file_from_the_menu():
 
 def test_send_attaches_several_files():
     # Files row a second time offers Add another / Remove them all
-    answers = ["3", "1", "1", "3", "/tmp/a.png", "3", "1", "/tmp/b.pdf", "4", "", "0"]
+    answers = [SEND, "1", "1", "3", "/tmp/a.png", "3", "1", "/tmp/b.pdf", "4", "", "0"]
     code, calls, output = run_menu(answers)
 
     assert code == 0
@@ -996,7 +1005,7 @@ def test_send_attaches_several_files():
 
 
 def test_send_can_clear_the_attachments():
-    answers = ["3", "1", "1", "3", "/tmp/a.png", "3", "2", "2", "hi", ".", "4", "", "0"]
+    answers = [SEND, "1", "1", "3", "/tmp/a.png", "3", "2", "2", "hi", ".", "4", "", "0"]
     code, calls, output = run_menu(answers)
 
     assert code == 0
@@ -1006,7 +1015,7 @@ def test_send_can_clear_the_attachments():
 
 
 def test_send_a_caption_with_a_file_sends_both():
-    answers = ["3", "1", "1", "2", "look at this", ".", "3", "/tmp/a.png", "4", "", "0"]
+    answers = [SEND, "1", "1", "2", "look at this", ".", "3", "/tmp/a.png", "4", "", "0"]
     code, calls, _output = run_menu(answers)
 
     assert code == 0
@@ -1015,7 +1024,7 @@ def test_send_a_caption_with_a_file_sends_both():
 
 
 def test_send_cancelling_the_file_path_stages_nothing():
-    answers = ["3", "1", "1", "3", "", "2", "hi", ".", "4", "", "0"]
+    answers = [SEND, "1", "1", "3", "", "2", "hi", ".", "4", "", "0"]
     code, calls, _output = run_menu(answers)
 
     assert code == 0
@@ -1027,7 +1036,7 @@ def test_send_cancelling_the_file_path_stages_nothing():
 
 def test_after_run_runs_the_same_search_again():
     # 2 = search, 1 = forum groups, 1 = Hermes, 7 = run, 1 = run it again, Enter, 0
-    code, calls, output = run_menu(["2", "1", "1", "7", "1", "", "0"])
+    code, calls, output = run_menu([SEARCH, "1", "1", "7", "1", "", "0"])
 
     assert code == 0
     assert [call.chat for call in calls] == ["-100111", "-100111"]
@@ -1039,7 +1048,7 @@ def test_after_run_runs_the_same_search_again():
 def test_search_tweak_returns_to_the_form_with_the_filters_kept():
     # ... 2 = contains (unset, so straight to the prompt), "hello", 7 = run,
     # 2 = tweak, 6 = limit, 5, 7 = run again, Enter, 0
-    answers = ["2", "1", "1", "2", "hello", "7", "2", "6", "5", "7", "", "0"]
+    answers = [SEARCH, "1", "1", "2", "hello", "7", "2", "6", "5", "7", "", "0"]
     _code, calls, output = run_menu(answers)
 
     assert len(calls) == 2
@@ -1052,17 +1061,17 @@ def test_search_tweak_returns_to_the_form_with_the_filters_kept():
 
 def test_after_run_says_not_done_when_the_action_was_declined_and_failed_on_an_error():
     _calls, declined = recorder(result=1)
-    _code, _unused, output = run_menu(["2", "1", "1", "7", "", "0"], runner=declined)
+    _code, _unused, output = run_menu([SEARCH, "1", "1", "7", "", "0"], runner=declined)
     assert "Not done" in screens(output)
 
     _calls, broken = recorder(error=ValueError("no"))
-    _code, _unused, output = run_menu(["2", "1", "1", "7", "", "0"], runner=broken)
+    _code, _unused, output = run_menu([SEARCH, "1", "1", "7", "", "0"], runner=broken)
     assert "Failed" in screens(output)
 
 
 def test_discover_offers_run_again_but_no_tweak():
     # 1 = discover, 1 = managed, 1 = print, 1 = run it again, Enter = menu, 0
-    _code, calls, output = run_menu(["1", "1", "1", "1", "", "0"])
+    _code, calls, output = run_menu([DISCOVER, "1", "1", "1", "", "0"])
 
     assert [call.all_chats for call in calls] == [False, False]
     assert "1. Run it again" in screens(output)
@@ -1070,7 +1079,7 @@ def test_discover_offers_run_again_but_no_tweak():
 
 
 def test_doctor_keeps_the_plain_enter_or_zero_prompt():
-    _code, calls, output = run_menu(["7", "", "0"])
+    _code, calls, output = run_menu([DOCTOR, "", "0"])
 
     assert [call.command for call in calls] == ["doctor"]
     assert "Run it again" not in screens(output)
@@ -1080,7 +1089,7 @@ def test_doctor_keeps_the_plain_enter_or_zero_prompt():
 def test_send_tweak_keeps_the_message_files_and_topic():
     # 3 = send, 1 = forum groups, 1 = Hermes, 2 = message, "hi", ".", 4 = send,
     # 2 = tweak, 4 = send again, Enter, 0
-    answers = ["3", "1", "1", "2", "hi", ".", "4", "2", "4", "", "0"]
+    answers = [SEND, "1", "1", "2", "hi", ".", "4", "2", "4", "", "0"]
     _code, calls, output = run_menu(answers)
 
     assert [call.text for call in calls] == ["hi", "hi"]
@@ -1090,7 +1099,7 @@ def test_send_tweak_keeps_the_message_files_and_topic():
 def test_create_offers_another_instead_of_a_rerun():
     # 4 = create, 1 = group, "Team", blank description, 1 = create another -> the
     # kind list, 3 = channel, "News", blank description, Enter, 0
-    answers = ["4", "1", "Team", "", "1", "3", "News", "", "", "0"]
+    answers = [CREATE, "1", "Team", "", "1", "3", "News", "", "", "0"]
     _code, calls, output = run_menu(answers)
 
     assert [(call.create_kind, call.title) for call in calls] == [("group", "Team"), ("channel", "News")]
@@ -1104,7 +1113,7 @@ def test_create_offers_another_instead_of_a_rerun():
 def test_send_back_with_a_message_asks_before_discarding():
     # ... 2 = message, "hi", ".", 0 = back -> asks, 1 = keep editing, 0 = back -> asks
     # again, 0 = discard -> the chat picker, 0 = root, 0 = exit
-    answers = ["3", "1", "1", "2", "hi", ".", "0", "1", "0", "0", "0", "0"]
+    answers = [SEND, "1", "1", "2", "hi", ".", "0", "1", "0", "0", "0", "0"]
     _code, calls, output = run_menu(answers)
 
     text = screens(output)
@@ -1118,7 +1127,7 @@ def test_send_back_with_a_message_asks_before_discarding():
 
 
 def test_send_back_with_nothing_staged_does_not_ask():
-    _code, calls, output = run_menu(["3", "1", "1", "0", "0", "0"])
+    _code, calls, output = run_menu([SEND, "1", "1", "0", "0", "0"])
 
     assert calls == []
     assert "Unsent message" not in screens(output)
@@ -1130,7 +1139,7 @@ def test_send_back_with_nothing_staged_does_not_ask():
 def test_clear_all_topics_row_is_the_all_topics_flag():
     # 5 = clear, 1 = Hermes, 3 = All topics (the row after the two topics), dry-run,
     # 1 = for real, Enter, 0
-    _code, calls, output = run_menu(["5", "1", "3", "1", "", "0"])
+    _code, calls, output = run_menu([CLEAR, "1", "3", "1", "", "0"])
 
     assert "3. All topics (no need to tick)" in screens(output)
     assert calls[0].all_topics is True
@@ -1141,7 +1150,7 @@ def test_clear_all_topics_row_is_the_all_topics_flag():
 
 def test_clear_batch_size_is_an_advanced_row_on_the_dry_run_screen():
     # ... 5 = continue, dry-run, 2 = batch size, 25, 1 = for real, Enter, 0
-    _code, calls, output = run_menu(["5", "1", "1", "5", "2", "25", "1", "", "0"])
+    _code, calls, output = run_menu([CLEAR, "1", "1", "5", "2", "25", "1", "", "0"])
 
     text = screens(output)
     assert "2. Batch size [100]" in text
@@ -1155,7 +1164,7 @@ def test_clear_remembers_the_ticks_when_the_same_chat_is_picked_again():
     # 5 = clear, 1 = Hermes, 1 = tick Deploys, 5 = continue (dry-run), 0 = back to
     # the ticker, 0 = back to the picker, 1 = Hermes again (still ticked),
     # 5 = continue (same ticks: no second scan), 0 = ticker, 0 = picker, 0 = root, 0
-    answers = ["5", "1", "1", "5", "0", "0", "1", "5", "0", "0", "0", "0"]
+    answers = [CLEAR, "1", "1", "5", "0", "0", "1", "5", "0", "0", "0", "0"]
     _code, calls, output = run_menu(answers)
 
     assert len(calls) == 1
@@ -1168,7 +1177,7 @@ def test_clear_remembers_the_ticks_when_the_same_chat_is_picked_again():
 
 def test_clear_more_topics_after_the_real_pass_starts_from_a_clean_ticker():
     # ... 1 = for real, 1 = clear more topics -> the ticker with nothing ticked, 0, 0, 0
-    _code, calls, output = run_menu(["5", "1", "1", "5", "1", "1", "0", "0", "0", "0"])
+    _code, calls, output = run_menu([CLEAR, "1", "1", "5", "1", "1", "0", "0", "0", "0"])
 
     text = screens(output)
     assert calls[1].execute is True
@@ -1182,7 +1191,7 @@ def test_clear_more_topics_after_the_real_pass_starts_from_a_clean_ticker():
 
 def test_bots_saves_the_whole_bot_list_to_json():
     # 6 = my bots, 2 = save the list (row after the one bot), path, Enter, 0
-    _code, calls, output = run_menu(["6", "2", "/tmp/bots.json", "", "0"])
+    _code, calls, output = run_menu([BOTS, "2", "/tmp/bots.json", "", "0"])
 
     assert "2. Save the bot list to a JSON file" in screens(output)
     assert calls[0].command == "bots"
@@ -1194,7 +1203,7 @@ def test_bots_typed_username_shows_a_bot_you_do_not_own_read_only():
     other = BotInfo(id=777, username="otherbot", name="Other", bio="Not mine", description=None, is_owned=False)
     session = FakeSession(profile=other)
     # 6 = my bots, 3 = type a bot, "@otherbot", 0 = back to the list, 0 = root, 0 = exit
-    _code, calls, output = run_menu(["6", "3", "@otherbot", "0", "0", "0"], session=session)
+    _code, calls, output = run_menu([BOTS, "3", "@otherbot", "0", "0", "0"], session=session)
 
     text = screens(output)
     assert calls == []
@@ -1210,7 +1219,7 @@ def test_bots_typo_in_a_typed_username_returns_to_the_list_not_the_root():
         async def bot_profile(self, reference):
             raise ValueError(f"{reference!r} is not a bot.")
 
-    _code, calls, output = run_menu(["6", "3", "nope", "0", "0"], session=Session())
+    _code, calls, output = run_menu([BOTS, "3", "nope", "0", "0"], session=Session())
 
     text = screens(output)
     assert calls == []
@@ -1220,7 +1229,7 @@ def test_bots_typo_in_a_typed_username_returns_to_the_list_not_the_root():
 
 def test_bots_with_none_of_your_own_still_offers_the_lookup():
     session = FakeSession(bots=[])
-    _code, calls, output = run_menu(["6", "0", "0"], session=session)
+    _code, calls, output = run_menu([BOTS, "0", "0"], session=session)
 
     text = screens(output)
     assert calls == []
@@ -1239,7 +1248,7 @@ def test_bots_typed_nickname_resolves_through_the_token_like_the_flags_do():
             return self._profile
 
     session = Session()
-    _code, _calls, _output = run_menu(["6", "3", "harry", "0", "0", "0"], session=session)
+    _code, _calls, _output = run_menu([BOTS, "3", "harry", "0", "0", "0"], session=session)
 
     # The nickname never reaches Telegram: the token's own bot id does.
     assert session.references == ["12345"]
@@ -1258,7 +1267,7 @@ def test_bot_edit_more_fetches_the_profile_again():
     session = Session()
     # 6, 1 = harrybot, 1 = edit, 1 = name, 2 = change, "Harry Two", 8 = apply,
     # 1 = edit more (fresh profile), 0 = field list back, 0 = the list, 0 = root, 0
-    answers = ["6", "1", "1", "1", "2", "Harry Two", "8", "1", "0", "0", "0", "0"]
+    answers = [BOTS, "1", "1", "1", "2", "Harry Two", "8", "1", "0", "0", "0", "0"]
     _code, calls, output = run_menu(answers, session=session)
 
     assert calls[0].name == "Harry Two"
@@ -1272,7 +1281,7 @@ def test_bot_edit_more_fetches_the_profile_again():
 def test_every_screen_below_the_root_carries_its_trail():
     # 2 = search, 1 = forum groups, 1 = Hermes, 3 = From, 0 = back to the form,
     # 0 = back to the picker, 0 = root, 0 = exit
-    _code, _calls, output = run_menu(["2", "1", "1", "3", "0", "0", "0", "0"])
+    _code, _calls, output = run_menu([SEARCH, "1", "1", "3", "0", "0", "0", "0"])
     text = screens(output)
     assert "Main › Search › Pick a chat\n" in text
     assert "Main › Search › Pick a chat › Forum groups\n" in text
@@ -1280,7 +1289,7 @@ def test_every_screen_below_the_root_carries_its_trail():
     assert "Main › Search › Hermes › From\n" in text
 
     # 6 = my bots, 1 = harrybot, 1 = edit, 1 = name, then back out four times and exit
-    _code, _calls, output = run_menu(["6", "1", "1", "1", "0", "0", "0", "0", "0"])
+    _code, _calls, output = run_menu([BOTS, "1", "1", "1", "0", "0", "0", "0", "0"])
     text = screens(output)
     assert "Main › My bots\n" in text
     assert "Main › My bots › @harrybot\n" in text
@@ -1288,7 +1297,7 @@ def test_every_screen_below_the_root_carries_its_trail():
     assert "Main › My bots › @harrybot › Edit › Name\n" in text
 
     # 5 = clear, 1 = Hermes, 1 = tick, 5 = continue, 1 = for real, Enter, 0
-    _code, _calls, output = run_menu(["5", "1", "1", "5", "1", "", "0"])
+    _code, _calls, output = run_menu([CLEAR, "1", "1", "5", "1", "", "0"])
     text = screens(output)
     assert "Main › Clear › Pick a forum group\n" in text
     assert "Main › Clear › Hermes › Tick what to clear\n" in text
@@ -1313,3 +1322,64 @@ def test_run_menu_defaults_to_the_ui_reader_and_writer(monkeypatch):
 
     assert code == 0
     assert "0. Exit" in screens(seen)
+
+
+# -- delete ---------------------------------------------------------------
+
+
+def test_delete_flow_dry_runs_before_offering_execute():
+    # Delete > a group or channel > Forum groups > Hermes > for real > exit
+    _code, calls, _output = run_menu([DELETE, "1", "1", "1", "1", "0"])
+
+    assert [call.command for call in calls] == ["delete", "delete"]
+    assert calls[0].execute is False
+    assert calls[1].execute is True
+    assert calls[1].delete_kind == "group"
+    assert calls[1].chat == "-100111"
+
+
+def test_delete_flow_knows_a_channel_from_a_group():
+    # Delete > a group or channel > Channels > Alerts > for real > exit
+    _code, calls, _output = run_menu([DELETE, "1", "2", "1", "1", "0"])
+
+    assert calls[1].delete_kind == "channel"
+    assert calls[1].chat == "-100222"
+
+
+def test_delete_flow_deletes_a_topic():
+    # Delete > a topic > Hermes > Deploys > for real > exit
+    _code, calls, _output = run_menu([DELETE, "2", "1", "1", "1", "0"])
+
+    assert calls[1].delete_kind == "topic"
+    assert calls[1].topic == 141
+    assert calls[1].chat == "-100111"
+
+
+def test_delete_flow_backing_out_never_executes():
+    _code, calls, _output = run_menu([DELETE, "1", "1", "1", "0", "0", "0", "0"])
+
+    executed = [call for call in calls if getattr(call, "execute", False)]
+    assert executed == []
+
+
+def test_delete_flow_names_the_target_before_the_point_of_no_return():
+    _code, _calls, output = run_menu([DELETE, "1", "1", "1", "1", "0"])
+
+    assert "Delete it for real (asks you to type Hermes)" in screens(output)
+
+
+def test_delete_flow_refuses_a_chat_create_could_not_make_back():
+    # Direct chats > Mum: nothing this tool can create, so nothing it will delete.
+    _code, calls, output = run_menu([DELETE, "1", "3", "1", "0"])
+
+    assert calls == []
+    assert "does not delete" in screens(output)
+
+
+def test_delete_flow_asks_which_kind_for_a_typed_reference():
+    # A typed reference has not been looked up, so the menu asks instead of guessing.
+    # Delete > group or channel > Type an ID (row 4) > @newchat > Channel > for real > exit
+    _code, calls, _output = run_menu([DELETE, "1", "4", "@newchat", "2", "1", "0"])
+
+    assert calls[1].delete_kind == "channel"
+    assert calls[1].chat == "@newchat"

@@ -4,6 +4,20 @@ All notable changes to this project will be documented here.
 
 This project follows a practical changelog style: user-visible changes, safety changes, and release notes belong here; active task tracking belongs outside the repo.
 
+## 3.7.0 - 2026-09-01
+
+- `delete` removes the group, channel or topic itself, not just the messages inside it. The tool could make all three and take none of them back, so a forum scaffolded with telegram-tools could only be unscaffolded in the Telegram app. `telegram-tools delete group|channel|topic` closes that with a gate one notch tighter than `clear-messages`: dry-run by default, and the real run wants `--execute` **and** the target's own title typed back, not the word `DELETE`. For a whole chat the mistake worth catching is deleting the *wrong* one, and only the title catches that. There is deliberately no `--yes` anywhere on the path: an agent can search, send and clear unattended, and can never delete a chat.
+
+- Naming the kind is a second lock, checked against what Telegram says rather than what you typed. `delete group` pointed at a broadcast channel is refused before anything is asked, naming the real type. The preview says how far the deletion reaches and does not soften it: a group or channel goes for **every** member, not just for you, along with every message, its invite links and its ID, and only its creator can do it at all.
+
+- `delete` removes exactly what `create` makes, so no cleanup this tool performs is a one-way door. Supergroups (with or without topics), broadcast channels and forum topics are all deletable and all creatable. A **basic group** is deliberately refused with that reason stated: `create` makes supergroups and cannot make a basic group back, so `delete` will not take one away — Telegram itself still can.
+
+- Deleting a topic is honest about the mechanism. Telegram has no delete-topic method; a client removes a topic by deleting every message in it, the service message that opened it included, after which the topic is gone from the list (`messages.deleteTopicHistory`). That is what `delete topic` does, and the preview says so. The **General** topic has no such opening message and cannot be deleted at all — it is refused with a pointer to `clear-messages`, which empties it instead.
+
+- The menu carries the same flow, and never as a shorter path past a gate. *Delete a group, channel, or topic* is a new root row: it works out the kind from what you picked rather than asking you to name it, dry-runs first, and only then offers a row that tells you which title it is about to ask for. A typed ID or `@username` is the one case it asks, because nothing has looked it up and guessing is not a gate.
+
+- One new root menu row shifts the numbering: *Delete* is 5, *Clear topic messages* moves to 6, *My bots* to 7, *Check setup* to 8.
+
 ## 3.6.0 - 2026-08-31
 
 - Topic listings show the emoji Telegram shows: `💻 Dobby`, `🔎 Researcher`, `‼️ Alerts`. A forum topic's title is plain text and the emoji in front of it is a separate custom-emoji document ID, so a tool that reads only the title prints titles that look like the emoji has gone missing — which is exactly how this was found. Every topic ID on a page is now resolved in one `messages.GetCustomEmojiDocuments` call, never one per topic, and the character goes in front of the title everywhere a topic is drawn: `discover`'s table, the menu's search, send and clear pickers, `send`'s confirmation preview, and the line `clear-messages` prints as it scans a topic. A topic with no icon, an ID Telegram will not resolve, or a failed call all print the bare title rather than an error. The `title` field itself is untouched — `--topic` matching and both export formats key on it — and `discover --json` gains an additive `icon_emoji` alongside it, so an existing reader keeps working.

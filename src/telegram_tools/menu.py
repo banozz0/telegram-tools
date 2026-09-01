@@ -12,6 +12,7 @@ from telegram_tools.bots import IMPLICIT_OTHER_RIGHT, format_bot_profile, get_bo
 from telegram_tools.client import SessionInUseError, create_client, start_client
 from telegram_tools.columns import cell
 from telegram_tools.config import ConfigError, load_config, lookup_bot_token, resolve_bot_token
+from telegram_tools.delete import kind_for_type
 from telegram_tools.discovery import list_dialog_choices
 from telegram_tools.prompts import BACK, CLEAR, EXIT, Extra, after_action, after_run, ask_int, ask_lines, ask_text, choose, edit_field, pick, pick_many
 from telegram_tools.resolver import resolve_chat
@@ -31,6 +32,7 @@ ROOT_ITEMS = (
     "Search / export messages",
     "Send a message",
     "Create a group, channel, or topic",
+    "Delete a group, channel, or topic",
     "Clear topic messages",
     "My bots",
     "Check setup",
@@ -171,6 +173,9 @@ class ChatPick:
     reference: str
     title: str
     is_forum: bool | None
+    # None for a typed reference, for the same reason `is_forum` is: nothing
+    # has looked it up, and `delete` must ask rather than assume.
+    type: str | None = None
 
 
 def _chat_label(chat) -> str:
@@ -226,7 +231,9 @@ def _pick_from_group(chats, *, title, read, write) -> Any:
                 continue
             return typed
 
-        return ChatPick(reference=str(chosen.id), title=chosen.title, is_forum=chosen.is_forum)
+        return ChatPick(
+            reference=str(chosen.id), title=chosen.title, is_forum=chosen.is_forum, type=chosen.type
+        )
 
 
 async def _pick_chat(*, session, read, write, forums_only: bool = False, trail: str = MAIN) -> Any:
@@ -642,6 +649,108 @@ async def _flow_create(*, session, runner, read, write) -> bool:
             return result is not EXIT
 
 
+# Deleting twice is never what anyone means -- the thing is gone -- so the row
+# after one is "delete something else", back at the scope screen.
+DELETE_ANOTHER = (STAY, "Delete something else")
+
+
+async def _flow_delete(*, session, runner, read, write) -> bool:
+    trail = crumb(MAIN, "Delete")
+    while True:
+        scope = choose(
+            ["A group or channel", "A topic in a forum group"], title=trail, read=read, write=write
+        )
+        if scope is BACK:
+            return True
+
+        if scope == 1:
+            picked = await _pick_chat(session=session, read=read, write=write, forums_only=True, trail=trail)
+            if picked is BACK:
+                continue
+            topics = await session.topics(picked.reference)
+            if not topics:
+                # One screen back -- the forum picker -- not all the way out.
+                write("That chat has no topics.")
+                continue
+            chosen = pick(
+                topics,
+                title=crumb(trail, picked.title, "Pick a topic to delete"),
+                label=lambda topic: f"{topic.id:<6}  {topic.display_title}",
+                read=read,
+                write=write,
+            )
+            if chosen is BACK:
+                continue
+            where = crumb(trail, picked.title, chosen.display_title)
+            target_title = chosen.title
+            dry_run = _namespace(
+                command="delete",
+                delete_kind="topic",
+                chat=picked.reference,
+                topic=chosen.id,
+                execute=False,
+            )
+        else:
+            picked = await _pick_chat(session=session, read=read, write=write, trail=trail)
+            if picked is BACK:
+                continue
+
+            if picked.type is None:
+                # A typed reference has not been looked up, so the menu asks
+                # rather than guesses; the command still checks the answer
+                # against what Telegram says before anything is deleted.
+                answer = choose(
+                    ["Group", "Channel"], title=crumb(trail, picked.title, "Which is it?"), read=read, write=write
+                )
+                if answer is BACK:
+                    continue
+                kind = ("group", "channel")[answer]
+            else:
+                kind = kind_for_type(picked.type)
+                if kind is None:
+                    write(
+                        f"error: {picked.title} is a {picked.type}, which telegram-tools does not delete - "
+                        "`create` cannot make one back. Delete it in Telegram itself."
+                    )
+                    if not after_action(read=read, write=write):
+                        return False
+                    continue
+
+            where = crumb(trail, picked.title)
+            target_title = picked.title
+            dry_run = _namespace(
+                command="delete", delete_kind=kind, chat=picked.reference, execute=False
+            )
+
+        # The dry-run always runs first: the menu must never be a shorter path
+        # to a deletion than the flags are.
+        if await _call(dry_run, session=session, runner=runner, write=write) is None:
+            return after_action(read=read, write=write)
+
+        choice = choose(
+            [f"Delete it for real (asks you to type {target_title})"],
+            title=crumb(where, "Dry-run done"),
+            read=read,
+            write=write,
+            back_label="Back to what to delete",
+        )
+        if choice is BACK:
+            continue
+
+        for_real = _namespace(**{**vars(dry_run), "execute": True})
+        result = await _act(
+            for_real,
+            session=session,
+            runner=runner,
+            read=read,
+            write=write,
+            trail=where,
+            rows=(DELETE_ANOTHER,),
+        )
+        if result is not STAY:
+            return result is not EXIT
+
+
 _ALL_TOPICS_ROW = Extra("every", "All topics (no need to tick)")
 DEFAULT_BATCH_SIZE = 100
 
@@ -1045,7 +1154,16 @@ async def run_menu(*, read=None, write=None, session=None, runner=None) -> int:
     write = ui.writer() if write is None else write
     session = session if session is not None else MenuSession()
     runner = runner if runner is not None else cli.run
-    flows = (_flow_discover, _flow_search, _flow_send, _flow_create, _flow_clear, _flow_bots, _flow_doctor)
+    flows = (
+        _flow_discover,
+        _flow_search,
+        _flow_send,
+        _flow_create,
+        _flow_delete,
+        _flow_clear,
+        _flow_bots,
+        _flow_doctor,
+    )
 
     try:
         while True:

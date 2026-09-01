@@ -309,3 +309,26 @@ def test_create_topic_requires_a_chat_and_title():
 
     with pytest.raises(SystemExit):
         parse_args("create", "topic", "--title", "Deploys")
+
+
+def test_delete_group_defaults_to_dry_run():
+    args = parse_args("delete", "group", "--chat", "@hermes")
+
+    assert args.command == "delete"
+    assert args.delete_kind == "group"
+    assert args.chat == "@hermes"
+    assert args.execute is False
+
+
+def test_delete_topic_needs_a_topic_id():
+    args = parse_args("delete", "topic", "--chat", "@hermes", "--topic", "141", "--execute")
+
+    assert args.delete_kind == "topic"
+    assert args.topic == 141
+    assert args.execute is True
+
+
+def test_delete_has_no_yes_flag():
+    """Deletion always needs a human: there is no unattended path, by design."""
+    with pytest.raises(SystemExit):
+        parse_args("delete", "group", "--chat", "@hermes", "--yes")

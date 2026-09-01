@@ -92,6 +92,34 @@ class DeleteResult:
 
 
 @dataclass(frozen=True)
+class ContainerDeleteResult:
+    """What `delete` was pointed at and whether it went through.
+
+    Separate from `DeleteResult`: that one counts messages inside a chat that
+    survives, this one is the chat or topic itself going away.
+    """
+
+    kind: str
+    id: int
+    title: str
+    dry_run: bool
+    topic_id: int | None = None
+    deleted: bool = False
+    cancelled: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "kind": self.kind,
+            "chat_id": self.id,
+            "topic_id": self.topic_id,
+            "title": self.title,
+            "deleted": self.deleted,
+            "dry_run": self.dry_run,
+            "cancelled": self.cancelled,
+        }
+
+
+@dataclass(frozen=True)
 class BotCommandInfo:
     command: str
     description: str
