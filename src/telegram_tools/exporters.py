@@ -6,13 +6,28 @@ from pathlib import Path
 from typing import Any, Iterable
 
 
+def json_text(payload: Any) -> str:
+    """One JSON spelling for the whole tool, emoji included.
+
+    `json.dumps` escapes non-ASCII by default, so a topic named 💻 Dobby came
+    out as "\\ud83d\\udcbb Dobby" while every other line of the same output --
+    the pickers, the discover table, the CSV export -- drew the emoji. Same
+    title, two spellings, one terminal. Both are valid JSON; only one is
+    readable.
+    """
+    return json.dumps(payload, indent=2, default=str, ensure_ascii=False)
+
+
 def write_records(records: Iterable[dict[str, Any]], output: str | Path, fmt: str) -> None:
     rows = list(records)
     path = Path(output)
     path.parent.mkdir(parents=True, exist_ok=True)
 
     if fmt == "json":
-        path.write_text(json.dumps(rows, indent=2, default=str) + "\n")
+        # Explicit encoding, not the locale's: raw UTF-8 through the default
+        # would raise on a machine whose locale is not UTF-8, where the old
+        # ASCII-escaped output could not fail.
+        path.write_text(json_text(rows) + "\n", encoding="utf-8")
         return
 
     if fmt != "csv":
@@ -24,7 +39,7 @@ def write_records(records: Iterable[dict[str, Any]], output: str | Path, fmt: st
             if key not in fieldnames:
                 fieldnames.append(key)
 
-    with path.open("w", newline="") as handle:
+    with path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(rows)

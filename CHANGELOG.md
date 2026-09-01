@@ -4,7 +4,14 @@ All notable changes to this project will be documented here.
 
 This project follows a practical changelog style: user-visible changes, safety changes, and release notes belong here; active task tracking belongs outside the repo.
 
-## 3.7.1 - 2026-09-01
+## 3.7.2 - 2026-09-01
+
+- JSON output prints the emoji instead of escaping it. `json.dumps` escapes non-ASCII by default, so a topic named `💻 Dobby` came back as `"\ud83d\udcbb Dobby"` while every other line of the same output — the pickers, the discover table, the CSV export — drew the emoji. Same title, two spellings, one terminal. Both are valid JSON and any parser read the old form fine; only one of them is readable by a person, which is who reads the menu. Found in the sibling's delete try-it and fixed the same way here.
+
+- The setting lives in one place rather than on six calls: a `json_text()` helper in `exporters.py` is now the only way this tool emits JSON, so the next command added cannot quietly reintroduce the escaping.
+
+- JSON and CSV exports are written as UTF-8 explicitly. Raw non-ASCII through Python's default would use the machine's locale encoding and could fail where the old ASCII-only output never could — and the CSV path already wrote emoji raw at locale encoding, so that latent case is closed too. This matters more here than in the sibling: topic titles carry their icon emoji as of 3.6.0, so nearly every `discover --json` on a forum was full of escapes.
+
 
 - `delete` printed its warning banner twice in one menu flow — once for the dry-run, once to confirm — which is exactly how a person learns to skim it. Found in the sibling's try-it and fixed the same way here: the dry-run prints a compact line plus the same GONE/OK consequences, and the banner belongs to the confirm alone, the screen that can still be stopped. A topic's dry-run also names the group it is in.
 

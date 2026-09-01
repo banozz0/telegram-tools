@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import json
 import sys
 from functools import partial
 from pathlib import Path
@@ -37,7 +36,7 @@ from telegram_tools.delete import (
 )
 from telegram_tools.discovery import classify_entity, discover_chats, filter_chats, format_discovery_table
 from telegram_tools.doctor import run_doctor
-from telegram_tools.exporters import write_records
+from telegram_tools.exporters import json_text, write_records
 from telegram_tools.resolver import EntityResolutionError, resolve_chat
 from telegram_tools.search import format_message_records, search_messages
 from telegram_tools.send import SendTarget, confirm_send, format_send_preview, require_send_allowed, send_message
@@ -182,7 +181,7 @@ async def _run_clear_messages(client, args) -> int:
         progress=print,
         confirm=confirm_clear_topic_messages,
     )
-    print(json.dumps(result.to_dict(), indent=2))
+    print(json_text(result.to_dict()))
     return 1 if result.cancelled else 0
 
 
@@ -269,7 +268,7 @@ async def _run_send(client, args, config) -> int:
         confirm = partial(confirm_send, preview)
 
     result = await send_message(client, peer, target, text, files=files, confirm=confirm)
-    print(json.dumps(result.to_dict(), indent=2))
+    print(json_text(result.to_dict()))
     return 1 if result.cancelled else 0
 
 
@@ -305,7 +304,7 @@ async def _run_create(client, args) -> int:
     else:
         created = await create_topic(client, peer, chat_id=chat_id, title=args.title, confirm=confirm)
 
-    print(json.dumps(created.to_dict(), indent=2))
+    print(json_text(created.to_dict()))
     return 1 if created.cancelled else 0
 
 
@@ -359,7 +358,7 @@ async def _run_delete(client, args) -> int:
             progress=print,
         )
 
-    print(json.dumps(result.to_dict(), indent=2))
+    print(json_text(result.to_dict()))
     return 1 if result.cancelled else 0
 
 
@@ -379,7 +378,7 @@ def bot_edit_requests(args) -> dict:
 def _write_json(payload, path: str) -> None:
     output = Path(path)
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(payload, indent=2, default=str) + "\n")
+    output.write_text(json_text(payload) + "\n", encoding="utf-8")
 
 
 def _bot_result(profile, plan, applied, *, cancelled: bool) -> dict:
@@ -396,7 +395,7 @@ def _emit_bot_result(result: dict, json_output: str | None) -> None:
     if json_output:
         _write_json(result, json_output)
     else:
-        print(json.dumps(result, indent=2))
+        print(json_text(result))
 
 
 async def _run_bots(client, args, config) -> int:
