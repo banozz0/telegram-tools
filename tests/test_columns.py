@@ -1,4 +1,4 @@
-from telegram_tools.columns import cell, pad, width
+from telegram_tools._core.columns import cell, pad, width
 
 # Two chat titles len() ranks one way and the terminal draws the other:
 # VAULT counts 8 characters and draws 9 columns, SYSTEM counts 9 and draws 8.

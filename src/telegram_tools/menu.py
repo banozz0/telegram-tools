@@ -10,7 +10,7 @@ from telethon.errors import ChannelForumMissingError, RPCError
 from telegram_tools import cli
 from telegram_tools.bots import IMPLICIT_OTHER_RIGHT, format_bot_profile, get_bot_profile, list_bots, resolve_bot, right_names
 from telegram_tools.client import SessionInUseError, create_client, start_client
-from telegram_tools.columns import cell
+from telegram_tools._core.columns import cell
 from telegram_tools.config import ConfigError, load_config, lookup_bot_token, resolve_bot_token
 from telegram_tools.delete import kind_for_type
 from telegram_tools.discovery import list_dialog_choices

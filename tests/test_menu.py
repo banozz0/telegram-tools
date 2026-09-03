@@ -1,7 +1,7 @@
 import asyncio
 
 from telegram_tools import menu
-from telegram_tools.columns import width
+from telegram_tools._core.columns import width
 from telegram_tools.config import ConfigError
 from telegram_tools.models import BotCommandInfo, BotInfo, ChatChoice, TopicInfo
 

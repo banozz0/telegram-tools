@@ -1,17 +1,17 @@
 """How a name is measured and cut so the ID column beside it lines up.
 
-Telegram chat titles carry emoji, and `len()` is the wrong ruler for them: an
+Names in a picker carry emoji, and `len()` is the wrong ruler for them: an
 emoji draws two columns from one codepoint, a variation selector draws none,
 and each half of a flag draws two. Padding on `len()` is what puts a row of
-the chat picker a column out of line -- `📚 Vaults` counts 8 characters
-and draws 9 columns, while `⚠️ Alerts` counts 9 and draws 8.
+a picker a column out of line -- `📚 Vaults` counts 8 characters and draws 9
+columns, while `⚠️ Alerts` counts 9 and draws 8.
 
 The rules below were measured against a real terminal on 2026-08-31 by
 printing each shape and asking the terminal where the cursor landed, over
 plain text, CJK, a combining mark, emoji with and without U+FE0F, a flag, a
-skin-tone modifier and two ZWJ sequences -- all fourteen agree. The sibling
-discord-tools carries the same rules and the same measured table (0.5.1), and
-the two are meant to stay identical.
+skin-tone modifier and two ZWJ sequences -- all fourteen agree. Those fourteen
+shapes are the contract: the suite that owns this module carries them as a
+table, and a terminal that disagrees is re-measured there, never patched here.
 """
 
 from __future__ import annotations
@@ -34,8 +34,8 @@ def width(text: str) -> int:
     """Roughly how many terminal columns `text` occupies.
 
     A heuristic -- no two terminals agree on every codepoint -- but right for
-    the case that actually bites here: a chat title with an emoji in front of
-    it. East Asian Wide and Fullwidth take two columns, a regional indicator
+    the case that actually bites here: a name with an emoji in front of it.
+    East Asian Wide and Fullwidth take two columns, a regional indicator
     takes two, and zero-width codepoints take none.
     """
     columns = 0
