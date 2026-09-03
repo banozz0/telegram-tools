@@ -46,6 +46,19 @@ def test_bot_edit_requests_keeps_an_empty_string_as_a_clearing_edit():
     assert bot_edit_requests(namespace(bot="harry", bio="")) == {"bio": ""}
 
 
+async def _me():
+    return SimpleNamespace(id=42, first_name="Sven", username="sven")
+
+
+def account_client():
+    """As much of the signed-in account as a bot edit needs: who is acting.
+
+    A bot edit builds a plan and leaves an audit line, and both name the
+    account making the change, so the client can no longer be a bare object.
+    """
+    return SimpleNamespace(get_me=_me)
+
+
 def fake_config(**tokens):
     from pathlib import Path
 
@@ -77,7 +90,7 @@ def owned_profile(**overrides):
 
 def test_run_bots_rejects_edit_flags_without_a_bot():
     with pytest.raises(ValueError, match="--bot is required"):
-        asyncio.run(_run_bots(object(), namespace(name="Harry"), fake_config()))
+        asyncio.run(_run_bots(account_client(), namespace(name="Harry"), fake_config()))
 
 
 def test_run_bots_cancels_without_applying_anything(monkeypatch, capsys):
@@ -131,7 +144,7 @@ def test_run_bots_writes_the_edit_result_to_json_when_requested(monkeypatch, tmp
     output_path = tmp_path / "result.json"
     args = namespace(bot="harry", name="Harry Two", yes=True, json_output=str(output_path))
 
-    exit_code = asyncio.run(_run_bots(object(), args, fake_config()))
+    exit_code = asyncio.run(_run_bots(account_client(), args, fake_config()))
 
     assert exit_code == 0
     # The JSON result goes to the file only; the identifying heading still goes to
@@ -145,7 +158,7 @@ def test_bot_token_never_appears_when_showing_a_bot_profile(monkeypatch, capsys)
     patch_bot_reads(monkeypatch, owned_profile())
     config = fake_config(harry=BOT_TOKEN_SECRET)
 
-    asyncio.run(_run_bots(object(), namespace(bot="harry"), config))
+    asyncio.run(_run_bots(account_client(), namespace(bot="harry"), config))
 
     assert BOT_TOKEN_SECRET not in capsys.readouterr().out
 
@@ -156,7 +169,7 @@ def test_bot_token_never_appears_in_the_confirm_diff(monkeypatch, capsys):
 
     monkeypatch.setattr("telegram_tools.cli.confirm_bot_edits", lambda plan: print(format_edit_plan(plan)) or False)
 
-    exit_code = asyncio.run(_run_bots(object(), namespace(bot="harry", name="Harry Two"), config))
+    exit_code = asyncio.run(_run_bots(account_client(), namespace(bot="harry", name="Harry Two"), config))
 
     assert exit_code == 1
     assert BOT_TOKEN_SECRET not in capsys.readouterr().out
@@ -185,7 +198,7 @@ def test_bot_token_never_appears_in_the_result_json(monkeypatch, capsys):
     monkeypatch.setattr("telegram_tools.cli.apply_bot_edits", fake_apply_bot_edits)
 
     args = namespace(bot="harry", name="Harry Two", group_rights="ban_users", yes=True)
-    exit_code = asyncio.run(_run_bots(object(), args, config))
+    exit_code = asyncio.run(_run_bots(account_client(), args, config))
 
     out = capsys.readouterr().out
     assert exit_code == 0
@@ -203,14 +216,14 @@ def test_editing_an_unowned_bot_raises_permission_error_and_applies_nothing(monk
     monkeypatch.setattr("telegram_tools.cli.apply_bot_edits", fail_if_called)
 
     with pytest.raises(PermissionError, match="do not own"):
-        asyncio.run(_run_bots(object(), namespace(bot="harry", name="Harry Two"), fake_config()))
+        asyncio.run(_run_bots(account_client(), namespace(bot="harry", name="Harry Two"), fake_config()))
 
 
 def test_editing_an_unowned_bot_without_a_username_names_it_by_id_not_at_id(monkeypatch):
     patch_bot_reads(monkeypatch, owned_profile(username=None, is_owned=False))
 
     with pytest.raises(PermissionError, match=r"bot 12345") as excinfo:
-        asyncio.run(_run_bots(object(), namespace(bot="harry", name="Harry Two"), fake_config()))
+        asyncio.run(_run_bots(account_client(), namespace(bot="harry", name="Harry Two"), fake_config()))
 
     assert "@12345" not in str(excinfo.value)
 
@@ -225,11 +238,11 @@ def test_mixed_plan_without_a_token_raises_before_applying_owner_changes(monkeyp
 
     args = namespace(bot="harry", name="Harry Two", group_rights="ban_users")
     with pytest.raises(ValueError, match="group_rights"):
-        asyncio.run(_run_bots(object(), args, fake_config()))
+        asyncio.run(_run_bots(account_client(), args, fake_config()))
 
 
 def _run_and_capture(args, config):
-    return asyncio.run(_run_bots(object(), args, config))
+    return asyncio.run(_run_bots(account_client(), args, config))
 
 
 @asynccontextmanager
@@ -241,7 +254,7 @@ async def refusing_bot_client(_config, _token):
 def test_run_bots_resolves_a_nickname_by_the_tokens_own_bot_id(monkeypatch):
     calls = patch_bot_reads(monkeypatch, owned_profile())
 
-    asyncio.run(_run_bots(object(), namespace(bot="harry"), fake_config(harry=BOT_TOKEN_SECRET)))
+    asyncio.run(_run_bots(account_client(), namespace(bot="harry"), fake_config(harry=BOT_TOKEN_SECRET)))
 
     assert calls["reference"] == 12345
 
@@ -322,7 +335,7 @@ def test_run_bots_refuses_a_missing_photo_before_prompting_or_writing(monkeypatc
 
 
 def test_main_turns_a_missing_file_into_a_usage_error(monkeypatch, capsys):
-    async def fake_run(_args):
+    async def fake_run(_args, **_report):
         raise FileNotFoundError(2, "No such file or directory", "/nope.json")
 
     monkeypatch.setattr("telegram_tools.cli.run", fake_run)

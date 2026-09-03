@@ -18,6 +18,15 @@ def json_text(payload: Any) -> str:
     return json.dumps(payload, indent=2, default=str, ensure_ascii=False)
 
 
+def json_line(payload: Any) -> str:
+    """One record as a single `--jsonl` line: the same spelling, no indent.
+
+    A stream is read a line at a time, so the pretty-printing that makes a
+    whole payload readable is exactly what a reader here cannot have.
+    """
+    return json.dumps(payload, default=str, ensure_ascii=False)
+
+
 def write_records(records: Iterable[dict[str, Any]], output: str | Path, fmt: str) -> None:
     rows = list(records)
     path = Path(output)

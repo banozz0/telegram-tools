@@ -5,7 +5,10 @@ from typing import Any
 
 
 class EntityResolutionError(ValueError):
-    pass
+    """A --chat reference Telegram would not turn into one chat."""
+
+    envelope_code = "TARGET_NOT_FOUND"
+    envelope_hint = "List the chats you can reach with `telegram-tools discover`."
 
 
 @dataclass(frozen=True)

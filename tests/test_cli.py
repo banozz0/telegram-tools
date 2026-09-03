@@ -164,7 +164,7 @@ def test_bots_command_rejects_photo_with_remove_photo():
 def test_run_uses_a_passed_client_and_leaves_it_connected(monkeypatch):
     seen = {}
 
-    async def fake_discover(client, args):
+    async def fake_discover(client, args, **_report):
         seen["client"] = client
         return 0
 
@@ -191,7 +191,7 @@ def test_run_without_a_client_creates_and_disconnects_one(monkeypatch):
         async def disconnect(self):
             events.append("disconnect")
 
-    async def fake_discover(_client, _args):
+    async def fake_discover(_client, _args, **_report):
         events.append("discover")
         return 0
 
@@ -206,7 +206,7 @@ def test_run_without_a_client_creates_and_disconnects_one(monkeypatch):
 
 
 def test_run_doctor_never_loads_config_or_connects(monkeypatch):
-    monkeypatch.setattr(cli, "run_doctor", lambda: 0)
+    monkeypatch.setattr(cli, "run_doctor", lambda **_: 0)
     monkeypatch.setattr(cli, "load_config", lambda: (_ for _ in ()).throw(AssertionError("no config for doctor")))
     monkeypatch.setattr(cli, "create_client", lambda _config: (_ for _ in ()).throw(AssertionError("no client for doctor")))
 

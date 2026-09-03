@@ -13,6 +13,8 @@ RULE = "--------------------------------------------"
 class SendNotAllowedError(PermissionError):
     """A --yes send aimed somewhere TELEGRAM_SEND_ALLOWLIST does not name."""
 
+    envelope_code = "NOT_ALLOWLISTED"
+
 
 @dataclass(frozen=True)
 class SendTarget:
@@ -123,12 +125,18 @@ async def send_message(
     *,
     files: Sequence[str] | None = None,
     confirm: Callable[[], bool] | None = None,
+    recheck: Callable[[], Any] | None = None,
 ) -> SendResult:
     files = list(files or [])
     if confirm is not None and not confirm():
         return SendResult(
             chat_id=target.chat_id, topic_id=target.topic_id, message_id=None, cancelled=True, files=len(files)
         )
+
+    # Between the preview a person read and this call, the chat could have been
+    # renamed or replaced. `recheck` re-resolves it and refuses on a difference.
+    if recheck is not None:
+        await recheck()
 
     if files:
         # Always a list, even for one file: Telethon groups a list into a single

@@ -15,6 +15,9 @@ _LOCKED = "database is locked"
 class SessionInUseError(RuntimeError):
     """A second client tried to open a session file another one already holds."""
 
+    envelope_code = "SESSION_IN_USE"
+    envelope_hint = "Close the other telegram-tools - a menu open in another terminal counts."
+
 
 def create_client(config: Config) -> TelegramClient:
     config.session_path.parent.mkdir(parents=True, exist_ok=True)

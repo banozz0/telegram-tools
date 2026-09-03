@@ -4,6 +4,28 @@ All notable changes to this project will be documented here.
 
 This project follows a practical changelog style: user-visible changes, safety changes, and release notes belong here; active task tracking belongs outside the repo.
 
+## 3.8.0 - 2026-09-04
+
+- **Machine-readable output, on every command.** `telegram-tools --json <command>` prints exactly one object on stdout — an *envelope* — and nothing else. It carries the command, the flags it was given, who the run acted as, what it acted on, a status, the command's own payload under `result`, any warnings, an error when there is one, and how long it took. Every key the old `--json PATH` files wrote is still there, inside `result`, under the same name. `--jsonl` streams one line per record first — a chat from `discover`, a message from `search` — and closes with the same envelope marked `"kind": "envelope"`. The flags go before the subcommand, where a global flag belongs: `telegram-tools --json discover`, not `discover --json`.
+
+- **Human output did not change.** Not one table, preview, prompt, warning banner or exit code. Without the flag this is the tool it was; with it, everything a person would read moves to stderr so stdout stays parseable, and a prompt reads from the terminal rather than from the pipe.
+
+- **Errors an agent can key on.** A refusal now carries a stable code — `NOT_ALLOWLISTED`, `TARGET_NOT_FOUND`, `TARGET_KIND_MISMATCH`, `PERMISSION_DENIED`, `PLAN_DRIFT`, `SESSION_IN_USE`, `CONFIG_MISSING`, `RATE_LIMITED` and the rest — plus a `hint` that is the exact command or edit that would fix it. Scripts that read those never have to match on English again.
+
+- **Exit codes mean what they meant.** 0 done, 1 not done, 2 refused, 130 interrupted — unchanged, `doctor`'s 1 for a failed check included. One code is new: **3**, "this asks for confirmation and there is no terminal to ask on", reachable only under `--json`, with the human command in the hint. An agent that hits a gate now gets an answer instead of a hang.
+
+- **Every write says what it is about to do, checks it may, and reads back what it did.** Before anything is sent, created, cleared or deleted, the tool builds a *plan* — the account, the resolved target, the change, the gate it needs — and asks Telegram what rights the account actually holds in that chat. A right Telegram says is absent refuses the write by name before a single call goes out. A right Telegram will not answer for — a private chat has no permissions to report — is named as unconfirmed and the write proceeds, because that is what it has always done.
+
+- **The window between the preview and the deletion is closed.** After the gate is answered and before the call goes out, the target is resolved again and compared with the one that was shown. A group renamed, replaced or gone in between refuses with `PLAN_DRIFT` rather than deleting whatever now holds that name.
+
+- **A local record of every executed write.** One redacted JSON line per write to `~/.telegram-tools/audit.jsonl` (0600, append-only, rotated at 10 MiB): when, as whom, which command, which target, which plan, which gate, and the readback. Menu runs are recorded exactly like flag runs. Nothing leaves the machine, and no token, phone number, api hash or session path can reach the file — one redaction pass covers the envelope, the audit line and every error before either is written.
+
+- **`--json` on `discover` and `bots` now takes the path *or* nothing.** `discover --json out.json` writes the same file it always wrote; a bare `discover --json` means the envelope. No other flag, choice or help line moved, and a test now holds every `--help` text against a captured copy so none can.
+
+- **`--version` said 3.6.0 for two releases.** The package's `__version__` had drifted from `pyproject.toml` and nothing read it, so nothing noticed. It is 3.8.0 in both now, and a test keeps them equal — the envelope, the plan id and every audit line carry that number, so it has to be the one that shipped.
+
+- Internally, the envelope, the error codes, the exit table, the redaction rules and the column measuring now live in `src/telegram_tools/_core/`, a copy of shared code maintained outside this repository at a recorded tag. It ships inside the package like any other module — there is no new dependency, and `pip install telegram-tools` still pulls Telethon and python-dotenv and nothing else.
+
 ## 3.7.2 - 2026-09-01
 
 - JSON output prints the emoji instead of escaping it. `json.dumps` escapes non-ASCII by default, so a topic named `💻 Dobby` came back as `"\ud83d\udcbb Dobby"` while every other line of the same output — the pickers, the discover table, the CSV export — drew the emoji. Same title, two spellings, one terminal. Both are valid JSON and any parser read the old form fine; only one of them is readable by a person, which is who reads the menu. Found in the sibling's delete try-it and fixed the same way here.

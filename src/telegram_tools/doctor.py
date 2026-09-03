@@ -26,6 +26,9 @@ class DoctorCheck:
     def format(self) -> str:
         return f"{self.status:<4} {self.message}"
 
+    def to_dict(self) -> dict[str, str]:
+        return {"status": self.status, "message": self.message}
+
 
 def check_python_version(version_info: tuple[int, ...] | None = None) -> DoctorCheck:
     version_info = version_info or sys.version_info[:3]
@@ -86,7 +89,13 @@ def run_doctor(
     env: Mapping[str, str] | None = None,
     version_info: tuple[int, ...] | None = None,
     home: Path | None = None,
+    report=None,
 ) -> int:
+    """Print every check and answer 1 if one failed.
+
+    `report` decides where the lines go and carries the same checks out as the
+    envelope's result; with none, this is the plain print it has always been.
+    """
     root = Path(root) if root is not None else Path.cwd()
     env = os.environ if env is None else env
     checks = [
@@ -98,6 +107,14 @@ def run_doctor(
     ]
 
     for check in checks:
-        print(check.format())
+        (report.info if report is not None else print)(check.format())
 
-    return 1 if any(check.failed for check in checks) else 0
+    failed = [check for check in checks if check.failed]
+    if report is not None:
+        report.result(
+            {"checks": [check.to_dict() for check in checks], "failed": len(failed)},
+            # Exit 1 for a failed check is what doctor has always answered, and
+            # `partial` is the status that carries it: some checks did not pass.
+            status="partial" if failed else "ok",
+        )
+    return 1 if failed else 0

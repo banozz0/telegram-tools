@@ -66,6 +66,7 @@ async def delete_topic_messages(
     batch_size: int = 100,
     progress: Callable[[str], None] | None = None,
     sleep=asyncio.sleep,
+    recheck: Callable[[], Any] | None = None,
 ) -> DeleteResult:
     progress = progress or (lambda _message: None)
     if batch_size < 1:
@@ -87,6 +88,11 @@ async def delete_topic_messages(
     if confirm() != "DELETE":
         progress("Clear topic messages cancelled")
         return DeleteResult(matched=len(ids), deleted=0, dry_run=False, cancelled=True)
+
+    # The gate has been answered; check the topics are still the topics that
+    # were named before a single message is deleted.
+    if recheck is not None:
+        await recheck()
 
     deleted = 0
     for batch in _chunks(ids, batch_size):
@@ -205,6 +211,7 @@ async def delete_chat(
     execute: bool = False,
     confirm: Callable[[str, str], str] = confirm_delete,
     progress: Callable[[str], None] | None = None,
+    recheck: Callable[[], Any] | None = None,
 ) -> ContainerDeleteResult:
     """Delete a supergroup or broadcast channel after a dry-run and a typed title."""
     progress = progress or (lambda _message: None)
@@ -218,6 +225,11 @@ async def delete_chat(
     if not _titles_match(confirm(preview, title), title):
         progress(f"Delete {kind} cancelled - the typed title did not match.")
         return ContainerDeleteResult(kind=kind, id=chat_id, title=title, dry_run=False, cancelled=True)
+
+    # The last thing before the point of no return: the title that was typed
+    # belongs to the chat that is about to go, not to one it was renamed from.
+    if recheck is not None:
+        await recheck()
 
     await client(DeleteChannelRequest(channel=peer))
     progress(f"Deleted {kind} {title} ({chat_id})")
@@ -234,6 +246,7 @@ async def delete_topic(
     execute: bool = False,
     confirm: Callable[[str, str], str] = confirm_delete,
     progress: Callable[[str], None] | None = None,
+    recheck: Callable[[], Any] | None = None,
 ) -> ContainerDeleteResult:
     """Delete a forum topic after a dry-run and a typed title.
 
@@ -262,6 +275,9 @@ async def delete_topic(
         return ContainerDeleteResult(
             kind="topic", id=chat_id, topic_id=topic.id, title=topic.title, dry_run=False, cancelled=True
         )
+
+    if recheck is not None:
+        await recheck()
 
     await client(DeleteTopicHistoryRequest(peer=peer, top_msg_id=topic.id))
     progress(f"Deleted topic {topic.title} ({topic.id}) in {chat_title}")

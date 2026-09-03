@@ -159,9 +159,14 @@ async def create_topic(
     chat_id: int,
     title: str,
     confirm: Callable[[], bool] | None = None,
+    recheck: Callable[[], Any] | None = None,
 ) -> CreatedChat:
     if confirm is not None and not confirm():
         return _cancelled("topic", title)
+
+    # The group named in the preview has to still be the group being posted into.
+    if recheck is not None:
+        await recheck()
 
     result = await client(CreateForumTopicRequest(peer=peer, title=title))
     return CreatedChat(kind="topic", title=title, id=chat_id, topic_id=_new_topic_id(result, title), forum=True)

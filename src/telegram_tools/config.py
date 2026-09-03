@@ -9,7 +9,14 @@ from dotenv import load_dotenv
 
 
 class ConfigError(RuntimeError):
-    pass
+    """Configuration that is absent or malformed. `envelope_code` says which."""
+
+    envelope_code = "CONFIG_INVALID"
+
+    def __init__(self, message: str, *, code: str | None = None) -> None:
+        super().__init__(message)
+        if code is not None:
+            self.envelope_code = code
 
 
 def config_dir(home: Path | None = None) -> Path:
@@ -36,6 +43,9 @@ class Config:
     session_path: Path
     bot_tokens: dict[str, str] = field(default_factory=dict, repr=False)
     send_allowlist: tuple[SendDestination, ...] = ()
+    # Where an executed write leaves its line. None means nowhere, which is
+    # what a config built by hand in a test gets: only `load_config` sets it.
+    audit_path: Path | None = None
 
 
 def bot_id_from_token(token: str) -> int | None:
@@ -144,7 +154,7 @@ def load_config(
 
     raw_api_id = env.get("TELEGRAM_API_ID")
     if not raw_api_id:
-        raise ConfigError("TELEGRAM_API_ID is required.")
+        raise ConfigError("TELEGRAM_API_ID is required.", code="CONFIG_MISSING")
 
     try:
         api_id = int(raw_api_id)
@@ -153,7 +163,7 @@ def load_config(
 
     api_hash = env.get("TELEGRAM_API_HASH")
     if not api_hash:
-        raise ConfigError("TELEGRAM_API_HASH is required.")
+        raise ConfigError("TELEGRAM_API_HASH is required.", code="CONFIG_MISSING")
 
     session_path = Path(env.get("TELEGRAM_TOOLS_SESSION", config_dir(home) / "telegram-tools"))
     return Config(
@@ -162,4 +172,5 @@ def load_config(
         session_path=session_path,
         bot_tokens=parse_bot_tokens(env.get("TELEGRAM_BOT_TOKENS")),
         send_allowlist=parse_send_allowlist(env.get("TELEGRAM_SEND_ALLOWLIST")),
+        audit_path=config_dir(home) / "audit.jsonl",
     )
