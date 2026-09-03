@@ -1,0 +1,4 @@
+usage: telegram-tools doctor [-h]
+
+options:
+  -h, --help  show this help message and exit

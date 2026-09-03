@@ -1,0 +1,9 @@
+usage: telegram-tools create group [-h] --title TITLE [--about ABOUT]
+                                   [--forum] [--yes]
+
+options:
+  -h, --help     show this help message and exit
+  --title TITLE  Group name
+  --about ABOUT  Group description
+  --forum        Enable topics on the new group
+  --yes          Skip the confirmation prompt

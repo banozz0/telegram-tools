@@ -1,0 +1,10 @@
+usage: telegram-tools delete [-h] {group,channel,topic} ...
+
+positional arguments:
+  {group,channel,topic}
+    group               Delete a supergroup, for everyone in it
+    channel             Delete a broadcast channel, for every subscriber
+    topic               Delete a topic in a forum group
+
+options:
+  -h, --help            show this help message and exit

@@ -1,0 +1,13 @@
+usage: telegram-tools clear-messages [-h] --chat CHAT (--topic TOPICS |
+                                     --all-topics) [--execute]
+                                     [--batch-size BATCH_SIZE]
+
+options:
+  -h, --help            show this help message and exit
+  --chat CHAT           Chat/channel username, link, or ID
+  --topic TOPICS        Topic ID to clear messages from; repeatable
+  --all-topics, --all-topics-in-chat
+                        Clear messages from every forum topic
+  --execute             Actually clear messages after typing DELETE
+  --batch-size BATCH_SIZE
+                        Clear-message batch size

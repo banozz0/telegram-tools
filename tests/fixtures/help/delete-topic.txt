@@ -1,0 +1,7 @@
+usage: telegram-tools delete topic [-h] --topic TOPIC --chat CHAT [--execute]
+
+options:
+  -h, --help     show this help message and exit
+  --topic TOPIC  Topic ID to delete
+  --chat CHAT    Chat username, link, or ID
+  --execute      Actually delete it after typing its exact title

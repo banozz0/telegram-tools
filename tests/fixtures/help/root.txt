@@ -1,0 +1,19 @@
+usage: telegram-tools [-h]
+                      {discover,clear-messages,search,bots,send,create,delete,doctor} ...
+
+positional arguments:
+  {discover,clear-messages,search,bots,send,create,delete,doctor}
+    discover            List dialogs and forum topics
+    clear-messages      Clear messages from forum topic(s), preserving topics
+                        and topic IDs
+    search              Search and export messages
+    bots                List the bots you own and edit their BotFather
+                        settings
+    send                Send a message to a chat or forum topic
+    create              Create a group, channel, or forum topic
+    delete              Delete a group, channel, or forum topic (dry-run by
+                        default)
+    doctor              Check local setup without printing secrets
+
+options:
+  -h, --help            show this help message and exit

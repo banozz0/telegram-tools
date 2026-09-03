@@ -1,0 +1,12 @@
+usage: telegram-tools send [-h] --chat CHAT [--topic TOPIC] [--text TEXT]
+                           [--file PATH] [--yes]
+
+options:
+  -h, --help     show this help message and exit
+  --chat CHAT    Chat/channel username, link, or ID
+  --topic TOPIC  Topic ID to post into; omit for the chat itself
+  --text TEXT    Message text, or - to read it from stdin; optional when
+                 --file is given
+  --file PATH    Attach a file; repeatable, several are sent as one album
+  --yes          Skip the preview and send; the destination must be in
+                 TELEGRAM_SEND_ALLOWLIST

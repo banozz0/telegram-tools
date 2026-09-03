@@ -1,0 +1,8 @@
+usage: telegram-tools create channel [-h] --title TITLE [--about ABOUT]
+                                     [--yes]
+
+options:
+  -h, --help     show this help message and exit
+  --title TITLE  Channel name
+  --about ABOUT  Channel description
+  --yes          Skip the confirmation prompt

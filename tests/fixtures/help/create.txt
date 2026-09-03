@@ -1,0 +1,10 @@
+usage: telegram-tools create [-h] {group,channel,topic} ...
+
+positional arguments:
+  {group,channel,topic}
+    group               Create a supergroup, optionally with topics
+    channel             Create a broadcast channel
+    topic               Create a topic in a forum group
+
+options:
+  -h, --help            show this help message and exit

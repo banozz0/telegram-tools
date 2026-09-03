@@ -1,0 +1,18 @@
+usage: telegram-tools search [-h] --chat CHAT [--topic TOPIC]
+                             [--keyword KEYWORD] [--from-user FROM_USER]
+                             [--since SINCE] [--until UNTIL] [--limit LIMIT]
+                             [--format {json,csv}] [--output OUTPUT]
+
+options:
+  -h, --help            show this help message and exit
+  --chat CHAT           Chat/channel username, link, or ID
+  --topic TOPIC         Limit search/export to one topic ID
+  --keyword, --contains KEYWORD
+                        Case-insensitive text filter
+  --from-user FROM_USER
+                        Sender username, ID, or 'me'
+  --since SINCE         Inclusive ISO date or datetime lower bound
+  --until UNTIL         Inclusive ISO date or datetime upper bound
+  --limit LIMIT         Maximum exported messages
+  --format {json,csv}   Export format
+  --output OUTPUT       Output path; prints a readable table when omitted

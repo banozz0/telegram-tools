@@ -1,0 +1,39 @@
+usage: telegram-tools bots [-h] [--bot BOT] [--json JSON_OUTPUT] [--name NAME]
+                           [--bio BIO] [--description DESCRIPTION]
+                           [--commands COMMANDS | --clear-commands]
+                           [--photo PHOTO | --remove-photo]
+                           [--group-rights GROUP_RIGHTS]
+                           [--channel-rights CHANNEL_RIGHTS] [--yes]
+
+options:
+  -h, --help            show this help message and exit
+  --bot BOT             Bot nickname from TELEGRAM_BOT_TOKENS, @username, or
+                        numeric ID
+  --json JSON_OUTPUT    Write bot output to this JSON file
+  --name NAME           Set the display name shown in chat lists
+  --bio BIO             Set the short bio shown under the bot profile
+  --description DESCRIPTION
+                        Set the 'what can this bot do?' text shown before
+                        Start
+  --commands COMMANDS   Path to a JSON file of {command, description} objects
+                        (needs a bot token)
+  --clear-commands      Remove every command (needs a bot token)
+  --photo PHOTO         Path to a new profile photo
+  --remove-photo        Remove the current profile photo (needs a bot token)
+  --group-rights GROUP_RIGHTS
+                        Default admin rights for groups, comma-separated, or
+                        none (needs a bot token). Valid names: change_info,
+                        post_messages, edit_messages, delete_messages,
+                        ban_users, invite_users, pin_messages, add_admins,
+                        anonymous, manage_call, other, manage_topics,
+                        post_stories, edit_stories, delete_stories,
+                        manage_direct_messages, manage_ranks
+  --channel-rights CHANNEL_RIGHTS
+                        Default admin rights for channels, comma-separated, or
+                        none (needs a bot token). Valid names: change_info,
+                        post_messages, edit_messages, delete_messages,
+                        ban_users, invite_users, pin_messages, add_admins,
+                        anonymous, manage_call, other, manage_topics,
+                        post_stories, edit_stories, delete_stories,
+                        manage_direct_messages, manage_ranks
+  --yes                 Skip the confirmation prompt

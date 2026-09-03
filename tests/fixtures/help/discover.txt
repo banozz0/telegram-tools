@@ -1,0 +1,6 @@
+usage: telegram-tools discover [-h] [--json JSON_OUTPUT] [--all]
+
+options:
+  -h, --help          show this help message and exit
+  --json JSON_OUTPUT  Write discovery output to this JSON file
+  --all               Show every chat instead of admin/managed chats only

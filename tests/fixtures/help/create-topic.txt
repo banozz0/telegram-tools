@@ -1,0 +1,7 @@
+usage: telegram-tools create topic [-h] --chat CHAT --title TITLE [--yes]
+
+options:
+  -h, --help     show this help message and exit
+  --chat CHAT    Forum group username, link, or ID
+  --title TITLE  Topic name
+  --yes          Skip the confirmation prompt
