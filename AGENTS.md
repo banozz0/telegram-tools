@@ -1,9 +1,12 @@
 # telegram-tools — agent brief
 
-Local Telethon CLI operating the user's own Telegram account: `discover` chat/topic IDs, `search`/export messages, `send` a message, `create` group/channel/topic, `delete` the same three, `clear-messages`, `bots` (BotFather settings), `doctor`. Public repo — contributor-facing; never commit phone numbers, API hashes, tokens, or exported chat data (CONTRIBUTING.md binds).
+Local Telethon CLI operating the user's own Telegram account: `discover` chat/topic IDs, `search`/export messages, `send` a message, `create` group/channel/topic, `delete` the same three, `clear-messages`, `bots` (BotFather settings), `doctor`. A global `--json`/`--jsonl` puts one shared-schema envelope on stdout for agents; human output is untouched by it. Public repo — contributor-facing; never commit phone numbers, API hashes, tokens, or exported chat data (CONTRIBUTING.md binds).
 
 ## Working here
-- Test: `.venv/bin/python -m pytest -q` → all pass (431 as of v3.7.0), no network. CI adds `compileall` + per-subcommand `--help` smoke; there is no lint step.
+- Test: `.venv/bin/python -m pytest -q` → all pass (552 as of v3.8.0), no network. CI adds `compileall` + per-subcommand `--help` smoke; there is no lint step.
+- `src/telegram_tools/_core/` is **not this repo's code**: a copy of a shared tree at the tag in `_core/VERSION`. Never edit it — `tests/test_core_copy.py` fails on any local change. A fix goes to the source, then `CLI_TOOLS_CORE_PATH=<checkout> scripts/sync-core.sh <tag>`.
+- Two tests are laws, not conveniences. `tests/test_help_surface.py` freezes every `--help` against `tests/fixtures/help/` — an added flag needs a named entry in `ALLOWED_ADDITIONS` carrying its reason. `tests/test_seams.py` fails if `src/`, README, AGENTS, CONTEXT or `skill/SKILL.md` names the sibling platform or the sibling tool.
+- Every write builds a plan, preflights the rights it needs, re-derives the target after its gate, reads back, and appends one redacted line to `~/.telegram-tools/audit.jsonl` — from the menu as well. A new write does all five or it is not finished.
 - Bare invocation is the human menu; agents pass a subcommand. Session + exports live in `~/.telegram-tools/`, outside the repo.
 - `skill/SKILL.md` (independently versioned) is the bundled agent skill's source of truth: a CLI-surface change updates it **in the same commit** — convention, nothing enforces it.
 - A user-visible fix also gets its CHANGELOG entry and version bump in the same change; unreleased fixes silently stacking on the last shipped version is the failure mode to avoid.

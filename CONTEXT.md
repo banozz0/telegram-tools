@@ -75,6 +75,48 @@ The terms this codebase uses, and the boundaries they imply.
   by the caller and never closed by `run`. Its exit code is what titles the
   after-run screen: 0 is Done, 1 (a declined confirm) is Not done, and a caught
   error is Failed.
+- **Envelope** — the one object `--json` puts on stdout (`cli-tools/envelope/1`,
+  built in `_core/contract.py`). Schema, tool, version, command, echoed args,
+  identity, target, status, result, plan, evidence, warnings, error, meta —
+  always those keys, always in that order. `result` is the command's own
+  payload and keeps every key it printed before, so the schema is additive
+  rather than a second output format.
+- **Reporter** — `envelope.py`: where one run's words, payload, target, plan,
+  evidence and audit line go. Human mode prints and returns; machine mode
+  collects and emits once. Commands talk to it instead of to `print`, so the
+  mode is decided once in `main` and the menu — which passes none — keeps the
+  human default.
+- **rid** — the stable string key for a Telegram object: `tg:chat:-100…`,
+  `tg:topic:-100…:141`, `tg:user:…`, `tg:bot:…`. Two segments for a thing that
+  lives inside a container. Everything machine-readable names a target by rid.
+- **Identity** — who a run acts as: platform, mode (`account` today), a label
+  screens print, a rid and the profile it came from. Never a credential; the
+  label is redacted on the way out, not checked and refused.
+- **Plan** — what a write is about to do, built before anything is asked: the
+  identity, the resolved targets, the mutations, the approval kind and the
+  preflight, hashed into a `plan_id`. A dry-run prints it and the real run
+  re-derives it.
+- **Approval kind** — which gate a write needs, one of four: `prompt_y`,
+  `typed_delete` (messages inside a container that survives), `typed_name` (the
+  container itself), `yes_allowlist` (the unattended path, where an allowlist
+  exists — only `send` has one).
+- **Preflight** — the rights a plan needs against the rights the account holds.
+  The distinction that matters is between a right Telegram reports as absent,
+  which refuses the write by name, and one it will not answer for at all — a
+  private chat has no participant permissions — which is named as unconfirmed
+  and lets the write through, because that is what has always happened.
+- **Drift** — the re-derivation between the answered gate and the call. The
+  target is resolved again and compared with the one that was shown; a
+  difference is `PLAN_DRIFT` and nothing is sent or deleted.
+- **Readback** — the state fetched after a write and reported as `evidence`.
+  One that cannot be fetched reads `unverified: <reason>` and is never
+  presented as verified.
+- **Audit line** — one redacted JSON line per *executed* write in
+  `~/.telegram-tools/audit.jsonl`, from the menu exactly as from a flag. Dry
+  runs and cancellations leave nothing.
+- **Redaction** — the single pass every envelope, audit line and error message
+  goes through before it is written. Shapes, not vendors: bot tokens, the API
+  hash, phone numbers, session paths.
 - **Shared copy** — `src/telegram_tools/_core/`: a byte-identical copy of a
   tree maintained outside this repository, at the tag recorded in
   `_core/VERSION`. It is never edited here — `tests/test_core_copy.py`

@@ -18,6 +18,7 @@ Built on [Telethon](https://github.com/LonamiWebs/Telethon). Everything runs on 
 - **`delete`** — removes a supergroup, a broadcast channel, or a forum topic: the thing itself, not just its messages. Dry-run by default; deleting requires `--execute` *and* typing the target's exact title at a prompt. It deletes exactly what `create` can make, so nothing this tool removes is beyond making again.
 - **`bots`** — lists the bots you own with their numeric IDs, and edits what @BotFather edits: display name, bio, description, commands, profile photo, and default admin rights.
 - **`doctor`** — checks your local setup without printing any secrets.
+- **`--json`** — any command, machine-readable: one object on stdout carrying the result, the target, the gate and the error code. For agents and scripts; see [For scripts and agents](#for-scripts-and-agents).
 
 ## What it doesn't do (on purpose)
 
@@ -197,6 +198,60 @@ dry-runs first and still asks you to type its exact title, sending shows the who
 message and asks `y/N`, and bot edits still print a diff and ask before writing. The
 menu has no equivalent of `--yes` at all. With no terminal attached it prints this help instead.
 
+## For scripts and agents
+
+Put `--json` before the subcommand and the command prints exactly one object on
+stdout, and nothing else:
+
+```bash
+telegram-tools --json discover
+telegram-tools --json send --chat -1001234567890 --topic 141 --text "deploy is green" --yes
+```
+
+```json
+{
+  "schema": "cli-tools/envelope/1",
+  "tool": "telegram-tools", "version": "3.8.0",
+  "command": "send", "args": {"chat": "-1001234567890", "topic": 141, "yes": true},
+  "identity": {"platform": "telegram", "mode": "account", "label": "Sven (@sven)", "id": "tg:user:12345678", "profile": "default", "via": null},
+  "target": {"rid": "tg:topic:-1001234567890:141", "kind": "topic", "title": "Deploys", "path": ["Agency", "Deploys"]},
+  "status": "ok",
+  "result": {"chat_id": -1001234567890, "topic_id": 141, "message_id": 9001, "files": 0, "sent": true, "cancelled": false},
+  "plan": {"plan_id": "b7f1e2d3c4b5a697", "approval": "yes_allowlist", "preflight": {"required": ["send_messages"], "held": ["send_messages"], "missing": []}},
+  "evidence": {"readback": "message 9001 is in Agency › Deploys", "fetched_at": "2026-09-04T09:31:04Z"},
+  "warnings": [], "error": null,
+  "meta": {"started": "2026-09-04T09:30:58Z", "duration_ms": 621, "api_calls": 0, "waited_ms": 0}
+}
+```
+
+- **`result` is the command's own payload**, with every key it printed before — so
+  a reader of the old `--json PATH` files reads the same keys one level in.
+- **`status`** is one of `ok`, `empty`, `partial`, `dry_run`, `cancelled`,
+  `refused`, `failed`.
+- **`--jsonl`** streams one JSON line per record first (a chat, a message) and
+  closes with the same envelope marked `"kind": "envelope"`.
+- **Everything a person would read moves to stderr** under either flag — tables,
+  previews, progress, prompts — so stdout stays parseable.
+- **`error.code` is stable.** `NOT_ALLOWLISTED`, `TARGET_NOT_FOUND`,
+  `TARGET_KIND_MISMATCH`, `PERMISSION_DENIED`, `PLAN_DRIFT`, `APPROVAL_REQUIRED`,
+  `SESSION_IN_USE`, `CONFIG_MISSING`, `RATE_LIMITED` and others. `error.hint` is
+  the exact command or edit that would fix it — worth relaying verbatim.
+- **`meta.api_calls` and `meta.waited_ms` are not measured yet** and report 0.
+  They are in the schema because both tools share it; a later release fills them.
+
+Exit codes, unchanged apart from one addition:
+
+| Code | Meaning |
+| --- | --- |
+| 0 | done — `ok`, `empty`, `dry_run` |
+| 1 | not done — cancelled at a gate, a declined confirm, `partial` (`doctor` with a failed check) |
+| 2 | refused — usage, config, permission, a platform error |
+| 3 | **new:** the command asks for confirmation and there is no terminal to ask on. Only under `--json`; `error.hint` is the same command for a human to run |
+| 130 | interrupted |
+
+`discover --json out.json` and `bots --json out.json` still write those files
+exactly as before; a bare `--json` on either means the envelope.
+
 ## Safety model
 
 | Command | Destructive? |
@@ -211,6 +266,17 @@ menu has no equivalent of `--yes` at all. With no terminal attached it prints th
 `clear-messages` also verifies you actually hold the delete-messages permission in the chat before doing anything, skips topic starter messages, and handles Telegram flood-wait limits automatically.
 
 `bots` refuses to edit a bot you do not own, and it never fetches or exports a bot token from Telegram — the three token-only edits simply fail with a message naming the fields they need one for.
+
+Every write — sending, creating, clearing, deleting, editing a bot — now also
+asks Telegram what rights your account actually holds in that chat before it
+does anything, and refuses by name when one it needs is missing. Once you have
+answered the gate, the target is resolved a second time and compared with the
+one you were shown: a chat renamed or replaced in that window refuses rather
+than acting on whatever now holds the name. Afterwards the result is read back
+and reported, and one redacted line per executed write is appended to
+`~/.telegram-tools/audit.jsonl` (from the menu exactly as from a flag). No
+token, phone number, API hash or session path can reach that file — the same
+redaction pass covers it, every envelope and every error message.
 
 ## Status
 

@@ -1,7 +1,7 @@
 ---
 name: telegram-tools
 description: "Use when you need the real numeric ID of a Telegram chat, channel, group or forum topic — 'what's the ID of that topic?', 'which chat is -100…?', 'where do I send this?' — when the user wants their own Telegram messages searched or exported to JSON/CSV, or when a message must be posted to a chat or topic the user has allowlisted."
-version: 1.3.1
+version: 1.4.0
 author: banozz0
 license: MIT
 platforms: [macos]
@@ -86,6 +86,48 @@ that *is* the answer. Never guess a chat ID. A made-up `-100…` sends the user'
 alert into the void, and they will not find out until something they needed never
 arrived.
 
+## Machine-readable output
+
+Put `--json` **before** the subcommand and the command prints exactly one object
+on stdout and nothing else. Prefer it for every run: it is the difference between
+parsing a table and reading a field.
+
+```
+telegram-tools --json discover
+telegram-tools --json send --chat <id> --topic <id> --text "..." --yes
+```
+
+The object always has the same keys. The ones worth reading:
+
+- **`status`** — `ok`, `empty`, `partial`, `dry_run`, `cancelled`, `refused`, `failed`.
+- **`result`** — the command's own payload, with the same keys the old
+  `--json PATH` files wrote (`chats`, `matched`, `sent`, `created`, `cleared`, …).
+- **`target`** — what it acted on: `rid` (`tg:chat:-100…`, `tg:topic:-100…:141`),
+  `title`, `path`. Use `rid` as the key when you need to name a chat or topic
+  across runs.
+- **`error.code`** and **`error.hint`** when something was refused. The code is
+  stable and safe to branch on; the hint is the exact command or edit that fixes
+  it — relay it to the user verbatim rather than retrying.
+- **`evidence.readback`** — what the tool read back after a write. A value that
+  starts with `unverified:` means the write went out but could not be confirmed;
+  say so rather than reporting success.
+
+`--jsonl` streams one line per record (a chat, a message) and closes with the
+same object marked `"kind": "envelope"` — use it when the answer could be long.
+
+Exit codes: **0** done, **1** not done (cancelled, or `doctor` with a failed
+check), **2** refused, **3** a gate needs a human and there is no terminal,
+**130** interrupted. Exit 3 is the one to recognise: it means the command wanted
+a confirmation you cannot give, and `error.hint` is the command to hand the user.
+
+Codes you will actually meet: `NOT_ALLOWLISTED` (a `--yes` send outside
+`TELEGRAM_SEND_ALLOWLIST` — rule 2, relay it), `APPROVAL_REQUIRED` (rule 4 or 5
+territory: hand it over), `TARGET_NOT_FOUND` and `TARGET_KIND_MISMATCH` (the
+chat reference is wrong — run `discover`, never guess), `PERMISSION_DENIED` (the
+account lacks the right, named), `SESSION_IN_USE` (the user has the menu open —
+say so, do not retry), `RATE_LIMITED` (Telegram asked for a wait; ask a narrower
+question), `PLAN_DRIFT` (the chat changed mid-run — re-run and re-read).
+
 ## Commands
 
 | The ask | Run |
@@ -108,8 +150,10 @@ arrived.
 - **`discover` defaults to admin/managed chats only** — the ones the user runs. Add
   `--all` only when the chat you want is one they merely belong to; it is a much
   longer walk through their dialog list.
-- **`--json` on `discover` takes a path, not a flag.** It writes the file; it does
-  not print JSON to the terminal.
+- **`--json` after a subcommand still takes a path.** `discover --json out.json`
+  writes that file and prints nothing. The envelope is the *global* flag, before
+  the subcommand: `telegram-tools --json discover`. A bare `discover --json` with
+  no path means the envelope too.
 - **`[media]` in a `search` row means a photo or file is attached.** A media-only
   message has no text at all, so without that marker the row looks empty and reads
   as "nothing is there". `--format json` carries the same fact as `has_media`.
@@ -132,6 +176,10 @@ arrived.
 - **A held session is not a bug to retry.** "Another telegram-tools is already using
   the login session" means the user has the menu open somewhere. Say so; a retry
   loop will not free it.
+- **A write leaves a local record.** Every executed send, create, clear, delete
+  or bot edit appends one line to `~/.telegram-tools/audit.jsonl`. It is the
+  user's log, it holds no secrets, and you never need to read it — but do not
+  suggest deleting it either.
 - **Check the tool's own help before using a flag** that is not in this table. The
   CLI's `--help` is current; this file is a snapshot.
 - **The menu is for the human at the keyboard.** `telegram-tools` with no arguments
