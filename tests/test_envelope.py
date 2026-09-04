@@ -91,11 +91,17 @@ def home(tmp_path, monkeypatch):
 def run_cli(home, monkeypatch):
     """`main(argv)` against a fake client; gives back the exit code and both streams."""
 
-    def run(argv, client=None, capsys=None, isatty=False):
+    def run(argv, client=None, capsys=None, isatty=False, answer=""):
         fake = client or FakeClient()
         monkeypatch.setattr(cli, "create_client", lambda _config: fake)
         monkeypatch.setattr(cli, "start_client", _started(fake))
-        monkeypatch.setattr(cli.sys, "stdin", SimpleNamespace(isatty=lambda: isatty, read=lambda: ""))
+        monkeypatch.setattr(
+            cli.sys,
+            "stdin",
+            # Under --json a gate reads the terminal directly, not input(), so
+            # the stand-in needs a readline as well as an isatty.
+            SimpleNamespace(isatty=lambda: isatty, read=lambda: "", readline=lambda: f"{answer}\n"),
+        )
         code = cli.main(argv)
         captured = capsys.readouterr()
         return code, captured.out, captured.err, fake
@@ -431,3 +437,98 @@ def test_create_under_json_reads_the_new_chat_back(run_cli, home, capsys):
     assert envelope["result"]["created"] is True
     assert envelope["evidence"]["readback"] == "group Hermes exists as -1000000000999"
     assert json.loads((home / ".telegram-tools" / "audit.jsonl").read_text())["command"] == "create group"
+
+
+def test_an_executed_clear_reads_back_and_leaves_one_0600_audit_line(run_cli, home, capsys):
+    fake = ForumClient()
+
+    code, out, err, _fake = run_cli(
+        ["--json", "clear-messages", "--chat", str(CHAT_ID), "--topic", "141", "--execute"],
+        client=fake,
+        capsys=capsys,
+        isatty=True,
+        answer="DELETE",
+    )
+
+    envelope = envelope_of(out)
+    assert (code, envelope["status"]) == (0, "ok")
+    assert envelope["result"]["cleared"] == 2
+    assert envelope["evidence"]["readback"] == "topic 141 now holds 0 message(s)"
+    assert fake.messages == []
+    # The scan lines a person reads are on stderr; stdout stayed one envelope.
+    assert "Scanning topic 141" in err
+
+    log = home / ".telegram-tools" / "audit.jsonl"
+    assert oct(log.stat().st_mode & 0o777) == "0o600"
+    line = json.loads(log.read_text(encoding="utf-8").strip())
+    assert (line["command"], line["approval"]) == ("clear-messages", "typed_delete")
+    assert line["targets"] == [f"tg:topic:{CHAT_ID}:141"]
+    assert line["evidence"]["readback"] == envelope["evidence"]["readback"]
+
+
+def test_a_cancelled_gate_leaves_no_audit_line(run_cli, home, capsys):
+    fake = ForumClient()
+
+    code, out, _err, _fake = run_cli(
+        ["--json", "clear-messages", "--chat", str(CHAT_ID), "--topic", "141", "--execute"],
+        client=fake,
+        capsys=capsys,
+        isatty=True,
+        answer="no",
+    )
+
+    envelope = envelope_of(out)
+    # Not done is exit 1, and nothing happened, so nothing is recorded.
+    assert (code, envelope["status"]) == (1, "cancelled")
+    assert len(fake.messages) == 2
+    assert not (home / ".telegram-tools" / "audit.jsonl").exists()
+
+
+def test_search_under_json_carries_the_rows_the_table_would_have_shown(run_cli, monkeypatch, capsys):
+    async def fake_search(*_args, **_kwargs):
+        return [{"id": 500, "text": "deploy is green", "chat_id": CHAT_ID}]
+
+    monkeypatch.setattr(cli, "search_messages", fake_search)
+
+    code, out, _err, _fake = run_cli(
+        ["--json", "search", "--chat", str(CHAT_ID), "--contains", "deploy"], capsys=capsys
+    )
+
+    envelope = envelope_of(out)
+    assert (code, envelope["status"]) == (0, "ok")
+    assert envelope["result"]["matched"] == 1
+    assert envelope["result"]["messages"][0]["id"] == 500
+    assert envelope["result"]["output"] is None
+
+
+def test_search_to_a_file_names_the_file_instead_of_repeating_it(run_cli, tmp_path, monkeypatch, capsys):
+    async def fake_search(*_args, **_kwargs):
+        return [{"id": 500, "text": "deploy is green"}]
+
+    monkeypatch.setattr(cli, "search_messages", fake_search)
+    destination = tmp_path / "out.json"
+
+    code, out, _err, _fake = run_cli(
+        ["--json", "search", "--chat", str(CHAT_ID), "--output", str(destination)], capsys=capsys
+    )
+
+    envelope = envelope_of(out)
+    assert code == 0
+    assert envelope["result"]["output"] == str(destination)
+    assert "messages" not in envelope["result"]
+    assert json.loads(destination.read_text())[0]["id"] == 500
+
+
+def test_bots_under_json_lists_what_the_table_listed(run_cli, monkeypatch, capsys):
+    from telegram_tools.models import BotInfo
+
+    async def fake_list_bots(_client):
+        return [BotInfo(id=12345, username="harrybot", name="Harry", bio=None, description=None, is_owned=True)]
+
+    monkeypatch.setattr(cli, "list_bots", fake_list_bots)
+
+    code, out, _err, _fake = run_cli(["--json", "bots"], capsys=capsys)
+
+    envelope = envelope_of(out)
+    assert (code, envelope["status"]) == (0, "ok")
+    assert envelope["result"]["bots"][0]["id"] == 12345
