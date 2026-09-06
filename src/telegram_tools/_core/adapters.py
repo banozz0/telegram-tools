@@ -3,24 +3,31 @@
 Spec: section 4.3. A Protocol exists here only when both tools implement it
 (seam law 3); each tool implements them in its own `adapters/` package, above
 its one SDK seam (law 4). An adapter receives an opened client, never a
-token, a phone number or a session path (law 6). Names are final. The
-signatures below are provisional: nothing implements them yet, and the card
-that lands each Protocol settles its signature and may change it freely.
+token, a phone number or a session path (law 6). Names are final.
+
+The first four are settled: the envelope cards implement the first three and
+the archive store card settles `ArchiveSource`. Both platforms reach the
+network through an async SDK, so every method that talks to a platform is a
+coroutine or an async iterator. `profiles()` stays synchronous because it
+reads local configuration. The remaining four are still provisional - nothing
+implements them yet, and the card that lands each one settles its signature
+and may change it freely.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Iterator, Mapping, Protocol, Sequence, runtime_checkable
+from typing import Any, AsyncIterator, Iterator, Mapping, Protocol, Sequence, runtime_checkable
 
+from .archive import ScopeListing
 from .identity import Identity, Target
 
 
 @runtime_checkable
 class IdentityProvider(Protocol):
-    """Resolve the active identity and its label; list profiles. Lands on the envelope cards."""
+    """Resolve the active identity and its label; list profiles. Settled on the envelope cards."""
 
-    def identity(self) -> Identity:
+    async def identity(self) -> Identity:
         """The identity this client acts as, label included and credential-free."""
         ...
 
@@ -31,9 +38,9 @@ class IdentityProvider(Protocol):
 
 @runtime_checkable
 class TargetResolver(Protocol):
-    """Reference (id, username, link, title) to a Target. Lands on the envelope cards."""
+    """Reference (id, username, link, title) to a Target. Settled on the envelope cards."""
 
-    def resolve(self, reference: str, kind: str | None = None) -> Target:
+    async def resolve(self, reference: str, kind: str | None = None) -> Target:
         """The one Target `reference` names, or an error coded TARGET_NOT_FOUND,
         TARGET_AMBIGUOUS or TARGET_KIND_MISMATCH before any network write."""
         ...
@@ -41,23 +48,37 @@ class TargetResolver(Protocol):
 
 @runtime_checkable
 class PermissionProbe(Protocol):
-    """Rights the identity holds on a target, for preflight. Lands on the envelope cards."""
+    """Rights the identity holds on a target, for preflight. Settled on the envelope cards."""
 
-    def rights(self, target: Target) -> frozenset[str]:
+    async def rights(self, target: Target) -> frozenset[str]:
         """The named rights held on `target`, in the plan's vocabulary."""
         ...
 
 
 @runtime_checkable
 class ArchiveSource(Protocol):
-    """Messages of a scope from a cursor, and the scopes themselves. Lands on the archive sync cards."""
+    """Scopes the identity can see, and the messages of one from a cursor. Settled on the archive store card.
 
-    def scopes(self) -> Iterator[Target]:
-        """Every syncable scope the identity can see."""
+    Both methods are async iterators, because both platforms page history
+    through an async SDK; each is called with `async for`, so an implementation
+    is an `async def` generator. Neither may swallow a scope: one the identity
+    cannot read is still listed, marked invisible and carrying its reason, and
+    the archive records that as coverage.
+    """
+
+    def scopes(self) -> AsyncIterator["ScopeListing"]:
+        """Every syncable scope, visible or not, each with its reason when it is not."""
         ...
 
-    def messages(self, scope: Target, cursor: str | None = None) -> Iterator[Mapping[str, Any]]:
-        """Records of `scope` from `cursor`, newest first, each carrying the cursor to resume from."""
+    def messages(
+        self, scope: Target, cursor: str | None = None, *, since: str | None = None
+    ) -> AsyncIterator[Mapping[str, Any]]:
+        """Records of `scope` from `cursor`, each carrying the cursor to resume from.
+
+        The store never interprets the order: it keeps the newest and oldest ids
+        it has seen and hands the last cursor back on the next run, so a source
+        may walk backwards through history or forwards from a checkpoint.
+        """
         ...
 
 
