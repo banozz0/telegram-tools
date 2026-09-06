@@ -138,6 +138,27 @@ def human_command(argv: Sequence[str]) -> str:
     return " ".join([TOOL, *kept])
 
 
+def account_command(argv: Sequence[str]) -> str:
+    """The same command without `--as-bot NICK`: what an account-only refusal points at.
+
+    The output flags stay, because the caller that hit the refusal is the one
+    that will run the hint, and it wants the same shape of answer it asked for.
+    """
+    kept: list[str] = []
+    skip = False
+    for word in argv:
+        if skip:
+            skip = False
+            continue
+        if word == "--as-bot":
+            skip = True
+            continue
+        if word.startswith("--as-bot="):
+            continue
+        kept.append(word)
+    return " ".join([TOOL, *kept])
+
+
 def echoed_args(args: Any) -> dict[str, Any]:
     """The parsed flags as the envelope echoes them: what was asked, minus how to print it."""
     return {
@@ -173,6 +194,7 @@ class Reporter:
         self.command = command
         self.args = echoed_args(args) if args is not None else {}
         self.human_command = human_command(argv)
+        self.account_command = account_command(argv)
         self.audit_log = audit
         self._stdout = stdout if stdout is not None else sys.stdout
         self._stderr = stderr if stderr is not None else sys.stderr
@@ -181,6 +203,9 @@ class Reporter:
 
         self.me: Any = None
         self.acting: Identity | None = None
+        # The account a bot identity acts through, as a label: named beside the
+        # mode on every bot-mode screen. None in account mode.
+        self.via_label: str | None = None
         self._target: Target | None = None
         self._plan: Plan | None = None
         self._evidence: Evidence | None = None
@@ -213,7 +238,14 @@ class Reporter:
         """
         if self.acting is None:
             return None
-        return banner(self.acting, self._target)
+        line = banner(self.acting, self._target)
+        if self.via_label:
+            # `Acting as: @alertsbot · bot (via Sven (@sven)) · Target: …`. The shared
+            # banner prints label and mode; the account the bot acts through is
+            # this tool's to add, right after the mode it qualifies.
+            head = f"Acting as: {self.acting.label} · {self.acting.mode}"
+            line = head + f" (via {self.via_label})" + line[len(head):]
+        return line
 
     def show_banner(self) -> None:
         """Print the identity line, once per run.
@@ -252,10 +284,11 @@ class Reporter:
 
             print(json_line(row), file=self._stdout)
 
-    def set_identity(self, identity: Identity, *, me: Any = None) -> None:
+    def set_identity(self, identity: Identity, *, me: Any = None, via_label: str | None = None) -> None:
         self.acting = identity
         if me is not None:
             self.me = me
+        self.via_label = via_label
 
     def set_target(self, target: Target) -> None:
         self._target = target

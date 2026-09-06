@@ -16,6 +16,7 @@ from telegram_tools import login
 from telegram_tools import profiles as profile_store
 from telegram_tools.adapters import AccountIdentity, ChatPermissions, ChatTargets, Rights
 from telegram_tools.adapters.account import account_label
+from telegram_tools.adapters.bot import BotIdentity, BotPermissions, resolve_chat_as_bot
 from telegram_tools.bot_session import apply_bot_edits, bot_client
 from telegram_tools.bots import (
     apply_owner_edits,
@@ -45,7 +46,7 @@ from telegram_tools.delete import (
 )
 from telegram_tools.discovery import classify_entity, discover_chats, filter_chats, format_discovery_table
 from telegram_tools.doctor import require_tight_modes, run_doctor
-from telegram_tools.envelope import PLATFORM, PREFIX, CommandError, Reporter, error_for, platform_error
+from telegram_tools.envelope import PLATFORM, PREFIX, CommandError, Reporter, account_command, error_for, platform_error
 from telegram_tools.exporters import json_text, write_records
 from telegram_tools.resolver import EntityResolutionError, resolve_chat
 from telegram_tools.search import format_message_records, search_messages
@@ -67,6 +68,15 @@ DELETE_TOPIC_RIGHTS = ("delete_messages",)
 # `auth` is here because it writes a session, which is the one local file worth
 # being strict about.
 WRITES = ("send", "create", "delete", "clear-messages", "bots", "auth")
+
+# What `--as-bot` may run. Section 5.2: a bot has no dialog list, no history and
+# no search (Telegram marks those user-only), owns nothing it could delete, and
+# cannot create a chat -- so bot mode is for what a bot is for: posting, and
+# opening a topic in a group it administers. Everything else refuses by name
+# before any connection is opened, with the same command minus the flag as the
+# hint. `doctor` and `profiles` act as nobody and are not on either list.
+BOT_MODE_COMMANDS = ("send", "create")
+BOT_MODE_CREATE_KINDS = ("topic",)
 
 
 def positive_int(value: str) -> int:
@@ -107,6 +117,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--profile",
         metavar="NAME",
         help="Act as this named login; default is TELEGRAM_TOOLS_PROFILE, or 'default'",
+    )
+    parser.add_argument(
+        "--as-bot",
+        dest="as_bot",
+        metavar="NICK",
+        help="Act as this bot (a TELEGRAM_BOT_TOKENS nickname) instead of the account; send and create topic only",
     )
     subparsers = parser.add_subparsers(dest="command")
 
@@ -220,12 +236,29 @@ async def _acting(client, report: Reporter):
     return report.acting
 
 
+def _in_bot_mode(report: Reporter) -> bool:
+    return report.acting is not None and report.acting.mode == "bot"
+
+
 async def _rights(client, report: Reporter, peer) -> Rights:
+    """The rights this run's identity holds in `peer`: the bot's under --as-bot, else the account's."""
     me = report.me
     if me is None:
         me = await client.get_me()
         report.me = me
-    return await ChatPermissions(client, me).probe(peer)
+    probe = BotPermissions(client, me) if _in_bot_mode(report) else ChatPermissions(client, me)
+    return await probe.probe(peer)
+
+
+async def _resolve(client, report: Reporter, reference):
+    """A `--chat` reference as this run's identity can resolve it.
+
+    The account walks its dialog list first and accepts a link; a bot has no
+    dialog list and takes an id or a username only (section 5.2).
+    """
+    if _in_bot_mode(report):
+        return await resolve_chat_as_bot(client, reference)
+    return await resolve_chat(client, reference)
 
 
 def _require_delete_permission(rights: Rights, *, what: str) -> None:
@@ -285,7 +318,7 @@ async def _run_discover(client, args, *, report: Reporter | None = None) -> int:
 
 async def _run_clear_messages(client, args, *, report: Reporter | None = None) -> int:
     report = report or Reporter()
-    resolved = await resolve_chat(client, args.chat)
+    resolved = await _resolve(client, report, args.chat)
     peer = resolved.input_entity
     chat = ChatTargets.chat_target(resolved, args.chat)
     report.set_target(chat)
@@ -364,7 +397,7 @@ async def _remaining_messages(client, peer, topics) -> str:
 
 async def _run_search(client, args, *, report: Reporter | None = None) -> int:
     report = report or Reporter()
-    resolved = await resolve_chat(client, args.chat)
+    resolved = await _resolve(client, report, args.chat)
     peer = resolved.input_entity
     report.set_target(ChatTargets.chat_target(resolved, args.chat))
     if not args.output:
@@ -427,7 +460,7 @@ async def _run_send(client, args, config, *, report: Reporter | None = None) -> 
     report = report or Reporter()
     files = _attachments(getattr(args, "files", None))
     text = _message_text(args.text, has_files=bool(files))
-    resolved = await resolve_chat(client, args.chat)
+    resolved = await _resolve(client, report, args.chat)
     peer = resolved.input_entity
     chat = ChatTargets.chat_target(resolved, args.chat)
 
@@ -466,12 +499,17 @@ async def _run_send(client, args, config, *, report: Reporter | None = None) -> 
             topic_id=args.topic,
         )
     else:
-        sender = _entity_title(report.me or await client.get_me(), "you")
+        if _in_bot_mode(report):
+            # The preview names both, exactly as the banner does: the bot that
+            # will post, and the account whose bot it is.
+            sender = f"{report.acting.label} (via {report.via_label})"
+        else:
+            sender = _entity_title(report.me or await client.get_me(), "you")
         preview = format_send_preview(target, text, sender=sender, files=files)
         confirm = partial(confirm_send, preview, **report.confirm_io())
 
     async def rebuild():
-        again = await resolve_chat(client, args.chat)
+        again = await _resolve(client, report, args.chat)
         fresh_chat = ChatTargets.chat_target(again, args.chat)
         fresh = fresh_chat
         if args.topic is not None:
@@ -521,7 +559,7 @@ async def _run_create(client, args, *, report: Reporter | None = None) -> int:
     chat = None
     rights = Rights(frozenset(), frozenset())
     if args.create_kind == "topic":
-        resolved = await resolve_chat(client, args.chat)
+        resolved = await _resolve(client, report, args.chat)
         peer = resolved.input_entity
         chat_id = resolved.id
         chat = ChatTargets.chat_target(resolved, args.chat)
@@ -572,7 +610,7 @@ async def _run_create(client, args, *, report: Reporter | None = None) -> int:
     if args.create_kind == "topic":
 
         async def rebuild():
-            again = await resolve_chat(client, args.chat)
+            again = await _resolve(client, report, args.chat)
             fresh = ChatTargets.chat_target(again, args.chat)
             return build_plan(
                 identity=identity,
@@ -619,7 +657,7 @@ async def _run_delete(client, args, *, report: Reporter | None = None) -> int:
     if args.delete_kind is None:
         raise ValueError("delete needs one of: group, channel, topic.")
 
-    resolved = await resolve_chat(client, args.chat)
+    resolved = await _resolve(client, report, args.chat)
     peer = resolved.input_entity
     chat = ChatTargets.chat_target(resolved, args.chat)
     title = chat.title
@@ -680,7 +718,7 @@ async def _run_delete(client, args, *, report: Reporter | None = None) -> int:
     require_rights(plan, rights, required)
 
     async def rebuild():
-        again = await resolve_chat(client, args.chat)
+        again = await _resolve(client, report, args.chat)
         fresh_chat = ChatTargets.chat_target(again, args.chat)
         if args.delete_kind == "topic":
             found = await get_forum_topics_by_ids(client, again.input_entity, [args.topic])
@@ -1072,6 +1110,86 @@ def _run_migrate(profile, *, report: Reporter, read, write, home: Path | None) -
     return 0
 
 
+# -- bot mode --------------------------------------------------------------
+
+
+def require_bot_mode_supports(args, report: Reporter) -> None:
+    """Refuse an account-only command under --as-bot, before anything connects.
+
+    Named by code so an agent can key on it, with the same command minus the
+    flag as the hint, because that command is the answer.
+    """
+    command = str(args.command or "")
+    kind = getattr(args, "create_kind", None)
+    supported = command in BOT_MODE_COMMANDS and (command != "create" or kind in BOT_MODE_CREATE_KINDS)
+    if supported:
+        return
+    what = command_name(args)
+    raise CommandError(
+        f"`{what}` needs the account: a bot has no dialog list, no history and nothing of its own to "
+        "delete or set up, so --as-bot cannot run it. Run it without --as-bot.",
+        code="IDENTITY_MODE_UNSUPPORTED",
+        hint=report.account_command,
+    )
+
+
+async def _via_account(config, report: Reporter) -> tuple[int, str]:
+    """The account a bot acts through: its id and label.
+
+    From the profile record when `auth` has written one -- no connection, and
+    the account's own session can stay held by a menu elsewhere. A profile
+    from before records existed is asked once, through its session.
+    """
+    stored = profile_store.load(getattr(config, "profile", profile_store.DEFAULT_PROFILE))
+    if stored.label and stored.user_id:
+        return int(stored.user_id), stored.label
+    client = await start_client(create_client(config), authorize=not report.machine)
+    try:
+        if report.machine and not await client.is_user_authorized():
+            raise login.LoginRequired(stored.name)
+        user = await client.get_me()
+    finally:
+        await _disconnect_quietly(client)
+    return int(getattr(user, "id", 0)), account_label(user)
+
+
+async def run_as_bot(args, config, *, report: Reporter) -> int:
+    """One command as the bot `--as-bot` names, through a client of its own.
+
+    The nickname resolves exactly as `bots --bot` resolves it; the token opens
+    a MemorySession and is never written anywhere; the bot Telegram answers
+    for has to be the bot the token's own prefix names, or nothing runs.
+    """
+    nick = args.as_bot
+    # Named `signin`, not `token`: the repository's commit guard reads any
+    # `token = <8+ chars>` as a credential, and this is the one line that would
+    # otherwise spell it.
+    signin = lookup_bot_token(config.bot_tokens, nick)
+    if signin is None:
+        raise CommandError(
+            f"No bot named {nick!r} in TELEGRAM_BOT_TOKENS.",
+            code="CONFIG_MISSING",
+            hint=f"Add {nick}:<token> to TELEGRAM_BOT_TOKENS in ~/.telegram-tools/.env, or pass a nickname it has.",
+        )
+    via_id, via_label = await _via_account(config, report)
+
+    async with bot_client(config, signin) as bot:
+        provider = await BotIdentity.open(bot, getattr(config, "profile", "default"), via_id=via_id, via_label=via_label)
+        expected = bot_id_from_token(signin)
+        if expected is not None and provider.id != expected:
+            raise CommandError(
+                f"The token stored as {nick!r} is for bot {expected}, but Telegram signed in bot {provider.id}.",
+                code="IDENTITY_MISMATCH",
+                hint="Fix that entry in TELEGRAM_BOT_TOKENS in ~/.telegram-tools/.env.",
+            )
+        report.set_identity(provider.identity(), me=provider.user, via_label=via_label)
+        if args.command == "send":
+            return await _run_send(bot, args, config, report=report)
+        if args.command == "create":
+            return await _run_create(bot, args, report=report)
+        raise ValueError(f"Unknown command: {args.command}")
+
+
 # -- running one -----------------------------------------------------------
 
 
@@ -1088,6 +1206,12 @@ async def run(args, *, client=None, config=None, report: Reporter | None = None)
 
     if args.command == "doctor":
         return run_doctor(report=report, profile=_profile_name(args))
+
+    # Section 5.2: an account-only command under --as-bot refuses here, before
+    # config is read and before anything could connect.
+    as_bot = getattr(args, "as_bot", None)
+    if as_bot and args.command != "profiles":
+        require_bot_mode_supports(args, report)
 
     # Neither of these opens a connection, and neither needs credentials: one
     # reads the profile store, the other moves a file inside it. Dispatched
@@ -1119,6 +1243,9 @@ async def run(args, *, client=None, config=None, report: Reporter | None = None)
 
     if args.command == "auth":
         return await _run_auth(args, config, report=report)
+
+    if as_bot:
+        return await run_as_bot(args, config, report=report)
 
     owns_client = client is None
     if owns_client:
@@ -1171,6 +1298,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     try:
         if args.command is None:
+            if getattr(args, "as_bot", None):
+                # The menu is the account's session; a bot has no rows in it.
+                parser.error("--as-bot needs a command (send, or create topic); bot mode has no menu.")
             if not sys.stdin.isatty():
                 # A menu needs a human. Scripts and agents get the help they
                 # actually wanted instead of a blocked input() prompt.

@@ -4,6 +4,18 @@ All notable changes to this project will be documented here.
 
 This project follows a practical changelog style: user-visible changes, safety changes, and release notes belong here; active task tracking belongs outside the repo.
 
+## 3.10.0 - 2026-09-06
+
+- **Act as one of your bots, explicitly.** `telegram-tools --as-bot alerts send --chat -100… --text "…"` posts as the bot whose token is stored under the nickname `alerts` in `TELEGRAM_BOT_TOKENS` — the same nicknames `bots --bot` has always used. The token opens an in-memory session and is never written to disk. Every screen names both: `Acting as: @alertsbot · bot (via Sven (@sven)) · Target: …`, and the `--json` envelope's `identity` carries `mode: "bot"`, `id: "tg:bot:…"` and `via: "tg:user:…"` — the account it belongs to. The send preview says `Sending as @alertsbot (via Sven (@sven))`. Without `--as-bot` nothing differs from before.
+
+- **Bot mode narrows; it never widens.** A Telegram bot has no dialog list, no message history, no search and nothing of its own to delete or set up, so `--as-bot` on `discover`, `search`, `bots`, `clear-messages`, `delete`, `create group`, `create channel` or `auth` refuses with `IDENTITY_MODE_UNSUPPORTED` before anything connects, and the hint is the same command without the flag. What runs under it is what a bot is for: `send`, and `create topic` in a group it administers. A bare `telegram-tools --as-bot NICK` gets no menu — the menu is the account's session.
+
+- **A bot only reaches chats it is in.** Targets under bot mode resolve by numeric id or `@username` only (a link is refused, because a bot cannot look one up), and the preflight asks Telegram what rights *the bot* holds there. A bot that is not a member of the chat is refused by name before the preview, with "add the bot to the chat" as the hint. `--yes` is gated by the same `TELEGRAM_SEND_ALLOWLIST` as an account send.
+
+- **The account behind the bot is read from the profile record** that `auth` writes (`profile.json`: a label and an id, nothing secret), so a bot-mode run opens no account session and works while the menu holds that session elsewhere. A profile from before records existed is asked once, through its session, and under `--json` an unauthorised one refuses with `LOGIN_REQUIRED` as any command would.
+
+- **A nickname that names no token refuses with `CONFIG_MISSING`**, and a token whose bot is not the bot Telegram signs in refuses with `IDENTITY_MISMATCH`; neither prints any part of a token.
+
 ## 3.9.0 - 2026-09-06
 
 - **Named logins.** `telegram-tools auth` walks you into a login instead of leaving it to whatever the first command happened to trigger: a phone number and the code Telegram sends, or `auth --qr` showing a QR block you scan from a phone that is already signed in (Settings → Devices → Link Desktop Device). Two-step verification is asked for at the terminal and stored nowhere. `auth --logout` ends a session once you type the profile's name back; `telegram-tools profiles` lists what this machine has.

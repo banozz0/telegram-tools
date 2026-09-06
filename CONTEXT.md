@@ -27,9 +27,26 @@ The terms this codebase uses, and the boundaries they imply.
   reference*: `profiles.load` resolves to it when `default` has no session of
   its own, nothing moves it, and `TELEGRAM_TOOLS_SESSION` still wins over every
   profile. `auth --migrate` is the only path that moves it, behind a y/N.
-- **Acting mode** — what an identity is doing: `account` today, signed in as
-  the person. The mode is a field of the identity, printed in the banner and
-  carried in every envelope.
+- **Acting mode** — what an identity is doing: `account`, signed in as the
+  person, or `bot`, signed in with one of that person's bot tokens under
+  `--as-bot`. The mode is a field of the identity, printed in the banner and
+  carried in every envelope, and the switch is always explicit: without the
+  flag nothing is a bot.
+- **Bot mode** — `--as-bot NICK` (`cli.run_as_bot`): the nickname resolves
+  through `TELEGRAM_BOT_TOKENS` exactly as `bots --bot` does, the token opens a
+  `MemorySession` (`bot_session.bot_client`, never on disk), and the run is
+  handed that client with a `BotIdentity` already set. It narrows, never
+  widens: `BOT_MODE_COMMANDS` is the whole list of what runs (`send`, `create
+  topic`), everything else refuses with `IDENTITY_MODE_UNSUPPORTED` before
+  config is read, because Telegram marks the dialog list, history, search and
+  the rest user-only (Telethon raises `BotMethodInvalidError`). Targets resolve
+  by id or `@username` only (`adapters/bot.py`, `resolve_chat_as_bot`), and the
+  preflight is the bot's rights, with "not a member" a named refusal rather
+  than an unknown. The menu has no bot mode: it is one account session.
+- **Via** — the account a bot identity acts through: `identity.via` is its rid,
+  and the banner names it after the mode, `bot (via Sven (@sven))`. Read from
+  the profile record `auth` wrote (a label and an id) so no account session is
+  opened; a profile with no record is asked once through its session.
 - **Banner** — the `Acting as: <label> · <mode> · Target: <path> (<ids>)` line
   every screen opens with (`_core.identity.banner`). A command prints it once,
   through the reporter, so `--json` puts it on stderr and the envelope carries
@@ -130,8 +147,9 @@ The terms this codebase uses, and the boundaries they imply.
 - **rid** — the stable string key for a Telegram object: `tg:chat:-100…`,
   `tg:topic:-100…:141`, `tg:user:…`, `tg:bot:…`. Two segments for a thing that
   lives inside a container. Everything machine-readable names a target by rid.
-- **Identity** — who a run acts as: platform, mode (`account` today), a label
-  screens print, a rid and the profile it came from. Never a credential; the
+- **Identity** — who a run acts as: platform, mode (`account` or `bot`), a label
+  screens print, a rid and the profile it came from, plus `via` when a bot acts
+  through an account. Never a credential; the
   label is redacted on the way out, not checked and refused. A `@username` is
   the label whenever there is one; with none, section 5.1 asks for the name plus
   the **last two digits** of the account's number, because a display name is

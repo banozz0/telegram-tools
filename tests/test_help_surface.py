@@ -73,6 +73,10 @@ ALLOWED_ADDITIONS = (
     "auth,profiles,",
     "auth Log a profile in or out (asks at the terminal)",
     "profiles List the named logins on this machine",
+    # The bot-mode card (agent-bo-95421937): one global flag, the explicit
+    # switch into acting as an owned bot. No subcommand gained or lost a flag.
+    "[--as-bot NICK]",
+    "--as-bot NICK Act as this bot (a TELEGRAM_BOT_TOKENS nickname) instead of the account; send and create topic only",
 )
 
 # The per-command `--json` gained an optional path, which argparse spells with

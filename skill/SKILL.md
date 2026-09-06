@@ -1,7 +1,7 @@
 ---
 name: telegram-tools
 description: "Use when you need the real numeric ID of a Telegram chat, channel, group or forum topic — 'what's the ID of that topic?', 'which chat is -100…?', 'where do I send this?' — when the user wants their own Telegram messages searched or exported to JSON/CSV, or when a message must be posted to a chat or topic the user has allowlisted."
-version: 1.5.0
+version: 1.6.0
 author: banozz0
 license: MIT
 platforms: [macos]
@@ -27,6 +27,10 @@ statement of what it can do today.
 The user may have more than one account logged in. `--profile NAME` goes **before**
 the subcommand and picks which one a run acts as; `telegram-tools profiles` lists
 them. With no flag it is `TELEGRAM_TOOLS_PROFILE`, or `default`.
+
+A run can also act as one of the user's own bots: `--as-bot NICK`, also before the
+subcommand, where NICK is a nickname from their `TELEGRAM_BOT_TOKENS`. Rule 9 below
+says when you may pass it; the short version is **only when the user named the bot**.
 
 ## This machine
 
@@ -97,6 +101,18 @@ that *is* the answer. Never guess a chat ID. A made-up `-100…` sends the user'
 alert into the void, and they will not find out until something they needed never
 arrived.
 
+**9. `--as-bot` only when the user named the bot.** Without it every run is the
+user's own account (rule 1). With it, `send` and `create topic` run as that bot —
+a different identity, with different reach and different consequences — and the
+switch is theirs to make: pass it only when the user said, in this conversation,
+which bot should post ("send that from the alerts bot"). Never pick a bot because
+its token happens to be configured, never fall back to it when the account is
+refused, and never use it to reach a chat the account is not in. Every other
+command refuses under it with `IDENTITY_MODE_UNSUPPORTED` and names the command
+to run without the flag — relay that, do not retry without it on your own
+initiative if the user asked for the bot. The allowlist (rule 2) binds a bot send
+exactly as it binds an account send.
+
 ## Machine-readable output
 
 Put `--json` **before** the subcommand and the command prints exactly one object
@@ -122,10 +138,12 @@ The object always has the same keys. The ones worth reading:
 - **`evidence.readback`** — what the tool read back after a write. A value that
   starts with `unverified:` means the write went out but could not be confirmed;
   say so rather than reporting success.
-- **`identity`** — which account the run acted as: `label` (`Sven (@sven)`),
-  `mode`, and `profile`. Worth naming in your answer when the user has more than
-  one profile, so they can see it was the right one. It never carries a phone
-  number, a token or a session path, and neither should your reply.
+- **`identity`** — who the run acted as: `label` (`Sven (@sven)`, or `@alertsbot`
+  under `--as-bot`), `mode` (`account` or `bot`), `profile`, and under bot mode
+  `via`, the account the bot belongs to. Worth naming in your answer when the
+  user has more than one profile or the run was a bot, so they can see it was
+  the right one. It never carries a phone number, a token or a session path, and
+  neither should your reply.
 
 `--jsonl` streams one line per record (a chat, a message) and closes with the
 same object marked `"kind": "envelope"` — use it when the answer could be long.
@@ -143,7 +161,9 @@ account lacks the right, named), `SESSION_IN_USE` (the user has the menu open �
 say so, do not retry), `RATE_LIMITED` (Telegram asked for a wait; ask a narrower
 question), `PLAN_DRIFT` (the chat changed mid-run — re-run and re-read),
 `LOGIN_REQUIRED` (that profile has no session — rule 6, hand over the `auth`
-command in the hint), `CONFIG_INVALID` (often the file-mode refusal: something
+command in the hint), `IDENTITY_MODE_UNSUPPORTED` (that command needs the
+account, not a bot — rule 9; the hint is the same command without `--as-bot`),
+`CONFIG_INVALID` (often the file-mode refusal: something
 under `~/.telegram-tools` is readable by others and every write refuses until it
 is not; the hint carries the `chmod`, and `telegram-tools doctor`
 names the files).
@@ -167,6 +187,7 @@ names the files).
 | "delete that topic/group" | hand them `telegram-tools delete topic --chat <id> --topic <id> --execute` — rule 4, they run it |
 | "which account is this acting as?" | `telegram-tools profiles`, or read `identity` off any `--json` run |
 | "use my other account" | `telegram-tools --profile work <command>` |
+| "post that from the alerts bot" (they named it, allowlisted) | `telegram-tools --as-bot alerts send --chat <id> --topic <topic-id> --text "..." --yes` — rule 9 |
 | "log me in" / "log me out" | hand them `telegram-tools auth` or `telegram-tools auth --logout` — rule 6, they run it |
 | "is telegram-tools set up?" | `telegram-tools doctor` |
 
@@ -208,6 +229,12 @@ names the files).
 - **Every run names the account it used.** Human output opens with
   `Acting as: <label> · account · Target: <path> (<ids>)`, and `--json` carries the
   same two as fields. When the user has several profiles, say which one answered.
+  A bot-mode run reads `Acting as: @alertsbot · bot (via <account>) · Target: …`.
+- **A bot only reaches chats it is in.** Under `--as-bot`, `--chat` takes a numeric
+  id or an `@username` (never a link), and a chat the bot is not a member of is
+  refused with `PERMISSION_DENIED` before the preview. That is not a reason to
+  drop the flag and post as the account instead — tell the user the bot is not in
+  that chat.
 - **`doctor` is the setup answer, and it needs no login.** It reports the profiles,
   whether the current one has a session, whether the local files are private
   enough to write, and whether a configured proxy is usable — all without printing

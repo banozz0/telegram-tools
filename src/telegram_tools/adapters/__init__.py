@@ -7,7 +7,9 @@ seam, so the tests that mock a client keep mocking exactly what they mocked
 before.
 
 `AccountIdentity` is the account mode: signed in as the person, which is what
-every command does today. A bot mode is a later card and lands beside it.
+every command does without `--as-bot`. `BotIdentity` and its two companions
+are the bot mode, in `adapters/bot.py`: the same three shapes, filled in for a
+client that holds a bot token, imported by the one place that opens one.
 """
 
 from telegram_tools.adapters.account import AccountIdentity, ChatPermissions, ChatTargets, Rights

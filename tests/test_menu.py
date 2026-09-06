@@ -1583,6 +1583,10 @@ NO_ROW = {
     "jsonl": "same",
     # A global that selects the login before the menu opens; `run_menu` takes it.
     "profile": "chosen before the menu starts, and named on every screen instead",
+    # The menu is one account session; a bot is a second connection with two
+    # rows' worth of reach (send, create topic). Bot mode is a flag for a
+    # command, and a bare `--as-bot` is refused rather than given a menu.
+    "as_bot": "bot mode runs one command on a client of its own; the menu is the account's session",
     # The whole point of the menu's safety story.
     "yes": "the menu never skips a confirm; that is the gate rule",
     "help": "argparse's own",

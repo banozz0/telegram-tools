@@ -18,6 +18,7 @@ Built on [Telethon](https://github.com/LonamiWebs/Telethon). Everything runs on 
 - **`delete`** — removes a supergroup, a broadcast channel, or a forum topic: the thing itself, not just its messages. Dry-run by default; deleting requires `--execute` *and* typing the target's exact title at a prompt. It deletes exactly what `create` can make, so nothing this tool removes is beyond making again.
 - **`bots`** — lists the bots you own with their numeric IDs, and edits what @BotFather edits: display name, bio, description, commands, profile photo, and default admin rights.
 - **`doctor`** — checks your local setup without printing any secrets.
+- **`--as-bot NICK`** — runs `send` or `create topic` as one of your own bots instead of as you, naming both on every screen. See [Acting as a bot](#acting-as-a-bot).
 - **`--json`** — any command, machine-readable: one object on stdout carrying the result, the target, the gate and the error code. For agents and scripts; see [For scripts and agents](#for-scripts-and-agents).
 
 ## What it doesn't do (on purpose)
@@ -128,6 +129,36 @@ because a display name is whatever its owner typed and need not tell two account
 Two digits, never more: the number itself is never part of a label, and a session path is
 never printed anywhere.
 
+### Acting as a bot
+
+```bash
+telegram-tools --as-bot alerts send --chat -1001234567890 --topic 141 --text "deploy is green"
+```
+
+`--as-bot NICK` goes before the subcommand, like `--profile`, and switches the run from
+your account to a bot whose token is stored under that nickname in `TELEGRAM_BOT_TOKENS`
+(the same nicknames `bots --bot` uses). The token opens an in-memory session and is never
+written to disk. The banner then names both identities, because the question you are
+answering is "which of my things is about to post this":
+
+```
+Acting as: @alertsbot · bot (via Sven (@sven)) · Target: Agency › 💻 Deploys (-1001234567890:141)
+```
+
+Bot mode narrows what a run can do; it never widens it. A Telegram bot has no dialog
+list, no history and no search, so `discover`, `search`, `bots`, `clear-messages`,
+`delete`, `create group`, `create channel` and `auth` refuse under `--as-bot` with
+`IDENTITY_MODE_UNSUPPORTED`, before anything connects, and the hint is the same command
+without the flag. What runs is what a bot is for: `send`, and `create topic` in a forum
+group it administers. Targets are resolved by numeric id or `@username` only — a bot
+cannot look up a link — and the bot has to be a member of the chat, which is checked
+before the preview. `--yes` needs the destination in `TELEGRAM_SEND_ALLOWLIST`, exactly
+as for an account send. There is no bot-mode menu: a bare `telegram-tools --as-bot NICK`
+refuses.
+
+The account named after `via` comes from the profile record `auth` wrote, so a bot-mode
+run opens no account session at all.
+
 ### Optional: a proxy
 
 ```bash
@@ -150,7 +181,7 @@ Most of `bots` runs on your normal login. Three edits — commands, profile phot
 TELEGRAM_BOT_TOKENS=mybot:12345:AAExampleToken,alerts:67890:BBExampleToken
 ```
 
-Nicknames are yours to choose and can be used as `--bot mybot`. The tool only ever reads this variable — it never writes a token anywhere, and never prints one.
+Nicknames are yours to choose and can be used as `--bot mybot`, or as `--as-bot mybot` to [act as that bot](#acting-as-a-bot). The tool only ever reads this variable — it never writes a token anywhere, and never prints one.
 
 ### Optional: the send allowlist
 
@@ -197,6 +228,9 @@ telegram-tools send --chat -1001234567890 --topic 141 --text "deploy is green"
 
 # Multi-line body, straight from a file or a pipe
 cat notes.txt | telegram-tools send --chat -1001234567890 --text -
+
+# The same, posted by one of your bots instead of by you
+telegram-tools --as-bot alerts send --chat -1001234567890 --topic 141 --text "deploy is green"
 
 # Attach files (repeatable; several go as one album, --text is the caption)
 telegram-tools send --chat -1001234567890 --file shot.png --file notes.pdf --text "the numbers"
@@ -333,8 +367,9 @@ telegram-tools --json send --chat -1001234567890 --topic 141 --text "deploy is g
   `RATE_LIMITED` and others. `error.hint` is the exact command or edit that
   would fix it — worth relaying verbatim.
 - **`identity` names the account every run acted as**, with the profile it came
-  from, and `target` what it acted on. Neither ever carries a phone number, a
-  token or a session path.
+  from, and `target` what it acted on. Under `--as-bot` its `mode` is `bot`, its
+  `id` is `tg:bot:…` and `via` is the account's `tg:user:…`. Neither ever carries
+  a phone number, a token or a session path.
 - **`meta.api_calls` and `meta.waited_ms` are not measured yet** and report 0.
   They are in the schema because both tools share it; a later release fills them.
 
@@ -353,6 +388,11 @@ exactly as before; a bare `--json` on either means the envelope. A run whose
 output goes to a file prints no `Acting as:` banner, so its stdout stays what it
 has always been: empty.
 
+`--as-bot NICK` goes before the subcommand too and runs `send` or `create topic`
+as that bot; any other command under it refuses with `IDENTITY_MODE_UNSUPPORTED`
+and the same command minus the flag as the hint. An agent should pass it only
+when the user named the bot.
+
 `--profile NAME` goes before the subcommand and picks the login;
 `TELEGRAM_TOOLS_PROFILE` is the default. Under `--json` a profile with no session
 refuses with `LOGIN_REQUIRED` and the `auth` command that fixes it, rather than
@@ -366,7 +406,7 @@ for a code or a password. Relay the refusal and let the person run it.
 | `discover`, `search`, `doctor`, `profiles` | No — read-only |
 | `auth` | Local only — writes or removes this machine's login. `--logout` needs the profile's name typed back, `--migrate` a `y/N`; there is no `--yes`, and it cannot run unattended. Nothing it asks for is stored: a two-step-verification password goes straight into the sign-in call |
 | `create` | No — makes new things, changes nothing existing, after a `y/N` unless you pass `--yes` |
-| `send` | Outward-facing — posts publicly as you (text, files, or both), after showing the whole message and asking `y/N`. `--yes` skips the prompt only for destinations in `TELEGRAM_SEND_ALLOWLIST` |
+| `send` | Outward-facing — posts publicly as you (text, files, or both), after showing the whole message and asking `y/N`. `--yes` skips the prompt only for destinations in `TELEGRAM_SEND_ALLOWLIST`. Under `--as-bot` it posts as that bot, only into chats the bot is in, behind the same preview and the same allowlist |
 | `bots` | No — changes settings on bots you own, after a diff and a `y/N` unless you pass `--yes`; reversible if you still have the old values, but `--remove-photo` and `--clear-commands` discard data Telegram will not hand back |
 | `clear-messages` | Yes — but only with `--execute` **and** a typed `DELETE`, only messages, never topics |
 | `delete` | Yes, and further than `clear-messages` goes — the group, channel or topic itself, for everyone in it. Only with `--execute` **and** the target's exact title typed back; there is no `--yes`, so it never runs unattended. It removes only what `create` can make: a basic group is refused, because this tool cannot make one back |
