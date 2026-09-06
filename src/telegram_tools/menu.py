@@ -7,6 +7,7 @@ from typing import Any
 
 from telethon.errors import ChannelForumMissingError, RPCError
 
+from telegram_tools import archive as archive_store
 from telegram_tools import cli
 from telegram_tools.bots import IMPLICIT_OTHER_RIGHT, format_bot_profile, get_bot_profile, list_bots, resolve_bot, right_names
 from telegram_tools.client import SessionInUseError, create_client, start_client
@@ -37,7 +38,7 @@ MAIN = "Main"
 # cannot do is worse than no hint.
 ROOT_ITEMS = (
     "Find IDs (chats, topics)",
-    "Read (search, export)",
+    "Read (search live, archive, export)",
     "Write (send)",
     "Build (create, delete)",
     "Clear messages",
@@ -109,6 +110,10 @@ class MenuSession:
     async def bot_profile(self, reference: str):
         client = await self.client()
         return await get_bot_profile(client, await resolve_bot(client, reference))
+
+    def archive_scopes(self) -> list[tuple[str, str]]:
+        """The scopes the local archive holds, for its pickers. Reads the file; opens no connection."""
+        return archive_store.list_scopes()
 
     async def close(self) -> None:
         if self._client is not None:
@@ -386,8 +391,19 @@ def _ask_from_user(*, read, write, trail: str) -> Any:
     return ask_text("Username, ID, or me", read=read, write=write)
 
 
+# The five formats `search --format` and `archive export --format` take, in
+# the order the flags list them: json and csv first, as they always were.
+EXPORT_FORMAT_ROWS = (
+    ("json", "JSON"),
+    ("csv", "CSV"),
+    ("jsonl", "JSON lines (one record per line)"),
+    ("markdown", "Markdown"),
+    ("html", "HTML (one self-contained page)"),
+)
+
+
 async def _flow_search(*, session, runner, read, write) -> bool:
-    trail = crumb(MAIN, "Search")
+    trail = crumb(MAIN, "Read", "Search")
     while True:
         picked = await _pick_chat(session=session, read=read, write=write, trail=trail)
         if picked is BACK:
@@ -435,10 +451,10 @@ async def _flow_search(*, session, runner, read, write) -> bool:
                     output_path = ask_text("Export file path", read=read, write=write)
                     if output_path is BACK:
                         continue
-                    fmt = choose(["JSON", "CSV"], title=crumb(form, "Format"), read=read, write=write)
+                    fmt = choose([label for _key, label in EXPORT_FORMAT_ROWS], title=crumb(form, "Format"), read=read, write=write)
                     if fmt is BACK:
                         continue
-                    output_format = ("json", "csv")[fmt]
+                    output_format = EXPORT_FORMAT_ROWS[fmt][0]
 
                 args = _namespace(
                     command="search",
@@ -1179,7 +1195,276 @@ async def _flow_bot_screen(profile, *, session, runner, read, write, trail: str)
         return result
 
 
+# -- the archive -----------------------------------------------------------
+
+_TYPE_A_RID = Extra("typed", "Type a rid (tg:chat:ID or tg:topic:ID:TOPIC)")
+
+
+def _scope_label(scope: tuple[str, str]) -> str:
+    rid, title = scope
+    return f"{cell(title or '(untitled)', 28)}  {rid}"
+
+
+def _pick_scope(session, *, read, write, trail: str) -> Any:
+    """A scope rid from the archive's own list, or one typed; BACK to leave it alone.
+
+    The archive knows what it holds, so its picker is its scopes table; a rid
+    it does not hold yet can still be typed, which is how the first sync of a
+    single chat is asked for.
+    """
+    scopes = session.archive_scopes()
+    if scopes:
+        chosen = pick(scopes, title=trail, label=_scope_label, read=read, write=write, extras=(_TYPE_A_RID,))
+        if chosen is BACK:
+            return BACK
+        if chosen != _TYPE_A_RID.key:
+            return chosen[0]
+    else:
+        write("The archive holds no scopes yet.")
+        choice = choose([_TYPE_A_RID.label], title=trail, read=read, write=write)
+        if choice is BACK:
+            return BACK
+    return ask_text("Scope rid", read=read, write=write)
+
+
+def _yes_no(value: bool) -> str:
+    return "yes" if value else "no"
+
+
+async def _flow_archive_sync(*, session, runner, read, write) -> bool:
+    """Sync: every chat by default, one scope, a date floor, or the walk from the top again."""
+    trail = crumb(MAIN, "Read", "Sync the archive")
+    staged: dict[str, Any] = {"scope": None, "since": None, "full": False}
+    while True:
+        rows = [
+            ("scope", f"Scope          [{_shown(staged['scope'], '(every chat this account can read)')}]"),
+            ("since", f"Since          [{_shown(staged['since'], '(all history)')}]"),
+            ("full", f"Start over     [{_yes_no(staged['full'])}]"),
+            ("run", "Sync now (one progress line per scope, then the coverage table)"),
+        ]
+        choice = choose([label for _key, label in rows], title=trail, read=read, write=write)
+        if choice is BACK:
+            return True
+        key = rows[choice][0]
+
+        if key == "run":
+            args = _namespace(
+                command="archive",
+                archive_kind="sync",
+                scope=None if staged["scope"] is None else [staged["scope"]],
+                since=staged["since"],
+                full=staged["full"],
+            )
+            result = await _act(args, session=session, runner=runner, read=read, write=write, trail=trail)
+            if result is not STAY:
+                return result is not EXIT
+            continue
+
+        if key == "full":
+            staged["full"] = not staged["full"]
+            continue
+
+        if key == "scope":
+            answer = edit_field(
+                crumb(trail, "Scope"),
+                _shown(staged["scope"], "(every chat)"),
+                read=read,
+                write=write,
+                ask=lambda: _pick_scope(session, read=read, write=write, trail=crumb(trail, "Scope")),
+                allow_clear=True,
+                is_set=staged["scope"] is not None,
+            )
+        else:
+            answer = edit_field(
+                crumb(trail, "Since"),
+                _shown(staged["since"], "(all history)"),
+                read=read,
+                write=write,
+                ask=lambda: ask_text("Since (ISO date)", read=read, write=write),
+                allow_clear=True,
+                is_set=staged["since"] is not None,
+            )
+        if answer is BACK:
+            continue
+        staged[key] = None if answer is CLEAR else answer
+
+
+async def _flow_archive_status(*, session, runner, read, write) -> bool:
+    """Status: one screen, straight back. Reads the file, opens no connection."""
+    identity = ask_text("Only this identity (tg:user:ID; blank for all)", read=read, write=write)
+    args = _namespace(command="archive", archive_kind="status", identity=None if identity is BACK else identity)
+    await _call(args, session=session, runner=runner, write=write, connect=False)
+    return after_action(read=read, write=write)
+
+
+_QUERY_FIELDS = (
+    ("query", "Query", "(required)"),
+    ("regex", "Regex", "(none)"),
+    ("scope", "Scope", "(every scope)"),
+    ("identity", "Identity", "(every identity)"),
+    ("author", "From", "(anyone)"),
+    ("since", "Since", "(any date)"),
+    ("until", "Until", "(any date)"),
+    ("context", "Context", "(none)"),
+    ("limit", "Limit", "(50)"),
+)
+
+
+async def _flow_archive_query(*, session, runner, read, write) -> bool:
+    """Search the archive, or export one search: the same form, two last rows."""
+    trail = crumb(MAIN, "Read", "Search the archive")
+    staged: dict[str, Any] = {key: None for key, _title, _empty in _QUERY_FIELDS}
+    while True:
+        rows = [(key, f"{title:<15}[{_shown(staged[key], empty)}]") for key, title, empty in _QUERY_FIELDS]
+        rows += [("run", "Search (print here)"), ("export", "Export to a file")]
+        choice = choose([label for _key, label in rows], title=trail, read=read, write=write, back_label="Back (discards)")
+        if choice is BACK:
+            count = sum(1 for value in staged.values() if value is not None)
+            if count and not _confirm_discard(trail, title=_staged_changes(count), said=f"Discarded {_staged_changes(count)}.", read=read, write=write):
+                continue
+            return True
+        key = rows[choice][0]
+
+        if key in ("run", "export"):
+            if not staged["query"]:
+                write("Type a query first.")
+                continue
+            fields = {
+                "query": staged["query"],
+                "regex": staged["regex"],
+                "scope": None if staged["scope"] is None else [staged["scope"]],
+                "identity": staged["identity"],
+                "author": staged["author"],
+                "since": staged["since"],
+                "until": staged["until"],
+                "context": staged["context"] or 0,
+                "limit": staged["limit"] or 50,
+            }
+            if key == "export":
+                output = ask_text("Output file (a bare name lands in ~/.telegram-tools/exports/)", read=read, write=write)
+                if output is BACK:
+                    continue
+                fmt = choose([label for _key, label in EXPORT_FORMAT_ROWS], title=crumb(trail, "Format"), read=read, write=write)
+                if fmt is BACK:
+                    continue
+                args = _namespace(command="archive", archive_kind="export", format=EXPORT_FORMAT_ROWS[fmt][0], output=output, **fields)
+            else:
+                args = _namespace(command="archive", archive_kind="search", **fields)
+            result = await _act(args, session=session, runner=runner, read=read, write=write, trail=trail, connect=False)
+            if result is not STAY:
+                return result is not EXIT
+            continue
+
+        title, empty = next((title, empty) for field, title, empty in _QUERY_FIELDS if field == key)
+        if key == "scope":
+            ask = lambda: _pick_scope(session, read=read, write=write, trail=crumb(trail, title))
+        elif key in ("context", "limit"):
+            ask = lambda: ask_int(title, read=read, write=write)
+        else:
+            ask = lambda: ask_text(title, read=read, write=write)
+        answer = edit_field(
+            crumb(trail, title),
+            _shown(staged[key], empty),
+            read=read,
+            write=write,
+            ask=ask,
+            allow_clear=key != "query",
+            is_set=staged[key] is not None,
+        )
+        if answer is BACK:
+            continue
+        staged[key] = None if answer is CLEAR else answer
+
+
+PRUNE_ANOTHER = (STAY, "Prune something else")
+
+
+async def _flow_archive_retention(*, session, runner, read, write) -> bool:
+    """Retention: the scope, the window, a dry-run, then the exact title typed back."""
+    trail = crumb(MAIN, "Read", "Prune the archive")
+    while True:
+        scope = _pick_scope(session, read=read, write=write, trail=crumb(trail, "Scope"))
+        if scope is BACK:
+            return True
+        keep = ask_text("Keep (a window like 90d, or a number of newest messages)", read=read, write=write)
+        if keep is BACK:
+            continue
+        dry_run = _namespace(command="archive", archive_kind="retention", scope=scope, keep=keep, execute=False)
+        # The dry-run always runs first: the menu must never be a shorter path
+        # past a gate than the flags are.
+        if await _call(dry_run, session=session, runner=runner, write=write, connect=False) is None:
+            return after_action(read=read, write=write)
+        choice = choose(
+            ["Prune it for real - the next screen asks for the scope's exact title"],
+            title=crumb(trail, "Dry-run done"),
+            read=read,
+            write=write,
+            back_label="Back to the scope list",
+        )
+        if choice is BACK:
+            continue
+        for_real = _namespace(**{**vars(dry_run), "execute": True})
+        result = await _act(for_real, session=session, runner=runner, read=read, write=write, trail=trail, rows=(PRUNE_ANOTHER,), connect=False)
+        if result is not STAY:
+            return result is not EXIT
+
+
+async def _flow_archive_forget(*, session, runner, read, write) -> bool:
+    """Forget: a scope or an identity, a dry-run, then the exact title typed back."""
+    trail = crumb(MAIN, "Read", "Forget")
+    while True:
+        what = choose(["A scope (one chat or topic)", "An identity (everything it archived)"], title=trail, read=read, write=write)
+        if what is BACK:
+            return True
+        if what == 0:
+            scope = _pick_scope(session, read=read, write=write, trail=crumb(trail, "Scope"))
+            if scope is BACK:
+                continue
+            dry_run = _namespace(command="archive", archive_kind="forget", scope=scope, identity=None, execute=False)
+        else:
+            identity = ask_text("Identity (tg:user:ID)", read=read, write=write)
+            if identity is BACK:
+                continue
+            dry_run = _namespace(command="archive", archive_kind="forget", scope=None, identity=identity, execute=False)
+        if await _call(dry_run, session=session, runner=runner, write=write, connect=False) is None:
+            return after_action(read=read, write=write)
+        choice = choose(
+            ["Forget it for real - the next screen asks for its exact title"],
+            title=crumb(trail, "Dry-run done"),
+            read=read,
+            write=write,
+            back_label="Back to what to forget",
+        )
+        if choice is BACK:
+            continue
+        for_real = _namespace(**{**vars(dry_run), "execute": True})
+        result = await _act(for_real, session=session, runner=runner, read=read, write=write, trail=trail, rows=((STAY, "Forget something else"),), connect=False)
+        if result is not STAY:
+            return result is not EXIT
+
+
 # -- the grouped rows ------------------------------------------------------
+
+
+READ_ROWS = (
+    ("Search live (asks Telegram)", _flow_search),
+    ("Sync the archive", _flow_archive_sync),
+    ("Archive status", _flow_archive_status),
+    ("Search or export the archive", _flow_archive_query),
+    ("Prune old rows (retention)", _flow_archive_retention),
+    ("Forget a scope or identity", _flow_archive_forget),
+)
+
+
+async def _flow_read(*, session, runner, read, write) -> bool:
+    """Row 2. The live search, and everything the local archive does."""
+    trail = crumb(MAIN, "Read")
+    while True:
+        choice = choose([label for label, _flow in READ_ROWS], title=trail, read=read, write=write)
+        if choice is BACK:
+            return True
+        if not await READ_ROWS[choice][1](session=session, runner=runner, read=read, write=write):
+            return False
 
 
 async def _flow_build(*, session, runner, read, write) -> bool:
@@ -1323,7 +1608,7 @@ async def run_menu(*, read=None, write=None, session=None, runner=None, profile=
 
     flows = (
         _flow_discover,
-        _flow_search,
+        _flow_read,
         _flow_send,
         _flow_build,
         _flow_clear,

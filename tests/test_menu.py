@@ -35,6 +35,9 @@ ICON_TOPICS = [
 
 BOTS = [BotInfo(id=12345, username="harrybot", name="Harry", bio=None, description=None, is_owned=True)]
 
+# What the local archive holds, as its pickers list it: (rid, title).
+SCOPES = [("tg:topic:-100111:141", "Deploys"), ("tg:chat:-100222", "Alerts")]
+
 PROFILE = BotInfo(
     id=12345,
     username="harrybot",
@@ -52,8 +55,9 @@ PROFILE = BotInfo(
 class FakeSession:
     """Stands in for MenuSession: same methods, canned data, no network."""
 
-    def __init__(self, *, chats=CHATS, topics=TOPICS, bots=BOTS, profile=PROFILE, bot_tokens=None):
+    def __init__(self, *, chats=CHATS, topics=TOPICS, bots=BOTS, profile=PROFILE, bot_tokens=None, scopes=None):
         self._chats = list(chats)
+        self._scopes = list(SCOPES if scopes is None else scopes)
         self._topics = list(topics)
         self._bots = list(bots)
         self._profile = profile
@@ -81,6 +85,9 @@ class FakeSession:
     async def bot_profile(self, reference):
         return self._profile
 
+    def archive_scopes(self):
+        return list(self._scopes)
+
     async def close(self):
         self.closed = True
 
@@ -107,7 +114,13 @@ def recorder(result=0, error=None):
 # and Delete live under Build, and My bots under Identity. `run_menu` flattens a
 # tuple, so an answer list still reads as one row per entry.
 DISCOVER = "1"
-SEARCH = "2"
+READ = "2"
+SEARCH = ("2", "1")
+ARCHIVE_SYNC = ("2", "2")
+ARCHIVE_STATUS = ("2", "3")
+ARCHIVE_QUERY = ("2", "4")
+ARCHIVE_RETENTION = ("2", "5")
+ARCHIVE_FORGET = ("2", "6")
 SEND = "3"
 BUILD = "4"
 CREATE = ("4", "1")
@@ -144,7 +157,7 @@ def run_menu(answers, *, session=None, runner=None, output=None):
 
 ROOT_ROWS = (
     "1. Find IDs (chats, topics)",
-    "2. Read (search, export)",
+    "2. Read (search live, archive, export)",
     "3. Write (send)",
     "4. Build (create, delete)",
     "5. Clear messages",
@@ -393,8 +406,8 @@ def test_pick_chat_lines_the_id_column_up_after_an_emoji_title():
 
 
 def test_search_runs_with_no_filters():
-    # 2 = search, 1 = forum groups, 1 = Hermes, 7 = run it, Enter = menu, 0 = exit
-    code, calls, _output = run_menu([SEARCH, "1", "1", "7", "", "0"])
+    # 2 1 = read > search live, 1 = forum groups, 1 = Hermes, 7 = run it, Enter = menu, 0 = exit
+    code, calls, _output = run_menu([SEARCH, "1", "1", "7", "", "0", "0"])
 
     assert code == 0
     args = calls[0]
@@ -485,10 +498,10 @@ def test_search_topic_picker_offers_all_topics():
 
 def test_search_topic_picker_says_the_chat_has_no_topics():
     session = FakeSession(topics=[])
-    # 2 = search, 1 = forum groups, 1 = Hermes, 1 = Topic row (no topics), 0 = back to
+    # 2 1 = read > search live, 1 = forum groups, 1 = Hermes, 1 = Topic row (no topics), 0 = back to
     # the staging screen, 0 = back to the chat picker, 0 = back out of the picker to
     # root, 0 = exit
-    answers = [SEARCH, "1", "1", "1", "0", "0", "0"]
+    answers = [SEARCH, "1", "1", "1", "0", "0", "0", "0"]
     code, calls, output = run_menu(answers, session=session)
 
     assert code == 0
@@ -497,12 +510,12 @@ def test_search_topic_picker_says_the_chat_has_no_topics():
     assert "That chat has no topics." in text
     # It returned to the staging screen rather than crashing or exiting: the
     # screen renders once before the Topic row is chosen, once again after.
-    assert text.count("Main › Search › Hermes\n") == 2
+    assert text.count("Main › Read › Search › Hermes\n") == 2
 
 
 def test_the_topic_picker_shows_the_emoji_telegram_draws_and_leaves_a_bare_topic_bare():
-    # 2 = search, 1 = forum groups, 1 = Hermes, 1 = the Topic row, then back out.
-    answers = [SEARCH, "1", "1", "1", "0", "0", "0", "0"]
+    # 2 1 = read > search live, 1 = forum groups, 1 = Hermes, 1 = the Topic row, then back out.
+    answers = [SEARCH, "1", "1", "1", "0", "0", "0", "0", "0"]
     code, _calls, output = run_menu(answers, session=FakeSession(topics=ICON_TOPICS))
 
     assert code == 0
@@ -525,10 +538,10 @@ def test_the_clear_ticker_shows_the_topic_emoji_too():
 
 
 def test_search_zero_at_staging_returns_to_the_chat_picker_not_root():
-    # 2 = search, 1 = forum groups, 1 = Hermes, 0 = staging back -> chat picker,
+    # 2 1 = read > search live, 1 = forum groups, 1 = Hermes, 0 = staging back -> chat picker,
     # 4 = type an ID/username this time, a new chat, 7 = run it (topic row is
     # shown since the typed chat's forum-ness is unknown), Enter, 0 = exit
-    answers = [SEARCH, "1", "1", "0", "4", "@newchat", "7", "", "0"]
+    answers = [SEARCH, "1", "1", "0", "4", "@newchat", "7", "", "0", "0"]
     code, calls, _output = run_menu(answers)
 
     assert code == 0
@@ -539,17 +552,17 @@ def test_search_zero_at_staging_returns_to_the_chat_picker_not_root():
 
 
 def test_search_staging_back_discards_and_says_so():
-    # 2 = search, 1 = forum groups, 1 = Hermes, 2 = Contains (unset -> straight to
+    # 2 1 = read > search live, 1 = forum groups, 1 = Hermes, 2 = Contains (unset -> straight to
     # the value prompt), "deploy" = the value, 0 = staging back -> asks first,
     # 0 = discard (says so) -> chat picker, 0 = chat picker back, 0 = exit.
-    answers = [SEARCH, "1", "1", "2", "deploy", "0", "0", "0", "0"]
+    answers = [SEARCH, "1", "1", "2", "deploy", "0", "0", "0", "0", "0"]
     code, calls, output = run_menu(answers)
 
     text = screens(output)
     assert code == 0
     assert calls == []
     assert "0. Back (discards)" in text
-    assert "Main › Search › Hermes › 1 staged change\n" in text
+    assert "Main › Read › Search › Hermes › 1 staged change\n" in text
     assert "Discarded 1 staged change." in text
 
 
@@ -1068,8 +1081,8 @@ def test_send_cancelling_the_file_path_stages_nothing():
 
 
 def test_after_run_runs_the_same_search_again():
-    # 2 = search, 1 = forum groups, 1 = Hermes, 7 = run, 1 = run it again, Enter, 0
-    code, calls, output = run_menu([SEARCH, "1", "1", "7", "1", "", "0"])
+    # 2 1 = read > search live, 1 = forum groups, 1 = Hermes, 7 = run, 1 = run it again, Enter, 0
+    code, calls, output = run_menu([SEARCH, "1", "1", "7", "1", "", "0", "0"])
 
     assert code == 0
     assert [call.chat for call in calls] == ["-100111", "-100111"]
@@ -1081,7 +1094,7 @@ def test_after_run_runs_the_same_search_again():
 def test_search_tweak_returns_to_the_form_with_the_filters_kept():
     # ... 2 = contains (unset, so straight to the prompt), "hello", 7 = run,
     # 2 = tweak, 6 = limit, 5, 7 = run again, Enter, 0
-    answers = [SEARCH, "1", "1", "2", "hello", "7", "2", "6", "5", "7", "", "0"]
+    answers = [SEARCH, "1", "1", "2", "hello", "7", "2", "6", "5", "7", "", "0", "0"]
     _code, calls, output = run_menu(answers)
 
     assert len(calls) == 2
@@ -1094,11 +1107,11 @@ def test_search_tweak_returns_to_the_form_with_the_filters_kept():
 
 def test_after_run_says_not_done_when_the_action_was_declined_and_failed_on_an_error():
     _calls, declined = recorder(result=1)
-    _code, _unused, output = run_menu([SEARCH, "1", "1", "7", "", "0"], runner=declined)
+    _code, _unused, output = run_menu([SEARCH, "1", "1", "7", "", "0", "0"], runner=declined)
     assert "Not done" in screens(output)
 
     _calls, broken = recorder(error=ValueError("no"))
-    _code, _unused, output = run_menu([SEARCH, "1", "1", "7", "", "0"], runner=broken)
+    _code, _unused, output = run_menu([SEARCH, "1", "1", "7", "", "0", "0"], runner=broken)
     assert "Failed" in screens(output)
 
 
@@ -1312,14 +1325,14 @@ def test_bot_edit_more_fetches_the_profile_again():
 
 
 def test_every_screen_below_the_root_carries_its_trail():
-    # 2 = search, 1 = forum groups, 1 = Hermes, 3 = From, 0 = back to the form,
-    # 0 = back to the picker, 0 = root, 0 = exit
-    _code, _calls, output = run_menu([SEARCH, "1", "1", "3", "0", "0", "0", "0"])
+    # 2 1 = read > search live, 1 = forum groups, 1 = Hermes, 3 = From, 0 = back to
+    # the form, 0 = back to the picker, 0 = read, 0 = root, 0 = exit
+    _code, _calls, output = run_menu([SEARCH, "1", "1", "3", "0", "0", "0", "0", "0"])
     text = screens(output)
-    assert "Main › Search › Pick a chat\n" in text
-    assert "Main › Search › Pick a chat › Forum groups\n" in text
-    assert "Main › Search › Hermes\n" in text
-    assert "Main › Search › Hermes › From\n" in text
+    assert "Main › Read › Search › Pick a chat\n" in text
+    assert "Main › Read › Search › Pick a chat › Forum groups\n" in text
+    assert "Main › Read › Search › Hermes\n" in text
+    assert "Main › Read › Search › Hermes › From\n" in text
 
     # 6 = my bots, 1 = harrybot, 1 = edit, 1 = name, then back out four times and exit
     _code, _calls, output = run_menu([BOTS_ROW, "1", "1", "1", "0", "0", "0", "0", "0", "0"])
@@ -1644,3 +1657,151 @@ def test_the_menu_never_builds_a_skipped_confirm():
     """
     assert "yes=True" not in MENU_SOURCE
     assert "yes = True" not in MENU_SOURCE
+
+
+# --- the archive rows under Read ---------------------------------------------
+
+
+def test_read_lists_the_live_search_and_every_archive_row():
+    _code, _calls, output = run_menu([READ, "0", "0"])
+    text = screens(output)
+    assert "Main › Read\n" in text
+    for row in (
+        "1. Search live (asks Telegram)",
+        "2. Sync the archive",
+        "3. Archive status",
+        "4. Search or export the archive",
+        "5. Prune old rows (retention)",
+        "6. Forget a scope or identity",
+    ):
+        assert row in text, row
+
+
+def test_archive_sync_stages_a_scope_a_floor_and_start_over_then_runs():
+    # 2 2 = read > sync, 1 = scope, 1 = pick the first archived scope, 2 = since,
+    # a date, 3 = start over (toggles), 4 = sync now, Enter = menu, 0 = read back, 0 = exit
+    answers = [ARCHIVE_SYNC, "1", "1", "2", "2026-09-01", "3", "4", "", "0", "0"]
+    code, calls, output = run_menu(answers)
+    assert code == 0
+    args = calls[0]
+    assert args.command == "archive" and args.archive_kind == "sync"
+    assert args.scope == ["tg:topic:-100111:141"]
+    assert args.since == "2026-09-01"
+    assert args.full is True
+    text = screens(output)
+    assert "Main › Read › Sync the archive\n" in text
+    assert "Start over     [yes]" in text
+    assert "Deploys" in text and "tg:topic:-100111:141" in text, "the scope picker is the archive's own list"
+
+
+def test_archive_sync_with_nothing_staged_syncs_everything():
+    code, calls, _output = run_menu([ARCHIVE_SYNC, "4", "", "0", "0"])
+    assert code == 0
+    assert calls[0].scope is None and calls[0].since is None and calls[0].full is False
+
+
+def test_the_scope_picker_takes_a_typed_rid_and_says_when_the_archive_is_empty():
+    # 3 = type a rid on the picker (two scopes, then the extra)
+    code, calls, _output = run_menu([ARCHIVE_SYNC, "1", "3", "tg:chat:-100999", "4", "", "0", "0"])
+    assert code == 0 and calls[0].scope == ["tg:chat:-100999"]
+
+    code, calls, output = run_menu([ARCHIVE_SYNC, "1", "1", "tg:chat:-100999", "4", "", "0", "0"], session=FakeSession(scopes=[]))
+    assert code == 0 and calls[0].scope == ["tg:chat:-100999"]
+    assert "The archive holds no scopes yet." in screens(output)
+
+
+def test_archive_status_runs_without_the_menus_connection():
+    session = FakeSession()
+    calls = []
+
+    async def runner(args, *, client=None, config=None):
+        calls.append((args, client))
+        return 0
+
+    # 2 3 = read > status, blank = every identity, Enter = back, 0 = read back, 0 = exit
+    code, _unused, _output = run_menu([ARCHIVE_STATUS, "", "", "0", "0"], session=session, runner=runner)
+    assert code == 0
+    args, client = calls[0]
+    assert args.command == "archive" and args.archive_kind == "status" and args.identity is None
+    assert client is None, "status reads the file; the menu's connection is not opened for it"
+
+
+def test_archive_search_stages_every_field_then_searches_and_exports():
+    answers = [
+        ARCHIVE_QUERY,
+        "1", "deploy",            # query
+        "2", "\\d+",             # regex
+        "3", "2",                 # scope: pick Alerts
+        "4", "tg:user:4242",      # identity
+        "5", "tg:user:777",       # from
+        "6", "2026-08-01",        # since
+        "7", "2026-09-01",        # until
+        "8", "2",                 # context
+        "9", "5",                 # limit
+        "10",                     # search (print here)
+        "2",                      # tweak it
+        "11", "deploys", "5",     # export: file name, then HTML
+        "",                       # Enter = menu
+        "0", "0",                 # read back, exit
+    ]
+    code, calls, output = run_menu(answers)
+    assert code == 0
+    searched, exported = calls
+    assert searched.command == "archive" and searched.archive_kind == "search"
+    assert searched.query == "deploy" and searched.regex == "\\d+"
+    assert searched.scope == ["tg:chat:-100222"] and searched.identity == "tg:user:4242"
+    assert searched.author == "tg:user:777" and searched.since == "2026-08-01" and searched.until == "2026-09-01"
+    assert searched.context == 2 and searched.limit == 5
+    assert exported.archive_kind == "export" and exported.format == "html" and exported.output == "deploys"
+    assert exported.query == "deploy" and exported.scope == ["tg:chat:-100222"]
+    assert "Main › Read › Search the archive\n" in screens(output)
+
+
+def test_archive_search_refuses_to_run_without_a_query():
+    code, calls, output = run_menu([ARCHIVE_QUERY, "10", "0", "0", "0"])
+    assert code == 0 and calls == []
+    assert "Type a query first." in screens(output)
+
+
+def test_archive_retention_dry_runs_first_then_asks_before_the_real_pass():
+    # 2 5 = read > prune, 1 = Deploys, keep, then 1 = for real, Enter, 0, 0
+    code, calls, output = run_menu([ARCHIVE_RETENTION, "1", "90d", "1", "", "0", "0"])
+    assert code == 0
+    dry_run, for_real = calls
+    assert dry_run.archive_kind == "retention" and dry_run.scope == "tg:topic:-100111:141" and dry_run.keep == "90d"
+    assert dry_run.execute is False and for_real.execute is True
+    assert "Main › Read › Prune the archive › Dry-run done\n" in screens(output)
+
+    # Backing out at the dry-run screen never reaches the real pass.
+    code, calls, _output = run_menu([ARCHIVE_RETENTION, "1", "90d", "0", "0", "0", "0"])
+    assert code == 0 and [args.execute for args in calls] == [False]
+
+
+def test_archive_forget_a_scope_or_an_identity_dry_runs_first():
+    code, calls, _output = run_menu([ARCHIVE_FORGET, "1", "2", "1", "", "0", "0"])
+    assert code == 0
+    dry_run, for_real = calls
+    assert dry_run.archive_kind == "forget" and dry_run.scope == "tg:chat:-100222" and dry_run.identity is None
+    assert dry_run.execute is False and for_real.execute is True
+
+    code, calls, _output = run_menu([ARCHIVE_FORGET, "2", "tg:user:4242", "1", "", "0", "0"])
+    assert code == 0
+    assert calls[0].scope is None and calls[0].identity == "tg:user:4242"
+    assert [args.execute for args in calls] == [False, True]
+
+
+def test_archive_prunes_stop_at_a_failed_dry_run():
+    calls, runner = recorder(error=ValueError("not a scope in this archive"))
+    code, _unused, output = run_menu([ARCHIVE_FORGET, "1", "1", "", "0", "0"], runner=runner)
+    assert code == 0
+    assert len(calls) == 1 and calls[0].execute is False
+    assert "error: not a scope in this archive" in screens(output)
+
+
+def test_the_live_search_export_offers_all_five_formats():
+    # 2 1 = search live, 1, 1 = Hermes, 8 = export, path, 4 = Markdown, Enter, 0, 0
+    code, calls, output = run_menu([SEARCH, "1", "1", "8", "out.md", "4", "", "0", "0"])
+    assert code == 0 and calls[0].format == "markdown" and calls[0].output == "out.md"
+    text = screens(output)
+    for row in ("1. JSON", "2. CSV", "3. JSON lines (one record per line)", "4. Markdown", "5. HTML (one self-contained page)"):
+        assert row in text, row
