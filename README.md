@@ -361,7 +361,8 @@ Every flag has a row:
 the clear screen offers *All topics* and a batch size, the bots screen can save the
 whole bot list to JSON and look up a bot you do not own, read-only, and *Read* opens
 a screen of six — the live search, then sync, status, search or export, prune and
-forget for the archive, whose scope picker is the archive's own list of what it holds.
+forget for the archive. Sync picks its scope from your live chats and topics, the same
+picker Search uses; search, prune and forget pick from what the archive already holds.
 
 The menu is in colour when it is talking to a terminal, and plain text in a pipe, under
 `NO_COLOR`, or with `TERM=dumb`.

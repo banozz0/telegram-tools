@@ -14,6 +14,7 @@ from telegram_tools.client import SessionInUseError, create_client, start_client
 from telegram_tools._core.columns import cell
 from telegram_tools._core.identity import banner as identity_banner
 from telegram_tools.adapters import AccountIdentity
+from telegram_tools.adapters.archive import scope_rid_for
 from telegram_tools import profiles as profile_store
 from telegram_tools.config import ConfigError, load_config, lookup_bot_token, resolve_bot_token
 from telegram_tools.delete import kind_for_type
@@ -1227,6 +1228,37 @@ def _pick_scope(session, *, read, write, trail: str) -> Any:
     return ask_text("Scope rid", read=read, write=write)
 
 
+async def _pick_live_scope(session, *, read, write, trail: str) -> Any:
+    """A scope rid from the account's own chats and topics -- what a sync can reach.
+
+    A sync archives what Telegram has, not what the archive already holds, so
+    its picker is the live chat list: a chat, and for a forum group one of its
+    topics or the whole group. The archive's own list is the right picker for
+    search, retention and forget, which act on what has already landed.
+    """
+    picked = await _pick_chat(session=session, read=read, write=write, trail=trail)
+    if picked is BACK:
+        return BACK
+    if picked.is_forum is False:
+        return scope_rid_for(picked.reference)
+    topics = await session.topics(picked.reference)
+    if not topics:
+        return scope_rid_for(picked.reference)
+    chosen = pick(
+        topics,
+        title=crumb(trail, picked.title, "Topic"),
+        label=lambda topic: f"{topic.id:<6}  {topic.display_title}",
+        read=read,
+        write=write,
+        extras=(Extra("all", "Every topic in this group"),),
+    )
+    if chosen is BACK:
+        return BACK
+    if chosen == "all":
+        return scope_rid_for(picked.reference)
+    return scope_rid_for(picked.reference, chosen.id)
+
+
 def _yes_no(value: bool) -> str:
     return "yes" if value else "no"
 
@@ -1265,15 +1297,14 @@ async def _flow_archive_sync(*, session, runner, read, write) -> bool:
             continue
 
         if key == "scope":
-            answer = edit_field(
-                crumb(trail, "Scope"),
-                _shown(staged["scope"], "(every chat)"),
-                read=read,
-                write=write,
-                ask=lambda: _pick_scope(session, read=read, write=write, trail=crumb(trail, "Scope")),
-                allow_clear=True,
-                is_set=staged["scope"] is not None,
-            )
+            if staged["scope"] is None:
+                # Nothing set yet: straight to the live picker, as Search does.
+                answer = await _pick_live_scope(session, read=read, write=write, trail=crumb(trail, "Scope"))
+            else:
+                choice = choose(["Pick another chat or topic", "Clear (every chat)"], title=crumb(trail, "Scope"), read=read, write=write)
+                if choice is BACK:
+                    continue
+                answer = CLEAR if choice == 1 else await _pick_live_scope(session, read=read, write=write, trail=crumb(trail, "Scope"))
         else:
             answer = edit_field(
                 crumb(trail, "Since"),

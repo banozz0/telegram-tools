@@ -1678,9 +1678,9 @@ def test_read_lists_the_live_search_and_every_archive_row():
 
 
 def test_archive_sync_stages_a_scope_a_floor_and_start_over_then_runs():
-    # 2 2 = read > sync, 1 = scope, 1 = pick the first archived scope, 2 = since,
+    # 2 2 = read > sync, 1 = scope, 1 = forum groups, 1 = Hermes, 1 = Deploys, 2 = since,
     # a date, 3 = start over (toggles), 4 = sync now, Enter = menu, 0 = read back, 0 = exit
-    answers = [ARCHIVE_SYNC, "1", "1", "2", "2026-09-01", "3", "4", "", "0", "0"]
+    answers = [ARCHIVE_SYNC, "1", "1", "1", "1", "2", "2026-09-01", "3", "4", "", "0", "0"]
     code, calls, output = run_menu(answers)
     assert code == 0
     args = calls[0]
@@ -1691,7 +1691,20 @@ def test_archive_sync_stages_a_scope_a_floor_and_start_over_then_runs():
     text = screens(output)
     assert "Main › Read › Sync the archive\n" in text
     assert "Start over     [yes]" in text
-    assert "Deploys" in text and "tg:topic:-100111:141" in text, "the scope picker is the archive's own list"
+    assert "Main › Read › Sync the archive › Scope › Pick a chat\n" in text, "a sync picks from the live chats, not the archive"
+    assert "Main › Read › Sync the archive › Scope › Hermes › Topic\n" in text
+
+
+def test_archive_sync_scope_takes_a_whole_forum_a_channel_or_is_cleared_again():
+    # A forum, every topic: 1 = scope, 1 = forum groups, 1 = Hermes, 3 = every topic (two topics, then the extra)
+    code, calls, _output = run_menu([ARCHIVE_SYNC, "1", "1", "1", "3", "4", "", "0", "0"])
+    assert code == 0 and calls[0].scope == ["tg:chat:-100111"]
+    # A channel has no topic step: 2 = channels, 1 = Alerts
+    code, calls, _output = run_menu([ARCHIVE_SYNC, "1", "2", "1", "4", "", "0", "0"])
+    assert code == 0 and calls[0].scope == ["tg:chat:-100222"]
+    # Set, then cleared back to every chat: 1 = scope again, 2 = clear
+    code, calls, _output = run_menu([ARCHIVE_SYNC, "1", "2", "1", "1", "2", "4", "", "0", "0"])
+    assert code == 0 and calls[0].scope is None
 
 
 def test_archive_sync_with_nothing_staged_syncs_everything():
@@ -1700,13 +1713,13 @@ def test_archive_sync_with_nothing_staged_syncs_everything():
     assert calls[0].scope is None and calls[0].since is None and calls[0].full is False
 
 
-def test_the_scope_picker_takes_a_typed_rid_and_says_when_the_archive_is_empty():
-    # 3 = type a rid on the picker (two scopes, then the extra)
-    code, calls, _output = run_menu([ARCHIVE_SYNC, "1", "3", "tg:chat:-100999", "4", "", "0", "0"])
-    assert code == 0 and calls[0].scope == ["tg:chat:-100999"]
+def test_the_archive_scope_picker_takes_a_typed_rid_and_says_when_the_archive_is_empty():
+    # The archive's own picker, on retention: 3 = type a rid (two scopes, then the extra)
+    code, calls, _output = run_menu([ARCHIVE_RETENTION, "3", "tg:chat:-100999", "90d", "0", "0", "0", "0"])
+    assert code == 0 and calls[0].scope == "tg:chat:-100999"
 
-    code, calls, output = run_menu([ARCHIVE_SYNC, "1", "1", "tg:chat:-100999", "4", "", "0", "0"], session=FakeSession(scopes=[]))
-    assert code == 0 and calls[0].scope == ["tg:chat:-100999"]
+    code, calls, output = run_menu([ARCHIVE_RETENTION, "1", "tg:chat:-100999", "90d", "0", "0", "0", "0"], session=FakeSession(scopes=[]))
+    assert code == 0 and calls[0].scope == "tg:chat:-100999"
     assert "The archive holds no scopes yet." in screens(output)
 
 

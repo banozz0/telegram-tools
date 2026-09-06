@@ -18,7 +18,7 @@ This project follows a practical changelog style: user-visible changes, safety c
 
 - **`archive retention --scope RID --keep 90d|N` and `archive forget --scope RID | --identity ID`** prune and remove, dry-run by default, and execute only with `--execute` plus the scope's exact title typed back — the same gate `delete` has, for the same reason, and with no `--yes` either. Each executed one leaves a line in the audit log.
 
-- **The menu's Read row** now opens a screen of six: the live search, sync, status, search or export, prune and forget. The root's nine rows and their numbers do not move. `--as-bot` refuses every archive command with `IDENTITY_MODE_UNSUPPORTED`: a bot cannot read history.
+- **The menu's Read row** now opens a screen of six: the live search, sync, status, search or export, prune and forget. Sync's scope is picked from your live chats and topics (a whole forum group, or one topic in it); the other archive rows pick from what the archive holds. The root's nine rows and their numbers do not move. `--as-bot` refuses every archive command with `IDENTITY_MODE_UNSUPPORTED`: a bot cannot read history.
 
 - **A sync or prune refuses while the tool's own files are readable by others**, like every other write here; the archive and its config are created 0600 and the exports directory 0700.
 
