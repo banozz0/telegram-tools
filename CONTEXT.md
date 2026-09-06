@@ -71,7 +71,9 @@ The terms this codebase uses, and the boundaries they imply.
   **own title** typed back, and no `--yes` at all; bot edits = a diff +
   confirm; `message delete` = `clear-messages`' gate on a selection, plus the
   count typed above 1000; every other message verb = `send`'s gate, with
-  `--yes` bound to the chat the write *lands in*. The menu builds the same args the flags would and never sets
+  `--yes` bound to the chat the write *lands in*; `structure apply` = dry-run
+  default + `--execute` + the target's exact title, no `--yes`, a terminal
+  required in either mode. The menu builds the same args the flags would and never sets
   `yes`/`execute` itself — it is never a shorter path past a gate.
 - **Message verb** — one of the fifteen things `message` does to a message
   (`messages.VERBS`). Each is an `Op`: its approval kind, the rights its plan
@@ -222,6 +224,48 @@ The terms this codebase uses, and the boundaries they imply.
   (no scanner gave a word, and the reason says which binaries were looked for).
   `accept` shows it before asking and refuses `BLOCKED` and `INFECTED` with
   `UNSAFE_BLOCKED`; `doctor` names the scanner it found or looked for.
+- **Blueprint** — one chat's structure as a secret-free JSON file
+  (`cli-tools/blueprint/telegram/1`): the container's settings and its topics,
+  every id replaced by a handle, the source rid recorded beside it. Exported,
+  diffed and applied by the shared engine (`_core/blueprint.py`); read from and
+  written to Telegram by this tool's port (`adapters/blueprint.py`); the
+  allowlist, banner, screens and plan are `structure.py`. A floor plan, never
+  a copy: `never_transferred` in the file and the four-line banner every export
+  prints say what it is not.
+- **Allowlist** — `structure.ALLOWLIST`, the one registered field set that says
+  what a Telegram blueprint carries: container `name`, `kind`, `about`,
+  `default_banned_rights`, `slow_mode_seconds`, `join_request`; topics `name`
+  and `icon_emoji_id`. The engine drops every other key the port read and
+  reports each by name, and generates `never_transferred` from the complement:
+  the six every platform refuses plus `admins`, `invite_links` and
+  `linked_chat`. Admin rights are held by people on Telegram, so they are
+  excluded rather than carried; the rights *primitive* still lives in the port
+  for the administration commands to wrap.
+- **Handle** — a blueprint-local name for an object, `<kind>:<slug>`
+  (`chat:team-hermes`, `topic:deploys`), minted from the title. Objects are
+  matched by handle, which is why two forums of the same shape and different
+  ids diff empty, and why the General topic a fresh forum already has is
+  matched rather than made twice.
+- **Topic order** — none, on Telegram: the app sorts topics by activity and a
+  client cannot set a position. The port therefore lists topics by title (ties
+  by id), so position is a function of the names on both sides and two forums
+  holding the same topics never differ in order.
+- **Chat kind** — what a blueprint calls the container: `supergroup`, `forum`
+  or `channel` (`adapters/blueprint.chat_kind`). Checked before an apply is
+  planned (`TARGET_KIND_MISMATCH`) and never changed by one. A basic group has
+  no kind here and is refused with the parity reason.
+- **Apply** — `structure apply`: the target is exported, the diff becomes
+  ordered create and update steps (objects in blueprint order, the chat's own
+  settings last), never a delete; the gate is `delete`'s typed title, refused
+  without a terminal in either mode; each accepted step leaves its own audit
+  line; the target is read back and diffed, and anything pending is `partial`.
+  A refused step stops the apply with the partial remap kept, so a rerun `diff`
+  shows the remainder. `--create` makes the chat first through `create`'s own
+  call. What the target has beyond the blueprint is reported as *left alone*.
+- **Remap** — the source-rid to target-rid rows one apply wrote into the
+  archive's `remaps` table under its `apply_id`, one row per minted or matched
+  id, each its own transaction. `structure remap --apply-id` prints them
+  offline.
 - **Trail** — the breadcrumb a screen's title carries (`Main › Clear › Ops`),
   built by `ui.crumb`. A flow passes its own trail down; a screen never invents
   one.

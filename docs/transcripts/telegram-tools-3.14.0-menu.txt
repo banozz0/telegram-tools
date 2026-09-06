@@ -1,0 +1,183 @@
+telegram-tools
+--------------------------------------------
+1. Find IDs (chats, topics)
+2. Read (search live, archive, export)
+3. Write (send, reply, message tools)
+4. Build (create, delete, structure)
+5. Clear messages
+6. Manage (admins, members, invites, settings)
+7. Watch (rules, runner, review queue)
+8. Identity (profiles, my bots)
+9. Check setup
+0. Exit
+Choose: 2
+Main › Read
+--------------------------------------------
+1. Search live (asks Telegram)
+2. Sync the archive (everything, or one chat or topic)
+3. Archive status
+4. Search or export the archive
+5. Prune old rows (retention)
+6. Forget a scope or identity
+0. Back
+Choose: 1
+Main › Read › Search › Pick a chat
+Acting as: Sven (@sven) · account
+--------------------------------------------
+1. Forum groups (2)
+2. Channels (2)
+3. Groups (1)
+4. Direct chats (1)
+5. Type an ID or @username
+0. Back
+Choose: 1
+Main › Read › Search › Pick a chat › Forum groups
+Acting as: Sven (@sven) · account
+--------------------------------------------
+1. Team Hermes                       -1001000000001
+2. Ops Room                          -1001000000002
+3. Filter by name
+4. Type an ID or @username
+0. Back
+Choose: 1
+Main › Read › Search › Team Hermes
+Acting as: Sven (@sven) · account
+--------------------------------------------
+1. Topic          [all topics]
+2. Contains       [(anything)]
+3. From           [(anyone)]
+4. Since          [(any date)]
+5. Until          [(any date)]
+6. Limit          [(no limit)]
+7. Run it (print here)
+8. Export to a file
+0. Back (discards)
+Choose: 2
+Contains (blank cancels): deploy
+Main › Read › Search › Team Hermes
+Acting as: Sven (@sven) · account
+--------------------------------------------
+1. Topic          [all topics]
+2. Contains       [deploy]
+3. From           [(anyone)]
+4. Since          [(any date)]
+5. Until          [(any date)]
+6. Limit          [(no limit)]
+7. Run it (print here)
+8. Export to a file
+0. Back (discards)
+Choose: 6
+Maximum messages (blank cancels): 20
+Main › Read › Search › Team Hermes
+Acting as: Sven (@sven) · account
+--------------------------------------------
+1. Topic          [all topics]
+2. Contains       [deploy]
+3. From           [(anyone)]
+4. Since          [(any date)]
+5. Until          [(any date)]
+6. Limit          [20]
+7. Run it (print here)
+8. Export to a file
+0. Back (discards)
+Choose: 7
+date        id     from       text
+2026-08-30  4812   sam        Deploy went out at 14:02, all green
+2026-08-29  4790   hermes     Deploying 3.4.1 now
+Main › Read › Search › Team Hermes › Done
+Acting as: Sven (@sven) · account
+--------------------------------------------
+1. Run it again
+2. Tweak it
+3. Main menu
+0. Exit
+Choose (Enter = main menu): 2
+Main › Read › Search › Team Hermes
+Acting as: Sven (@sven) · account
+--------------------------------------------
+1. Topic          [all topics]
+2. Contains       [deploy]
+3. From           [(anyone)]
+4. Since          [(any date)]
+5. Until          [(any date)]
+6. Limit          [20]
+7. Run it (print here)
+8. Export to a file
+0. Back (discards)
+Choose: 0
+Main › Read › Search › Team Hermes › 2 staged changes
+Acting as: Sven (@sven) · account
+--------------------------------------------
+1. Keep editing
+0. Discard it and go back
+Choose: 0
+Discarded 2 staged changes.
+Main › Read › Search › Pick a chat
+Acting as: Sven (@sven) · account
+--------------------------------------------
+1. Forum groups (2)
+2. Channels (2)
+3. Groups (1)
+4. Direct chats (1)
+5. Type an ID or @username
+0. Back
+Choose: 0
+Main › Read
+Acting as: Sven (@sven) · account
+--------------------------------------------
+1. Search live (asks Telegram)
+2. Sync the archive (everything, or one chat or topic)
+3. Archive status
+4. Search or export the archive
+5. Prune old rows (retention)
+6. Forget a scope or identity
+0. Back
+Choose: 0
+telegram-tools
+Acting as: Sven (@sven) · account
+--------------------------------------------
+1. Find IDs (chats, topics)
+2. Read (search live, archive, export)
+3. Write (send, reply, message tools)
+4. Build (create, delete, structure)
+5. Clear messages
+6. Manage (admins, members, invites, settings)
+7. Watch (rules, runner, review queue)
+8. Identity (profiles, my bots)
+9. Check setup
+0. Exit
+Choose: 8
+Main › Identity
+Acting as: Sven (@sven) · account
+--------------------------------------------
+1. Profiles on this machine
+2. Log in (phone and code)
+3. Log in by scanning a QR code
+4. Log out
+5. Move the pre-profile session into a profile
+6. My bots
+0. Back
+Choose: 1
+default      Sven (@sven)
+work         Sven at work (@svenworks)
+Main › Identity › Profiles › Done
+Acting as: Sven (@sven) · account
+--------------------------------------------
+1. Back to Identity
+2. Main menu
+0. Exit
+Choose (Enter = main menu): 
+telegram-tools
+Acting as: Sven (@sven) · account
+--------------------------------------------
+1. Find IDs (chats, topics)
+2. Read (search live, archive, export)
+3. Write (send, reply, message tools)
+4. Build (create, delete, structure)
+5. Clear messages
+6. Manage (admins, members, invites, settings)
+7. Watch (rules, runner, review queue)
+8. Identity (profiles, my bots)
+9. Check setup
+0. Exit
+Choose: 0

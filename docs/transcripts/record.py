@@ -117,6 +117,10 @@ def _canned():
             # The archive's own scope list, invented like everything else here.
             return [("tg:topic:-1001000000001:141", "Deploys"), ("tg:chat:-1001000000003", "Alerts")]
 
+        def structure_applies(self):
+            # The remap picker's rows, invented like everything else here.
+            return [("3f9c2a1b7d4e6f80", "3f9c2a1b7d4e6f80  2026-09-06T10:00:00Z  blueprint 5d41402abc4b2a76")]
+
         async def close(self) -> None:
             self.closed = True
 

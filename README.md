@@ -19,6 +19,7 @@ Built on [Telethon](https://github.com/LonamiWebs/Telethon). Everything runs on 
 - **`message`** — what you do to a message once it exists: `reply`, `edit`, `delete`, `forward`, `copy`, `react`, `unreact`, `pin`, `unpin`, `poll`, `typing`, `read`, `unread`, `bookmark`, `draft`. Each shows the chat and the message it is about to act on, then asks. Deleting is dry-run by default, bounded, and needs `--execute` plus a typed `DELETE`. See [Message tools](#message-tools).
 - **`create`** — makes a supergroup (optionally with topics already on), a broadcast channel, or a topic inside a forum group, and prints the new ID.
 - **`delete`** — removes a supergroup, a broadcast channel, or a forum topic: the thing itself, not just its messages. Dry-run by default; deleting requires `--execute` *and* typing the target's exact title at a prompt. It deletes exactly what `create` can make, so nothing this tool removes is beyond making again.
+- **`structure`** — a chat's shape as a file: `structure export` writes a blueprint (kind, title, description, topics, default rights, slow mode, join approval — never members, admins, messages, history or invite links), `structure diff` says what another chat would need to match it, `structure apply` makes the missing topics and settings behind the same typed-title gate `delete` has and never deletes anything on the target, and `structure remap` prints the id table an apply wrote. See [Structure blueprints](#structure-blueprints).
 - **`bots`** — lists the bots you own with their numeric IDs, and edits what @BotFather edits: display name, bio, description, commands, profile photo, and default admin rights.
 - **`doctor`** — checks your local setup without printing any secrets.
 - **`--as-bot NICK`** — runs `send`, `create topic` or a message verb as one of your own bots instead of as you, naming both on every screen. See [Acting as a bot](#acting-as-a-bot).
@@ -29,6 +30,7 @@ Built on [Telethon](https://github.com/LonamiWebs/Telethon). Everything runs on 
 - No renaming forum topics — `clear-messages` leaves topic IDs untouched, and `delete topic` is the only way a topic goes.
 - No unattended downloads, and no download at all outside the review queue. `archive sync` notes every link and file it walks past and fetches none of them; `message copy` links to an attachment rather than fetching it. A byte reaches your disk only after you approved that candidate at a terminal, it sat in quarantine through every check, and you accepted it with the verdict in front of you. No rule, schedule or sync can approve, and no `--yes` exists for either step.
 - No cloud scanning. The one scanner is a local ClamAV, if you have one; without it every verdict is `UNSCANNED`, said plainly, never "clean".
+- No perfect clones. A blueprint carries a chat's structure — kind, title, description, topics, default rights, slow mode, join approval — and nothing that belongs to people or to time: no members, no admins, no messages, no history, no invite links, no linked discussion group. `structure export` says so every time it runs, and the file lists it too.
 - No automation loops. The `bots` command edits bot *settings*; it never runs a bot.
 - No changing a bot's `@username`, creating or deleting bots, or reading/revoking bot tokens — those stay with @BotFather.
 - No cloud anything — credentials and session files stay in `~/.telegram-tools/`.
@@ -429,6 +431,34 @@ piped into stdin is not a person. Every approve, accept, reject and retry leaves
 line in the audit log. Nothing is uploaded anywhere, ever: there is no reputation
 lookup, no sandbox, no cloud scan in any code path.
 
+## Structure blueprints
+
+A forum with the right topics, the right default rights and slow mode is this tool's home turf, and a blueprint makes that repeatable:
+
+```bash
+telegram-tools structure export --chat @teamhermes --output hermes.json
+telegram-tools structure diff --blueprint hermes.json --chat @teamhermes2
+telegram-tools structure apply --blueprint hermes.json --chat @teamhermes2            # dry-run: every step, nothing done
+telegram-tools structure apply --blueprint hermes.json --chat @teamhermes2 --execute  # asks for the chat's exact title
+telegram-tools structure apply --blueprint hermes.json --create --execute             # a new forum with that title first
+telegram-tools structure remap --apply-id 3f9c2a1b7d4e6f80                            # the id table, offline
+```
+
+Every export opens with the same four lines, because a blueprint is a floor plan and not a copy:
+
+```text
+This is a blueprint of the chat's structure, not a copy of the chat.
+It carries: kind, title, description, topics (title and icon), default rights, slow mode, join approval.
+It never carries: members, admins, messages, history, invite links, the linked discussion group.
+Applying it makes topics and settings on the target and never deletes anything there.
+```
+
+The file is `cli-tools/blueprint/telegram/1`: sorted keys, ids replaced by handles like `topic:deploys` with the source id recorded beside them, topics listed by title (Telegram gives them no order a client can set), and a `never_transferred` list generated from the same allowlist the exporter filters through — a field outside that list cannot reach the file. Two forums with the same shape and different ids diff empty, and exporting a chat, applying the file to a new one and exporting that again gives the same bytes once the source ids are stripped.
+
+`apply` reads the target first and plans only the difference: topics to make, topics and settings to change, in blueprint order, the chat's own settings last. It never plans a delete — a topic or setting the target has beyond the blueprint is reported as *left alone*. The dry-run prints every step; `--execute` asks you to type the target's exact title (with `--create`, the title the new chat will have), re-resolves the chat after you answer and refuses with `PLAN_DRIFT` if it changed, then makes one step at a time. A step Telegram refuses stops the apply there, with everything already made kept and recorded, so a rerun `diff` shows what remains. Afterwards the chat is read back and compared: anything still pending is `partial` (exit 1), and the readback says which. Each accepted step appends its own line to `~/.telegram-tools/audit.jsonl`; the remap rows live in the archive under the apply id, and `structure remap` prints them without connecting.
+
+The kinds have to match — a forum blueprint applies to a forum, a channel's to a channel — and a basic group has no blueprint at all, for the reason `delete` refuses one: `create` makes supergroups, so it could never be applied back. Admin rights are held by people on Telegram, so they are on the never-transferred list rather than in the file; the administration commands set them on a person you name.
+
 ## The menu
 
 Run `telegram-tools` with no arguments and you get a menu instead of flags:
@@ -440,7 +470,7 @@ Acting as: Sven (@sven) · account
 1. Find IDs (chats, topics)
 2. Read (search live, archive, export)
 3. Write (send, reply, message tools)
-4. Build (create, delete)
+4. Build (create, delete, structure)
 5. Clear messages
 6. Manage (admins, members, invites, settings)
 7. Watch (rules, runner, review queue)
@@ -475,7 +505,9 @@ forget for the archive. Sync picks its scope from your live chats and topics, th
 picker Search uses; search, prune and forget pick from what the archive already holds.
 *Write* opens a screen of sixteen — Send, then one row per message verb — each picking
 the chat from your live chats and staging the verb's fields; Send's form has a *Reply to*
-row, and Delete's *Delete for real* toggle is its `--execute`.
+row, and Delete's *Delete for real* toggle is its `--execute`. *Build* opens six rows: create,
+delete, then export a blueprint, diff one against a chat, apply one — the dry-run runs first,
+and the exact title is typed at the CLI's own prompt — and show an apply's remap table.
 
 The menu is in colour when it is talking to a terminal, and plain text in a pipe, under
 `NO_COLOR`, or with `TERM=dumb`.
@@ -556,7 +588,7 @@ Exit codes, unchanged apart from one addition:
 | 0 | done — `ok`, `empty`, `dry_run` |
 | 1 | not done — cancelled at a gate, a declined confirm, `partial` (`doctor` with a failed check) |
 | 2 | refused — usage, config, permission, a platform error |
-| 3 | **new:** the command asks for confirmation and there is no terminal to ask on. Under `--json`, and for `review approve`, `review accept` and `review reject` in either mode; `error.hint` is the same command for a human to run |
+| 3 | **new:** the command asks for confirmation and there is no terminal to ask on. Under `--json`, and for `review approve`, `review accept`, `review reject` and `structure apply --execute` in either mode; `error.hint` is the same command for a human to run |
 | 130 | interrupted |
 
 `discover --json out.json` and `bots --json out.json` still write those files
@@ -585,6 +617,8 @@ for a code or a password. Relay the refusal and let the person run it.
 | `review list`, `review status` | No — read the archive and two local directories; no host is contacted and no redirect is resolved |
 | `review approve`, `review retry` | Outward-facing — after a `y/N` at a terminal, contacts the link's host (redirects walked one `HEAD` at a time) or reads the file through your login, into quarantine, through eleven checks and the scanner. No `--yes`; refuses without a terminal (`APPROVAL_REQUIRED`, exit 3) |
 | `review accept`, `review reject` | Local only — move a quarantined file into `media/` after showing its verdict, or delete the quarantined bytes; each after a `y/N`, no `--yes`. `BLOCKED` and `INFECTED` can never be accepted |
+| `structure export`, `structure diff`, `structure remap` | No — export and diff read one chat and write a local file or a screen; remap reads the local archive and never connects |
+| `structure apply` | Additive on the target — makes topics and sets the chat's settings, never deletes a topic, a setting or the chat. Dry-run by default; executing needs `--execute` **and** the target's exact title typed at a terminal, in either mode; there is no `--yes`. `--create` makes a new chat of the blueprint's kind first |
 | `archive retention`, `archive forget` | Local only — prune or remove rows of the local archive, never anything on Telegram. Dry-run by default; executing needs `--execute` **and** the scope's exact title typed back; there is no `--yes` |
 | `auth` | Local only — writes or removes this machine's login. `--logout` needs the profile's name typed back, `--migrate` a `y/N`; there is no `--yes`, and it cannot run unattended. Nothing it asks for is stored: a two-step-verification password goes straight into the sign-in call |
 | `create` | No — makes new things, changes nothing existing, after a `y/N` unless you pass `--yes` |
@@ -599,7 +633,7 @@ for a code or a password. Relay the refusal and let the person run it.
 
 `bots` refuses to edit a bot you do not own, and it never fetches or exports a bot token from Telegram — the three token-only edits simply fail with a message naming the fields they need one for.
 
-Every write — sending, a message verb, creating, clearing, deleting, editing a bot — now also
+Every write — sending, a message verb, creating, clearing, deleting, applying a blueprint, editing a bot — now also
 asks Telegram what rights your account actually holds in that chat before it
 does anything, and refuses by name when one it needs is missing. Once you have
 answered the gate, the target is resolved a second time and compared with the

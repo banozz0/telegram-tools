@@ -1,13 +1,13 @@
 ---
 name: telegram-tools
 description: "Use when you need the real numeric ID of a Telegram chat, channel, group or forum topic — 'what's the ID of that topic?', 'which chat is -100…?', 'where do I send this?' — when the user wants their own Telegram messages searched or exported (JSON, CSV, JSONL, Markdown, HTML), when a history question can be answered from the local archive instead of a fresh fetch, when a message must be posted to a chat or topic the user has allowlisted, or when a message the user named should get a reply, a reaction, a pin, or be forwarded, copied or bookmarked."
-version: 1.9.0
+version: 1.10.0
 author: banozz0
 license: MIT
 platforms: [macos]
 metadata:
   hermes:
-    tags: [telegram, chat-ids, topic-ids, forum, search, archive, export, send, reply, react, message, review, cli]
+    tags: [telegram, chat-ids, topic-ids, forum, search, archive, export, send, reply, react, message, review, structure, blueprint, cli]
 ---
 
 # telegram-tools
@@ -151,6 +151,17 @@ the URL exactly as the message wrote it. When the user wants a file, hand them t
 candidate id and `telegram-tools review approve --ids <id>`; when a verdict says
 `UNSCANNED`, tell them no scanner was found rather than calling the file clean.
 
+**12. Never run `structure apply --execute`.** A blueprint apply makes topics and
+changes a chat's settings for everyone in it, and its gate is `delete`'s: `--execute`
+plus the chat's exact title typed at a terminal, refused without one in either mode
+(`APPROVAL_REQUIRED`, exit 3), and no `--yes`. Do not drive it through the menu, a pty,
+or a piped answer. `structure export`, `structure diff`, `structure remap` and the
+dry-run of `apply` (no `--execute`) are yours to run: they read a chat or the archive
+and change nothing. When the user wants a chat to match a blueprint, hand them the
+`--execute` command and relay the dry-run's step list. A blueprint is a floor plan and
+not a copy: never describe it as copying members, admins, messages or history, because
+`never_transferred` in the file says it does not, and `structure export` prints the same.
+
 ## Machine-readable output
 
 Put `--json` **before** the subcommand and the command prints exactly one object
@@ -235,6 +246,10 @@ names the files).
 | "save that message" / "bookmark it" | `telegram-tools --json message bookmark --chat <id> --id <msg-id> --label "..." --yes` — Saved Messages plus an archive row |
 | "mark it read" / "draft this for me" | `telegram-tools --json message read --chat <id> --yes`, `message draft --chat <id> --text "..." --yes` |
 | "delete those messages" | hand them `telegram-tools message delete --chat <id> --ids <a>,<b> --execute` — rule 10, they type DELETE |
+| "save this forum's layout" / "what does that chat's setup look like?" | `telegram-tools --json structure export --chat <id> --output /path/hermes.json` — reads only; the file holds no people or messages |
+| "how does that chat differ from the blueprint?" | `telegram-tools --json structure diff --blueprint /path/hermes.json --chat <id>` — reads only |
+| "set that chat up like the blueprint" / "make a forum from it" | run the dry-run `telegram-tools --json structure apply --blueprint /path/hermes.json --chat <id>` and relay the steps; hand them the same command with `--execute` (or `--create --execute`) — rule 12, they type the title |
+| "which new topic is which?" after an apply | `telegram-tools --json structure remap --apply-id <id>` — offline |
 | "make me a group with topics" (they asked) | `telegram-tools create group --title "..." --forum --yes` |
 | "add a topic to that group" (they asked) | `telegram-tools create topic --chat <id> --title "..." --yes` |
 | "delete that topic/group" | hand them `telegram-tools delete topic --chat <id> --topic <id> --execute` — rule 4, they run it |
@@ -293,8 +308,8 @@ names the files).
 - **A held session is not a bug to retry.** "Another telegram-tools is already using
   the login session" means the user has the menu open somewhere. Say so; a retry
   loop will not free it.
-- **A write leaves a local record.** Every executed send, message verb, create, clear, delete
-  or bot edit appends one line to `~/.telegram-tools/audit.jsonl`. It is the
+- **A write leaves a local record.** Every executed send, message verb, create, clear, delete,
+  blueprint step or bot edit appends one line to `~/.telegram-tools/audit.jsonl`. It is the
   user's log, it holds no secrets, and you never need to read it — but do not
   suggest deleting it either.
 - **Check the tool's own help before using a flag** that is not in this table. The
@@ -336,6 +351,10 @@ names the files).
   Rule 11. `approve`, `accept` and `reject` refuse without a terminal; `retry` asks
   nothing because its yes was given at approve, and it still starts a fetch. `review
   list` and `review status` are the read-only half and are fine to run.
+- **`structure apply --execute`** — it makes topics and changes settings on a real chat,
+  behind the chat's exact title typed at a terminal, with no `--yes`. Rule 12. The
+  dry-run (no `--execute`), `export`, `diff` and `remap` are the read-only half and are
+  fine to run.
 - **`archive retention` and `archive forget`** — they remove rows from the user's
   local archive. Dry-run is the default and executing needs `--execute` plus the
   scope's exact title typed at a prompt, with no `--yes`; hand the user the command.
