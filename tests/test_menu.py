@@ -56,9 +56,13 @@ class FakeSession:
         self._topics = list(topics)
         self._bots = list(bots)
         self._profile = profile
-        self.config = type("Config", (), {"bot_tokens": bot_tokens or {}})()
+        self.config = type("Config", (), {"bot_tokens": bot_tokens or {}, "profile": "default"})()
         self.closed = False
+        self.released = 0
         self.topic_calls = []
+        # The identity line the real session learns when it connects. Screens
+        # below the root carry it; a test that wants the bare screen sets None.
+        self.banner = "Acting as: Sven (@sven) \u00b7 account"
 
     async def client(self):
         return "CLIENT"
@@ -79,6 +83,11 @@ class FakeSession:
     async def close(self):
         self.closed = True
 
+    async def release(self):
+        self.released += 1
+        self.closed = True
+        self.banner = None
+
 
 def recorder(result=0, error=None):
     calls = []
@@ -92,12 +101,27 @@ def recorder(result=0, error=None):
     return calls, runner
 
 
-# Root rows, so a test says which screen it is on instead of a bare number.
-# fmt: off
-(
-    DISCOVER, SEARCH, SEND, CREATE, DELETE, CLEAR, BOTS, DOCTOR,
-) = (str(number) for number in range(1, 9))
-# fmt: on
+# Root rows of the nine-row menu (spec section 14), so a test says which screen
+# it is on instead of a bare number. Three of them are two keystrokes now: Create
+# and Delete live under Build, and My bots under Identity. `run_menu` flattens a
+# tuple, so an answer list still reads as one row per entry.
+DISCOVER = "1"
+SEARCH = "2"
+SEND = "3"
+BUILD = "4"
+CREATE = ("4", "1")
+DELETE = ("4", "2")
+CLEAR = "5"
+MANAGE = "6"
+WATCH = "7"
+IDENTITY = "8"
+PROFILES = ("8", "1")
+LOG_IN = ("8", "2")
+LOG_IN_QR = ("8", "3")
+LOG_OUT = ("8", "4")
+MIGRATE = ("8", "5")
+BOTS_ROW = ("8", "6")
+DOCTOR = "9"
 
 
 def run_menu(answers, *, session=None, runner=None, output=None):
@@ -105,9 +129,10 @@ def run_menu(answers, *, session=None, runner=None, output=None):
     calls = []
     if runner is None:
         calls, runner = recorder()
+    keystrokes = [key for answer in answers for key in (answer if isinstance(answer, tuple) else (answer,))]
     code = asyncio.run(
         menu.run_menu(
-            read=reader(*answers),
+            read=reader(*keystrokes),
             write=output.append,
             session=session or FakeSession(),
             runner=runner,
@@ -116,19 +141,26 @@ def run_menu(answers, *, session=None, runner=None, output=None):
     return code, calls, output
 
 
+ROOT_ROWS = (
+    "1. Find IDs (chats, topics)",
+    "2. Read (search, export)",
+    "3. Write (send)",
+    "4. Build (create, delete)",
+    "5. Clear messages",
+    "6. Manage (admins, members, invites, settings)",
+    "7. Watch (rules, runner, review queue)",
+    "8. Identity (profiles, my bots)",
+    "9. Check setup",
+)
+
+
 def test_root_menu_lists_every_command_and_exits_on_zero():
     code, _calls, output = run_menu(["0"])
 
     text = screens(output)
     assert code == 0
-    assert "1. Chats & topics (find IDs)" in text
-    assert "2. Search / export messages" in text
-    assert "3. Send a message" in text
-    assert "4. Create a group, channel, or topic" in text
-    assert "5. Delete a group, channel, or topic" in text
-    assert "6. Clear topic messages" in text
-    assert "7. My bots" in text
-    assert "8. Check setup" in text
+    for row in ROOT_ROWS:
+        assert row in text, row
     assert "0. Exit" in text
 
 
@@ -178,7 +210,7 @@ def test_zero_at_the_first_flow_screen_returns_to_the_root_menu():
 
     assert code == 0
     assert calls == []
-    assert screens(output).count("1. Chats & topics (find IDs)") == 2
+    assert screens(output).count(ROOT_ROWS[0]) == 2
 
 
 def test_discover_zero_at_where_screen_returns_to_scope_not_root():
@@ -237,7 +269,7 @@ def test_a_session_acquisition_error_is_caught_and_returns_to_the_menu():
     assert calls == []
     assert "error: TELEGRAM_API_ID is required." in screens(output)
     assert "Failed" in screens(output)
-    assert screens(output).count("1. Chats & topics (find IDs)") == 2
+    assert screens(output).count(ROOT_ROWS[0]) == 2
 
 
 def test_zero_after_an_action_exits():
@@ -635,7 +667,7 @@ def test_clear_offers_manual_entry_when_there_are_no_forum_groups():
 
 def test_bots_lists_and_prints_a_profile():
     # 6 = my bots, 1 = harrybot, 0 out of the bot screen to the list, 0 = root, 0 = exit
-    code, calls, output = run_menu([BOTS, "1", "0", "0", "0"])
+    code, calls, output = run_menu([BOTS_ROW, "1", "0", "0", "0", "0"])
 
     text = screens(output)
     assert code == 0
@@ -651,7 +683,7 @@ def test_bots_with_no_username_matches_the_existing_formatters():
     bot = BotInfo(id=99999, username=None, name="Nameless", bio=None, description=None, is_owned=True)
     session = FakeSession(bots=[bot], profile=bot)
     # 6 = my bots, 1 = the only bot, 0 = back to the list, 0 = root, 0 = exit
-    code, calls, output = run_menu([BOTS, "1", "0", "0", "0"], session=session)
+    code, calls, output = run_menu([BOTS_ROW, "1", "0", "0", "0", "0"], session=session)
 
     text = screens(output)
     assert code == 0
@@ -662,7 +694,7 @@ def test_bots_with_no_username_matches_the_existing_formatters():
 
 
 def test_bots_saves_a_profile_to_json():
-    code, calls, _output = run_menu([BOTS, "1", "2", "/tmp/bot.json", "0"])
+    code, calls, _output = run_menu([BOTS_ROW, "1", "2", "/tmp/bot.json", "0", "0"])
 
     assert calls[0].command == "bots"
     assert calls[0].bot == "12345"
@@ -671,7 +703,7 @@ def test_bots_saves_a_profile_to_json():
 
 def test_bot_edit_stages_a_name_and_applies_without_yes():
     # 4, 1 = bot, 1 = edit, 1 = Name, 2 = change, text, 8 = review & apply
-    answers = [BOTS, "1", "1", "1", "2", "Harry Two", "8", "", "0"]
+    answers = [BOTS_ROW, "1", "1", "1", "2", "Harry Two", "8", "", "0", "0"]
     code, calls, _output = run_menu(answers)
 
     args = calls[0]
@@ -683,7 +715,7 @@ def test_bot_edit_stages_a_name_and_applies_without_yes():
 
 
 def test_bot_edit_clears_a_bio_with_an_empty_string():
-    answers = [BOTS, "1", "1", "2", "3", "8", "", "0"]
+    answers = [BOTS_ROW, "1", "1", "2", "3", "8", "", "0", "0"]
     code, calls, _output = run_menu(answers)
 
     assert calls[0].bio == ""
@@ -697,7 +729,7 @@ def test_bot_edit_unset_field_skips_the_keep_change_clear_screen():
     # 4 = my bots, 1 = harrybot, 1 = edit, 2 = Bio (unset -> straight to the value
     # prompt, no keep/change/clear screen), "hello" = the typed value, 8 = apply,
     # Enter, 0 = exit.
-    answers = [BOTS, "1", "1", "2", "hello", "8", "", "0"]
+    answers = [BOTS_ROW, "1", "1", "2", "hello", "8", "", "0", "0"]
     code, calls, output = run_menu(answers, session=session)
 
     assert code == 0
@@ -708,7 +740,7 @@ def test_bot_edit_unset_field_skips_the_keep_change_clear_screen():
 def test_bot_edit_shows_current_values_and_staged_changes():
     # ... 0 = field list back -> asks first, 0 = discard (to the bot's own screen),
     # 0 = the list, 0 = root, 0 = exit
-    answers = [BOTS, "1", "1", "1", "2", "Harry Two", "0", "0", "0", "0", "0"]
+    answers = [BOTS_ROW, "1", "1", "1", "2", "Harry Two", "0", "0", "0", "0", "0", "0"]
     _code, _calls, output = run_menu(answers)
 
     text = screens(output)
@@ -721,7 +753,7 @@ def test_bot_edit_shows_current_values_and_staged_changes():
 def test_bot_edit_staging_the_name_none_is_not_shown_as_cleared():
     # "none" is the sentinel for clearing rights, not an ordinary staged value.
     # Typed as a *name* it must render as the literal value, not "(cleared)".
-    answers = [BOTS, "1", "1", "1", "2", "none", "0", "0", "0", "0", "0"]
+    answers = [BOTS_ROW, "1", "1", "1", "2", "none", "0", "0", "0", "0", "0", "0"]
     _code, _calls, output = run_menu(answers)
 
     text = screens(output)
@@ -731,7 +763,7 @@ def test_bot_edit_staging_the_name_none_is_not_shown_as_cleared():
 
 def test_bot_edit_refuses_token_fields_without_a_token():
     # ... 0 = field list back (to the bot's own screen), 0 = the list, 0 = root, 0 = exit
-    answers = [BOTS, "1", "1", "4", "0", "0", "0", "0"]
+    answers = [BOTS_ROW, "1", "1", "4", "0", "0", "0", "0", "0"]
     _code, calls, output = run_menu(answers)
 
     text = screens(output)
@@ -748,7 +780,7 @@ def test_bot_edit_rights_toggle_with_a_token():
     # 6 = group rights, 2 = change, then the toggle: post_messages is preselected
     # (row 2 of page 1), tick change_info (row 1), Continue is numbered after
     # every right (16 of them) on every page.
-    answers = [BOTS, "1", "1", "6", "2", "1", "18", "8", "", "0"]
+    answers = [BOTS_ROW, "1", "1", "6", "2", "1", "18", "8", "", "0", "0"]
     _code, calls, _output = run_menu(answers, session=session)
 
     assert calls[0].group_rights == "change_info,post_messages"
@@ -756,7 +788,7 @@ def test_bot_edit_rights_toggle_with_a_token():
 
 def test_bot_edit_clears_rights_with_none():
     session = FakeSession(bot_tokens={"harry": "12345:AAtoken"})
-    answers = [BOTS, "1", "1", "6", "3", "8", "", "0"]
+    answers = [BOTS_ROW, "1", "1", "6", "3", "8", "", "0", "0"]
     _code, calls, _output = run_menu(answers, session=session)
 
     assert calls[0].group_rights == "none"
@@ -764,7 +796,7 @@ def test_bot_edit_clears_rights_with_none():
 
 def test_bot_edit_apply_with_nothing_staged_says_so():
     # ... 0 = field list back (to the bot's own screen), 0 = the list, 0 = root, 0 = exit
-    answers = [BOTS, "1", "1", "8", "0", "0", "0", "0"]
+    answers = [BOTS_ROW, "1", "1", "8", "0", "0", "0", "0", "0"]
     _code, calls, output = run_menu(answers)
 
     assert calls == []
@@ -775,7 +807,7 @@ def test_bot_edit_zero_at_field_list_returns_to_the_bots_own_screen_not_root():
     # 4 = bots, 1 = harrybot, 1 = edit, 0 = field list back (nothing staged) ->
     # the bot's own screen, 2 = save profile (proves we landed there, not root),
     # path, Enter, 0 = exit
-    answers = [BOTS, "1", "1", "0", "2", "/tmp/bot.json", "", "0"]
+    answers = [BOTS_ROW, "1", "1", "0", "2", "/tmp/bot.json", "", "0", "0"]
     code, calls, _output = run_menu(answers)
 
     assert code == 0
@@ -883,7 +915,7 @@ def test_send_shows_a_long_message_on_one_line():
 
 def test_create_group_asks_for_a_title_and_description():
     # 4 = create, 1 = Group
-    answers = [CREATE, "1", "Hermes", "the agency", "", "0"]
+    answers = [CREATE, "1", "Hermes", "the agency", "", "0", "0"]
     code, calls, _output = run_menu(answers)
 
     assert code == 0
@@ -898,7 +930,7 @@ def test_create_group_asks_for_a_title_and_description():
 
 def test_create_forum_group_sets_forum():
     # 2 = Forum group; a blank description means none
-    answers = [CREATE, "2", "Hermes", "", "", "0"]
+    answers = [CREATE, "2", "Hermes", "", "", "0", "0"]
     code, calls, _output = run_menu(answers)
 
     assert code == 0
@@ -907,7 +939,7 @@ def test_create_forum_group_sets_forum():
 
 
 def test_create_channel_asks_for_a_broadcast():
-    answers = [CREATE, "3", "Alerts", "", "", "0"]
+    answers = [CREATE, "3", "Alerts", "", "", "0", "0"]
     code, calls, _output = run_menu(answers)
 
     assert code == 0
@@ -917,7 +949,7 @@ def test_create_channel_asks_for_a_broadcast():
 
 def test_create_topic_picks_a_forum_group_first():
     # 4 = Topic in a forum group, 1 = Hermes (the only forum group)
-    answers = [CREATE, "4", "1", "Deploys", "", "0"]
+    answers = [CREATE, "4", "1", "Deploys", "", "0", "0"]
     code, calls, _output = run_menu(answers)
 
     assert code == 0
@@ -928,7 +960,7 @@ def test_create_topic_picks_a_forum_group_first():
 
 
 def test_create_cancelling_the_title_returns_to_the_kind_list():
-    answers = [CREATE, "1", "", "0", "0"]
+    answers = [CREATE, "1", "", "0", "0", "0"]
     code, calls, output = run_menu(answers)
 
     assert code == 0
@@ -1099,7 +1131,7 @@ def test_send_tweak_keeps_the_message_files_and_topic():
 def test_create_offers_another_instead_of_a_rerun():
     # 4 = create, 1 = group, "Team", blank description, 1 = create another -> the
     # kind list, 3 = channel, "News", blank description, Enter, 0
-    answers = [CREATE, "1", "Team", "", "1", "3", "News", "", "", "0"]
+    answers = [CREATE, "1", "Team", "", "1", "3", "News", "", "", "0", "0"]
     _code, calls, output = run_menu(answers)
 
     assert [(call.create_kind, call.title) for call in calls] == [("group", "Team"), ("channel", "News")]
@@ -1191,7 +1223,7 @@ def test_clear_more_topics_after_the_real_pass_starts_from_a_clean_ticker():
 
 def test_bots_saves_the_whole_bot_list_to_json():
     # 6 = my bots, 2 = save the list (row after the one bot), path, Enter, 0
-    _code, calls, output = run_menu([BOTS, "2", "/tmp/bots.json", "", "0"])
+    _code, calls, output = run_menu([BOTS_ROW, "2", "/tmp/bots.json", "", "0", "0"])
 
     assert "2. Save the bot list to a JSON file" in screens(output)
     assert calls[0].command == "bots"
@@ -1203,7 +1235,7 @@ def test_bots_typed_username_shows_a_bot_you_do_not_own_read_only():
     other = BotInfo(id=777, username="otherbot", name="Other", bio="Not mine", description=None, is_owned=False)
     session = FakeSession(profile=other)
     # 6 = my bots, 3 = type a bot, "@otherbot", 0 = back to the list, 0 = root, 0 = exit
-    _code, calls, output = run_menu([BOTS, "3", "@otherbot", "0", "0", "0"], session=session)
+    _code, calls, output = run_menu([BOTS_ROW, "3", "@otherbot", "0", "0", "0", "0"], session=session)
 
     text = screens(output)
     assert calls == []
@@ -1219,7 +1251,7 @@ def test_bots_typo_in_a_typed_username_returns_to_the_list_not_the_root():
         async def bot_profile(self, reference):
             raise ValueError(f"{reference!r} is not a bot.")
 
-    _code, calls, output = run_menu([BOTS, "3", "nope", "0", "0"], session=Session())
+    _code, calls, output = run_menu([BOTS_ROW, "3", "nope", "0", "0", "0"], session=Session())
 
     text = screens(output)
     assert calls == []
@@ -1229,7 +1261,7 @@ def test_bots_typo_in_a_typed_username_returns_to_the_list_not_the_root():
 
 def test_bots_with_none_of_your_own_still_offers_the_lookup():
     session = FakeSession(bots=[])
-    _code, calls, output = run_menu([BOTS, "0", "0"], session=session)
+    _code, calls, output = run_menu([BOTS_ROW, "0", "0", "0"], session=session)
 
     text = screens(output)
     assert calls == []
@@ -1248,7 +1280,7 @@ def test_bots_typed_nickname_resolves_through_the_token_like_the_flags_do():
             return self._profile
 
     session = Session()
-    _code, _calls, _output = run_menu([BOTS, "3", "harry", "0", "0", "0"], session=session)
+    _code, _calls, _output = run_menu([BOTS_ROW, "3", "harry", "0", "0", "0", "0"], session=session)
 
     # The nickname never reaches Telegram: the token's own bot id does.
     assert session.references == ["12345"]
@@ -1267,7 +1299,7 @@ def test_bot_edit_more_fetches_the_profile_again():
     session = Session()
     # 6, 1 = harrybot, 1 = edit, 1 = name, 2 = change, "Harry Two", 8 = apply,
     # 1 = edit more (fresh profile), 0 = field list back, 0 = the list, 0 = root, 0
-    answers = [BOTS, "1", "1", "1", "2", "Harry Two", "8", "1", "0", "0", "0", "0"]
+    answers = [BOTS_ROW, "1", "1", "1", "2", "Harry Two", "8", "1", "0", "0", "0", "0", "0"]
     _code, calls, output = run_menu(answers, session=session)
 
     assert calls[0].name == "Harry Two"
@@ -1289,7 +1321,7 @@ def test_every_screen_below_the_root_carries_its_trail():
     assert "Main › Search › Hermes › From\n" in text
 
     # 6 = my bots, 1 = harrybot, 1 = edit, 1 = name, then back out four times and exit
-    _code, _calls, output = run_menu([BOTS, "1", "1", "1", "0", "0", "0", "0", "0"])
+    _code, _calls, output = run_menu([BOTS_ROW, "1", "1", "1", "0", "0", "0", "0", "0", "0"])
     text = screens(output)
     assert "Main › My bots\n" in text
     assert "Main › My bots › @harrybot\n" in text
@@ -1329,7 +1361,7 @@ def test_run_menu_defaults_to_the_ui_reader_and_writer(monkeypatch):
 
 def test_delete_flow_dry_runs_before_offering_execute():
     # Delete > a group or channel > Forum groups > Hermes > for real > exit
-    _code, calls, _output = run_menu([DELETE, "1", "1", "1", "1", "0"])
+    _code, calls, _output = run_menu([DELETE, "1", "1", "1", "1", "0", "0"])
 
     assert [call.command for call in calls] == ["delete", "delete"]
     assert calls[0].execute is False
@@ -1340,7 +1372,7 @@ def test_delete_flow_dry_runs_before_offering_execute():
 
 def test_delete_flow_knows_a_channel_from_a_group():
     # Delete > a group or channel > Channels > Alerts > for real > exit
-    _code, calls, _output = run_menu([DELETE, "1", "2", "1", "1", "0"])
+    _code, calls, _output = run_menu([DELETE, "1", "2", "1", "1", "0", "0"])
 
     assert calls[1].delete_kind == "channel"
     assert calls[1].chat == "-100222"
@@ -1348,7 +1380,7 @@ def test_delete_flow_knows_a_channel_from_a_group():
 
 def test_delete_flow_deletes_a_topic():
     # Delete > a topic > Hermes > Deploys > for real > exit
-    _code, calls, _output = run_menu([DELETE, "2", "1", "1", "1", "0"])
+    _code, calls, _output = run_menu([DELETE, "2", "1", "1", "1", "0", "0"])
 
     assert calls[1].delete_kind == "topic"
     assert calls[1].topic == 141
@@ -1356,7 +1388,7 @@ def test_delete_flow_deletes_a_topic():
 
 
 def test_delete_flow_backing_out_never_executes():
-    _code, calls, _output = run_menu([DELETE, "1", "1", "1", "0", "0", "0", "0"])
+    _code, calls, _output = run_menu([DELETE, "1", "1", "1", "0", "0", "0", "0", "0"])
 
     executed = [call for call in calls if getattr(call, "execute", False)]
     assert executed == []
@@ -1364,14 +1396,14 @@ def test_delete_flow_backing_out_never_executes():
 
 def test_delete_flow_says_the_title_prompt_is_on_the_next_screen():
     """The old label read as "type it here", and that is what a tester did."""
-    _code, _calls, output = run_menu([DELETE, "1", "1", "1", "1", "0"])
+    _code, _calls, output = run_menu([DELETE, "1", "1", "1", "1", "0", "0"])
 
     assert "the next screen asks for its exact title" in screens(output)
 
 
 def test_delete_flow_refuses_a_chat_create_could_not_make_back():
     # Direct chats > Mum: nothing this tool can create, so nothing it will delete.
-    _code, calls, output = run_menu([DELETE, "1", "3", "1", "0"])
+    _code, calls, output = run_menu([DELETE, "1", "3", "1", "0", "0"])
 
     assert calls == []
     assert "does not delete" in screens(output)
@@ -1380,7 +1412,159 @@ def test_delete_flow_refuses_a_chat_create_could_not_make_back():
 def test_delete_flow_asks_which_kind_for_a_typed_reference():
     # A typed reference has not been looked up, so the menu asks instead of guessing.
     # Delete > group or channel > Type an ID (row 4) > @newchat > Channel > for real > exit
-    _code, calls, _output = run_menu([DELETE, "1", "4", "@newchat", "2", "1", "0"])
+    _code, calls, _output = run_menu([DELETE, "1", "4", "@newchat", "2", "1", "0", "0"])
 
     assert calls[1].delete_kind == "channel"
     assert calls[1].chat == "@newchat"
+
+
+# -- the nine-row root (spec section 14), landed on the profiles card ---------
+
+
+def test_the_root_shows_all_nine_rows_including_the_two_a_later_version_fills():
+    _code, _calls, output = run_menu(["0"])
+
+    text = screens(output)
+    # 6 and 7 hold their numbers now so that nothing above or below them moves
+    # again when Manage and Watch arrive. Gate G6: this grouping, once.
+    assert "6. Manage (admins, members, invites, settings)" in text
+    assert "7. Watch (rules, runner, review queue)" in text
+
+
+def test_manage_says_it_arrives_later_and_comes_straight_back():
+    _code, calls, output = run_menu([MANAGE, "", "0"])
+
+    text = screens(output)
+    assert calls == [], "a row with nothing behind it runs nothing"
+    assert "arrive in a later version" in text
+    assert text.count(ROOT_ROWS[0]) == 2, "and lands back on the root"
+
+
+def test_watch_says_it_arrives_later_too():
+    _code, calls, output = run_menu([WATCH, "", "0"])
+
+    assert calls == []
+    assert "Rules, the runner and the review queue arrive in a later version." in screens(output)
+
+
+def test_build_holds_create_and_delete():
+    _code, _calls, output = run_menu([BUILD, "0", "0"])
+
+    text = screens(output)
+    assert "1. Create a group, channel, or topic" in text
+    assert "2. Delete a group, channel, or topic" in text
+
+
+def test_identity_lists_the_profile_rows_and_my_bots():
+    _code, _calls, output = run_menu([IDENTITY, "0", "0"])
+
+    text = screens(output)
+    assert "1. Profiles on this machine" in text
+    assert "2. Log in (phone and code)" in text
+    assert "3. Log in by scanning a QR code" in text
+    assert "4. Log out" in text
+    assert "5. Move the pre-profile session into a profile" in text
+    assert "6. My bots" in text
+
+
+def test_identity_runs_profiles_without_the_menus_connection():
+    session = FakeSession()
+
+    _code, calls, _output = run_menu([PROFILES, "", "0"], session=session)
+
+    assert calls[0].command == "profiles"
+    # It reads the store and opens nothing, so the menu keeps its connection --
+    # and with it the identity line every screen after this one still carries.
+    assert session.released == 0
+    assert session.banner is not None
+
+
+def test_identity_hands_the_session_file_back_before_a_login():
+    # `auth` opens its own client on the file the menu is holding, and one
+    # session file is one connection. Afterwards the caches go too: a login can
+    # change which account this is.
+    session = FakeSession()
+
+    _code, calls, _output = run_menu([LOG_IN, "", "0"], session=session)
+
+    assert calls[0].command == "auth"
+    assert session.released == 2
+    assert session.banner is None
+
+
+def test_identity_log_in_asks_for_neither_qr_nor_logout():
+    _code, calls, _output = run_menu([LOG_IN, "", "0"])
+
+    args = calls[0]
+    assert args.command == "auth"
+    assert (args.qr, args.logout, args.migrate) == (False, False, False)
+
+
+def test_identity_qr_row_sets_the_qr_flag():
+    _code, calls, _output = run_menu([LOG_IN_QR, "", "0"])
+
+    assert (calls[0].qr, calls[0].logout, calls[0].migrate) == (True, False, False)
+
+
+def test_identity_log_out_row_sets_the_logout_flag():
+    _code, calls, _output = run_menu([LOG_OUT, "", "0"])
+
+    assert (calls[0].qr, calls[0].logout, calls[0].migrate) == (False, True, False)
+
+
+def test_identity_migrate_row_sets_the_migrate_flag():
+    _code, calls, _output = run_menu([MIGRATE, "", "0"])
+
+    assert (calls[0].qr, calls[0].logout, calls[0].migrate) == (False, False, True)
+
+
+def test_the_menu_never_asks_auth_to_skip_a_gate():
+    # Section 5.2 and the repo's own rule: the menu is not a shorter path past a
+    # gate. `auth` has no --yes, and nothing the menu builds may invent one.
+    for row in (LOG_IN, LOG_IN_QR, LOG_OUT, MIGRATE):
+        _code, calls, _output = run_menu([row, "", "0"])
+        assert not getattr(calls[0], "yes", False), row
+        assert not getattr(calls[0], "execute", False), row
+
+
+# -- the banner (section 5.1, gate answer 2a) --------------------------------
+
+
+def test_every_screen_carries_the_acting_identity_once_there_is_a_connection():
+    _code, _calls, output = run_menu([DISCOVER, "0", "0"])
+
+    for screen in output:
+        if "\n" + menu.RULE in screen:
+            lines = screen.split("\n")
+            assert lines[1] == "Acting as: Sven (@sven) · account", screen
+
+
+def test_the_root_shows_no_identity_before_anything_has_connected():
+    # A bare `telegram-tools` opens without credentials, and there is nothing to
+    # name until something logs in. That is answer 2a to the card's gate.
+    session = FakeSession()
+    session.banner = None
+
+    _code, _calls, output = run_menu(["0"], session=session)
+
+    assert "Acting as:" not in screens(output)
+    assert screens(output).split("\n")[1] == menu.RULE
+
+
+def test_the_banner_goes_between_the_title_and_the_rule():
+    session = FakeSession()
+
+    _code, _calls, output = run_menu([DISCOVER, "0", "0"], session=session)
+
+    first = output[0].split("\n")
+    assert first[0] == "telegram-tools"
+    assert first[1].startswith("Acting as: ")
+    assert first[2] == menu.RULE
+
+
+def test_a_command_s_own_output_is_not_treated_as_a_screen():
+    # Only a title over the rule gets the line; anything a command printed goes
+    # through untouched, rule of its own included.
+    plain = "chat  -100111\n" + menu.RULE + "\nmore output"
+
+    assert menu._screen_with_banner(plain, "Acting as: X · account") == plain

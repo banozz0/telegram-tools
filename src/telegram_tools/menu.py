@@ -11,10 +11,13 @@ from telegram_tools import cli
 from telegram_tools.bots import IMPLICIT_OTHER_RIGHT, format_bot_profile, get_bot_profile, list_bots, resolve_bot, right_names
 from telegram_tools.client import SessionInUseError, create_client, start_client
 from telegram_tools._core.columns import cell
+from telegram_tools._core.identity import banner as identity_banner
+from telegram_tools.adapters import AccountIdentity
+from telegram_tools import profiles as profile_store
 from telegram_tools.config import ConfigError, load_config, lookup_bot_token, resolve_bot_token
 from telegram_tools.delete import kind_for_type
 from telegram_tools.discovery import list_dialog_choices
-from telegram_tools.prompts import BACK, CLEAR, EXIT, Extra, after_action, after_run, ask_int, ask_lines, ask_text, choose, edit_field, pick, pick_many
+from telegram_tools.prompts import BACK, CLEAR, EXIT, RULE, Extra, after_action, after_run, ask_int, ask_lines, ask_text, choose, edit_field, pick, pick_many
 from telegram_tools.resolver import resolve_chat
 from telegram_tools.topics import get_forum_topics
 from telegram_tools import ui
@@ -27,16 +30,27 @@ MENU_ERRORS = (ConfigError, SessionInUseError, ValueError, OSError, RPCError)
 
 ROOT_TITLE = "telegram-tools"
 MAIN = "Main"
+# The nine-row root of spec section 14, landed once so nobody learns new numbers
+# twice. Rows 6 and 7 name capabilities a later version brings; they keep their
+# numbers now so that every other row keeps its own when those arrive. A row's
+# hint names what is behind it *today* -- a hint that promises something the row
+# cannot do is worse than no hint.
 ROOT_ITEMS = (
-    "Chats & topics (find IDs)",
-    "Search / export messages",
-    "Send a message",
-    "Create a group, channel, or topic",
-    "Delete a group, channel, or topic",
-    "Clear topic messages",
-    "My bots",
+    "Find IDs (chats, topics)",
+    "Read (search, export)",
+    "Write (send)",
+    "Build (create, delete)",
+    "Clear messages",
+    "Manage (admins, members, invites, settings)",
+    "Watch (rules, runner, review queue)",
+    "Identity (profiles, my bots)",
     "Check setup",
 )
+# What rows 6 and 7 say when picked, by row. One screen, one line, straight back.
+LATER = {
+    5: ("Manage", "Admins, members, invites and chat settings arrive in a later version."),
+    6: ("Watch", "Rules, the runner and the review queue arrive in a later version."),
+}
 
 
 class MenuSession:
@@ -47,21 +61,28 @@ class MenuSession:
     refresh.
     """
 
-    def __init__(self, config=None) -> None:
+    def __init__(self, config=None, profile: str | None = None) -> None:
         self._config = config
+        self._profile = profile
         self._client = None
         self._chats: list[Any] | None = None
         self._bots: list[Any] | None = None
+        # The `Acting as:` line every screen carries once there is a connection
+        # to learn it from. None until then, which is what keeps a bare
+        # `telegram-tools` from needing a login to show its root.
+        self.banner: str | None = None
 
     @property
     def config(self):
         if self._config is None:
-            self._config = load_config()
+            self._config = load_config(profile=self._profile)
         return self._config
 
     async def client(self):
         if self._client is None:
             self._client = await start_client(create_client(self.config))
+            provider = await AccountIdentity.open(self._client, getattr(self.config, "profile", "default"))
+            self.banner = identity_banner(provider.identity())
         return self._client
 
     async def chats(self):
@@ -94,16 +115,34 @@ class MenuSession:
             await self._client.disconnect()
             self._client = None
 
+    async def release(self) -> None:
+        """Drop the connection and everything learned through it.
+
+        `auth` opens its own client, and one session file is one connection, so
+        logging in or out from the menu has to hand the file back first. The
+        caches go with it: after a login the account may not be the same one.
+        """
+        await self.close()
+        self._config = None
+        self._chats = None
+        self._bots = None
+        self.banner = None
+
 
 def _namespace(**kwargs) -> argparse.Namespace:
     return argparse.Namespace(**kwargs)
 
 
-async def _call(args, *, session, runner, write) -> int | None:
+async def _call(args, *, session, runner, write, connect: bool = True) -> int | None:
     """Run one action. Returns its exit code, or None when it errored and the
-    message is already printed."""
+    message is already printed.
+
+    `connect=False` runs it against a client of its own: `auth` writes the very
+    session file the menu is holding open, and two clients on one file is the
+    lock error this menu exists to avoid.
+    """
     try:
-        client = await session.client() if session is not None else None
+        client = await session.client() if session is not None and connect else None
         config = session.config if session is not None else None
         return await runner(args, client=client, config=config)
     except MENU_ERRORS as exc:
@@ -121,14 +160,14 @@ RUN_AGAIN = (AGAIN, "Run it again")
 TWEAK = (STAY, "Tweak it")
 
 
-async def _act(args, *, session, runner, read, write, trail: str = MAIN, rows=(RUN_AGAIN, TWEAK)) -> Any:
+async def _act(args, *, session, runner, read, write, trail: str = MAIN, rows=(RUN_AGAIN, TWEAK), connect: bool = True) -> Any:
     """Run one action, then the after-run screen. Returns STAY, MENU or EXIT.
 
     The title says what happened: Done on exit code 0, Not done when a confirm
     was declined (the CLI returns 1), Failed after a printed error.
     """
     while True:
-        code = await _call(args, session=session, runner=runner, write=write)
+        code = await _call(args, session=session, runner=runner, write=write, connect=connect)
         outcome = "Done" if code == 0 else ("Failed" if code is None else "Not done")
         result = after_run(read=read, write=write, title=crumb(trail, outcome), rows=rows)
         if result is not AGAIN:
@@ -303,7 +342,8 @@ async def _flow_discover(*, session, runner, read, write) -> bool:
 async def _flow_doctor(*, session, runner, read, write) -> bool:
     # No session: doctor never opens a connection, which is the point of it. And
     # no after-run screen: running doctor again tells you nothing new.
-    await _call(_namespace(command="doctor"), session=None, runner=runner, write=write)
+    profile = getattr(session.config, "profile", None) if session is not None else None
+    await _call(_namespace(command="doctor", profile=profile), session=None, runner=runner, write=write)
     return after_action(read=read, write=write)
 
 
@@ -1139,7 +1179,130 @@ async def _flow_bot_screen(profile, *, session, runner, read, write, trail: str)
         return result
 
 
-async def run_menu(*, read=None, write=None, session=None, runner=None) -> int:
+# -- the grouped rows ------------------------------------------------------
+
+
+async def _flow_build(*, session, runner, read, write) -> bool:
+    """Row 4. Two things that make and unmake the same objects, under one roof."""
+    trail = crumb(MAIN, "Build")
+    while True:
+        choice = choose(
+            ["Create a group, channel, or topic", "Delete a group, channel, or topic"],
+            title=trail,
+            read=read,
+            write=write,
+        )
+        if choice is BACK:
+            return True
+        flow = _flow_create if choice == 0 else _flow_delete
+        if not await flow(session=session, runner=runner, read=read, write=write):
+            return False
+
+
+def _flow_later(index: int):
+    """Rows 6 and 7: a number that is reserved rather than a number that lies.
+
+    They are on the root now so that nothing above or below them ever moves
+    again. Picking one says what it will hold and comes straight back.
+    """
+
+    async def flow(*, session, runner, read, write) -> bool:
+        name, line = LATER[index]
+        # Built as one screen rather than four writes: a screen is a title, the
+        # rule and rows ending in 0, and only that shape carries the banner.
+        write("\n".join([crumb(MAIN, name), RULE, line, "0. Back"]))
+        read("Choose: ")
+        return True
+
+    return flow
+
+
+IDENTITY_ROWS = (
+    "Profiles on this machine",
+    "Log in (phone and code)",
+    "Log in by scanning a QR code",
+    "Log out",
+    "Move the pre-profile session into a profile",
+    "My bots",
+)
+
+
+async def _flow_identity(*, session, runner, read, write) -> bool:
+    """Row 8. Which login this is, and the bots that login owns.
+
+    Every row but the last runs against a client of its own: `auth` writes the
+    session file the menu holds open, and `profiles` needs no connection at all.
+    Afterwards the menu drops what it learned, because a login can change who
+    the account is.
+    """
+    trail = crumb(MAIN, "Identity")
+    while True:
+        choice = choose(list(IDENTITY_ROWS), title=trail, read=read, write=write)
+        if choice is BACK:
+            return True
+        if choice == 5:
+            if not await _flow_bots(session=session, runner=runner, read=read, write=write):
+                return False
+            continue
+
+        profile = getattr(session.config, "profile", profile_store.DEFAULT_PROFILE)
+        if choice == 0:
+            args = _namespace(command="profiles", profile=profile)
+            label = "Profiles"
+        else:
+            args = _namespace(
+                command="auth",
+                profile=profile,
+                qr=choice == 2,
+                logout=choice == 3,
+                migrate=choice == 4,
+            )
+            label = IDENTITY_ROWS[choice]
+
+        # `auth` opens its own client on the session file the menu is holding,
+        # so the file has to be free first, and afterwards what the menu cached
+        # was learned as whoever was logged in before this screen. `profiles`
+        # reads the store and opens nothing, so it costs the menu neither.
+        if choice != 0:
+            await session.release()
+        result = await _act(
+            args,
+            session=session,
+            runner=runner,
+            read=read,
+            write=write,
+            trail=crumb(trail, label),
+            rows=((STAY, "Back to Identity"),),
+            connect=False,
+        )
+        if choice != 0:
+            await session.release()
+        if result is not STAY:
+            return result is not EXIT
+
+
+# -- the loop --------------------------------------------------------------
+
+
+def _screen_with_banner(text: str, banner: str | None) -> str:
+    """A screen with the acting identity between its title and its rule.
+
+    Section 5.1 puts the line under the trail, and `prompts._screen` is the one
+    shape that has one: a title, the rule, then rows. Anything else a command
+    printed passes through untouched.
+    """
+    if banner is None:
+        return text
+    lines = text.split("\n")
+    # Title, rule, rows, and a last row that is always 0. Requiring the 0 as well
+    # as the rule is what keeps a command's own output -- which can print a rule
+    # of its own on its second line -- from being decorated as a screen.
+    if len(lines) < 3 or lines[1] != RULE or not lines[-1].startswith("0. "):
+        return text
+    return "\n".join([lines[0], banner, *lines[1:]])
+
+
+async def run_menu(*, read=None, write=None, session=None, runner=None, profile=None) -> int:
     """The looping menu. Returns 0 on a normal exit.
 
     The exit code belongs to the session, not to any one action inside it: a
@@ -1151,17 +1314,22 @@ async def run_menu(*, read=None, write=None, session=None, runner=None) -> int:
     gets plain text.
     """
     read = ui.reader() if read is None else read
-    write = ui.writer() if write is None else write
-    session = session if session is not None else MenuSession()
+    painted = ui.writer() if write is None else write
+    session = session if session is not None else MenuSession(profile=profile)
     runner = runner if runner is not None else cli.run
+
+    def write(text: Any = "") -> None:
+        painted(_screen_with_banner(str(text), session.banner))
+
     flows = (
         _flow_discover,
         _flow_search,
         _flow_send,
-        _flow_create,
-        _flow_delete,
+        _flow_build,
         _flow_clear,
-        _flow_bots,
+        _flow_later(5),
+        _flow_later(6),
+        _flow_identity,
         _flow_doctor,
     )
 

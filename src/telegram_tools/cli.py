@@ -1189,7 +1189,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             # top-level import either way closes the cycle.
             from telegram_tools.menu import run_menu
 
-            return asyncio.run(run_menu())
+            # `--profile` reaches the menu too: it decides which login the
+            # whole session acts as, and the banner names it on every screen.
+            return asyncio.run(run_menu(profile=getattr(args, "profile", None)))
         return report.finish(asyncio.run(run(args, report=report)))
     except (KeyboardInterrupt, EOFError) as exc:
         if report.machine:
