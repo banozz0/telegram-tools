@@ -556,7 +556,7 @@ Exit codes, unchanged apart from one addition:
 | 0 | done — `ok`, `empty`, `dry_run` |
 | 1 | not done — cancelled at a gate, a declined confirm, `partial` (`doctor` with a failed check) |
 | 2 | refused — usage, config, permission, a platform error |
-| 3 | **new:** the command asks for confirmation and there is no terminal to ask on. Under `--json`, and for `review approve` and `review accept` in either mode; `error.hint` is the same command for a human to run |
+| 3 | **new:** the command asks for confirmation and there is no terminal to ask on. Under `--json`, and for `review approve`, `review accept` and `review reject` in either mode; `error.hint` is the same command for a human to run |
 | 130 | interrupted |
 
 `discover --json out.json` and `bots --json out.json` still write those files

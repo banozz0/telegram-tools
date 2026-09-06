@@ -333,8 +333,9 @@ names the files).
   read-only half and is fine to run.
 - **`review approve`, `review accept`, `review reject`, `review retry`** — the two
   human decisions that download and keep a file, and the two that undo or redo one.
-  Rule 11. Each refuses without a terminal; `review list` and `review status` are the
-  read-only half and are fine to run.
+  Rule 11. `approve`, `accept` and `reject` refuse without a terminal; `retry` asks
+  nothing because its yes was given at approve, and it still starts a fetch. `review
+  list` and `review status` are the read-only half and are fine to run.
 - **`archive retention` and `archive forget`** — they remove rows from the user's
   local archive. Dry-run is the default and executing needs `--execute` plus the
   scope's exact title typed at a prompt, with no `--yes`; hand the user the command.

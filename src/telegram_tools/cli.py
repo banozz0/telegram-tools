@@ -1022,11 +1022,12 @@ async def _run_review(args, config, *, client=None, report: Reporter) -> int:
         queue = review_ops.queue_for(archive)
         if kind == "list":
             rows = queue.list(kind=getattr(args, "kind", None), state=getattr(args, "state", None))
-            for row in rows:
-                report.record(row.to_dict())
+            entries = review_ops.describe_rows(archive, rows)
+            for entry in entries:
+                report.record(entry)
             if not report.machine:
-                print(review_ops.format_queue(rows))
-            report.result({"count": len(rows), "candidates": [row.to_dict() for row in rows]}, status="ok" if rows else "empty")
+                print(review_ops.format_queue(entries))
+            report.result({"count": len(entries), "candidates": entries}, status="ok" if entries else "empty")
             return 0
         if kind == "status":
             status = review_ops.status_of(queue)

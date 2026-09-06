@@ -131,18 +131,42 @@ def _where(row: QueueRow) -> str:
     return f"{row.source_rid}#{row.source_message_id}"
 
 
-def format_queue(rows: Sequence[QueueRow]) -> str:
-    """One line per candidate: id, kind, state, source, sender, the thing itself, what was claimed."""
-    if not rows:
+def describe_rows(archive: Archive, rows: Sequence[QueueRow]) -> list[dict[str, Any]]:
+    """Each candidate as `review list` reports it (section 9.1): the queue row plus the
+    source message's date and its location path, both read from the archive. `created_at`
+    is when the candidate was queued, which is not when the message was sent."""
+    entries = []
+    for row in rows:
+        found = archive.connection.execute(
+            "SELECT date FROM messages WHERE rid = ? AND message_id = ?", (row.source_rid, row.source_message_id)
+        ).fetchone()
+        entries.append(
+            {
+                **row.to_dict(),
+                "message_date": found["date"] if found else None,
+                "location": list(_target_for(archive, row.source_rid).path),
+            }
+        )
+    return entries
+
+
+def format_queue(entries: Sequence[dict[str, Any]]) -> str:
+    """One line per candidate: id, kind, state, the message's date, its location, sender,
+    the thing itself, what was claimed. `entries` are `describe_rows` dicts."""
+    if not entries:
         return "The review queue is empty."
     lines = ["Review queue", "--------------------------------------------"]
-    for row in rows:
+    for entry in entries:
+        what = entry["url"] if entry["kind"] == "link" else (entry.get("display_name") or entry.get("locator") or "")
+        claimed = entry["claimed_type"] or "?"
+        if entry["claimed_size"] is not None:
+            claimed += f" {human_bytes(entry['claimed_size'])}"
         lines.append(
-            f"{row.manifest_id}\t{row.kind}\t{row.state}\t{_where(row)}\t{row.created_at}\t"
-            f"sender={row.sender}\t{_what(row)}\t{_claimed(row)}"
-            + (f"\tverdict={row.verdict}" if row.verdict else "")
+            f"{entry['manifest_id']}\t{entry['kind']}\t{entry['state']}\t{entry['source_rid']}#{entry['source_message_id']}\t"
+            f"{entry['message_date'] or '-'}\t{' › '.join(entry['location'])}\tsender={entry['sender']}\t{what}\t{claimed}"
+            + (f"\tverdict={entry['verdict']}" if entry["verdict"] else "")
         )
-    lines.append(f"{len(rows)} candidate(s). Nothing is fetched until you run review approve.")
+    lines.append(f"{len(entries)} candidate(s). Nothing is fetched until you run review approve.")
     return "\n".join(lines)
 
 
@@ -153,7 +177,7 @@ def format_candidates(rows: Sequence[QueueRow], *, heading: str) -> str:
         lines.append(f"{row.manifest_id}  {row.kind}  {row.state}")
         lines.append(f"    {'URL as written' if row.kind == 'link' else 'file'}: {_what(row)}")
         lines.append(f"    claimed: {_claimed(row)}")
-        lines.append(f"    from: {_where(row)}  sender={row.sender}  {row.created_at}")
+        lines.append(f"    from: {_where(row)}  sender={row.sender}  queued {row.created_at}")
         if row.verdict:
             lines.append(f"    verdict: {row.verdict}" + (f" ({row.last_error})" if row.last_error else ""))
         if row.sha256:
@@ -286,6 +310,7 @@ __all__ = [
     "ReviewError",
     "approval_for",
     "build_pipeline",
+    "describe_rows",
     "format_accepted",
     "format_candidates",
     "format_queue",

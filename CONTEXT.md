@@ -199,9 +199,10 @@ The terms this codebase uses, and the boundaries they imply.
   `review.py` is this tool's side: the pipeline with this tool's fetchers, the
   screens, the plans. `list` and `status` are queries; `approve` and `retry`
   are the only commands here that contact a host, and only after the answer.
-- **Terminal gate** — the review queue's stricter `prompt_y`: both human moves
-  refuse without a tty in *either* mode (`cli._review_io`, `APPROVAL_REQUIRED`,
-  exit 3), where every other gate checks the tty only under `--json`. A `y`
+- **Terminal gate** — the review queue's stricter `prompt_y`: both human moves,
+  and `reject` with them, refuse without a tty in *either* mode
+  (`cli._review_io`, `APPROVAL_REQUIRED`, exit 3), where every other gate checks
+  the tty only under `--json`. `retry` asks nothing: its yes was given at approve. A `y`
   piped into stdin is not a person, and `Approval.interactive` carries the
   tty check rather than the answer.
 - **Media fetcher** — `adapters/media.TelegramMediaFetcher`, this tool's

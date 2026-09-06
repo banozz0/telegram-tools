@@ -371,6 +371,11 @@ def test_review_list_shows_the_url_as_written_and_makes_no_request(run_cli, caps
     envelope = envelope_of(out)
     assert envelope["result"]["count"] == 2
     assert {row["url"] for row in envelope["result"]["candidates"]} == {URL, None}
+    link = next(row for row in envelope["result"]["candidates"] if row["kind"] == "link")
+    # Section 9.1: the source message's date and its location path, not the enqueue time.
+    assert link["message_date"] == "2026-09-01T05:00:00Z"
+    assert link["location"] == ["Alerts"]
+    assert link["created_at"] != link["message_date"]
     assert opener.requests == [], "listing resolved no redirect and contacted no host"
 
     code, out, _err, _fake = run_cli(["--json", "review", "list", "--kind", "link", "--state", "queued"], capsys=capsys)
@@ -378,6 +383,7 @@ def test_review_list_shows_the_url_as_written_and_makes_no_request(run_cli, caps
 
     code, out, _err, _fake = run_cli(["review", "list"], capsys=capsys)
     assert "Review queue" in out and URL in out and "report.bin" in out
+    assert "2026-09-01T05:00:00Z\tAlerts\tsender=Harry" in out
     assert "Nothing is fetched until you run review approve" in out
 
 
