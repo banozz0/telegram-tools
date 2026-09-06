@@ -533,20 +533,35 @@ async def _run_archive_sync(client, args, *, report: Reporter) -> int:
     identity = await _acting(client, report)
     report.show_banner()
     source = TelegramArchiveSource(client, only=getattr(args, "scope", None))
+    full = bool(getattr(args, "full", False))
+    deleted: dict[str, int] = {}
     with archive_store.open_archive() as archive:
         result = await archive.sync(
             source,
             identity,
             since=getattr(args, "since", None),
-            full=bool(getattr(args, "full", False)),
+            full=full,
             progress=report.info,
         )
+        for scope in result.scopes:
+            if scope.status == "ok" and full and scope.rid not in source.floored:
+                # A full walk saw everything that exists, so a live row it did
+                # not serve is a message Telegram no longer has.
+                gone = archive_store.mark_missing_deleted(archive, scope.rid, source.seen.get(scope.rid, set()))
+                if gone:
+                    deleted[scope.rid] = gone
+                    report.info(f"{scope.rid} {scope.title}: {gone} marked deleted".rstrip())
+            elif scope.status == "failed" and archive_store.is_rate_limited(scope.error):
+                archive.record_coverage(scope.rid, identity.id, visible=True, skipped_reason="rate_limited")
     report.waited_ms += source.waited_ms
     if not report.machine:
         print(archive_store.format_coverage(result))
     for scope in result.scopes:
         report.record(scope.to_dict())
-    report.result({**result.to_dict(), "waited_ms": source.waited_ms}, status=result.status)
+    report.result(
+        {**result.to_dict(), "deleted": deleted, "waited_ms": source.waited_ms},
+        status=result.status,
+    )
     return 1 if result.status == "partial" else 0
 
 
@@ -634,9 +649,16 @@ async def _run_archive_prune(args, config, *, report: Reporter) -> int:
             return 1
 
         # Re-derive after the gate: the row the title was typed for has to be
-        # the row still there. A retention plan's cutoff moves with the clock,
-        # so the target is compared, not the plan id.
-        fresh = archive.scope_target(target.rid) if args.scope else target
+        # the row still there, under the same title. A retention plan's cutoff
+        # moves with the clock, so the target is compared, not the plan id; an
+        # identity is re-read from its own row the same way.
+        if args.scope:
+            fresh = archive.scope_target(target.rid)
+        else:
+            row = archive.connection.execute(
+                "SELECT label FROM identities WHERE identity_id = ?", (args.identity,)
+            ).fetchone()
+            fresh = None if row is None else Target(rid=target.rid, kind=target.kind, title=row["label"], path=target.path)
         if fresh is None or fresh.title != target.title:
             raise CommandError(
                 "The scope changed between the preview and the execution.",

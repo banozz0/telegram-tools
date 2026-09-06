@@ -167,6 +167,11 @@ class TelegramArchiveSource:
         self._scopes: dict[str, _Scope] = {}
         # Every flood wait this source slept, in milliseconds, for `meta.waited_ms`.
         self.waited_ms = 0
+        # The ids each scope served this run. Telegram's history never says what
+        # was deleted, so a full walk finds deletions by what it did *not* see,
+        # and this is what `archive sync --full` compares the store against.
+        self.seen: dict[str, set[int]] = {}
+        self.floored: set[str] = set()
 
     # -- scopes ------------------------------------------------------------
 
@@ -289,8 +294,11 @@ class TelegramArchiveSource:
         if pending is None:
             return
         # The last record of the run: the new top is known, and everything
-        # below `low` has either been walked now or was walked before.
-        yield {**pending, "cursor": Cursor(top, low if low is not None else top, True).encode()}
+        # below `low` has either been walked now or was walked before -- unless
+        # the walk stopped at a `since` floor, in which case the history below
+        # is still there and the cursor stays open for a later run to continue.
+        done = scope.rid not in self.floored
+        yield {**pending, "cursor": Cursor(top, low if low is not None else top, done).encode()}
 
     async def _stream(self, scope: _Scope, state: Cursor | None, floor):
         """Messages newest first, each tagged `above` (the old top) or `below` (the walk)."""
@@ -327,8 +335,10 @@ class TelegramArchiveSource:
                     if floor is not None and isinstance(date, datetime):
                         when = date if date.tzinfo is not None else date.replace(tzinfo=UTC)
                         if when < floor:
+                            self.floored.add(scope.target.rid)
                             return
                     offset = int(message.id)
+                    self.seen.setdefault(scope.target.rid, set()).add(offset)
                     yield message
                 return
             except FloodWaitError as exc:

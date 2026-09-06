@@ -38,6 +38,7 @@ telegram-tools search --help
 telegram-tools send --help
 telegram-tools create --help
 telegram-tools bots --help
+telegram-tools archive --help
 telegram-tools doctor --help
 ```
 

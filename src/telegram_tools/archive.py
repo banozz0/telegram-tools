@@ -13,6 +13,7 @@ that connects, and its source is `adapters/archive.py`.
 
 from __future__ import annotations
 
+import re
 import sqlite3
 from pathlib import Path
 from typing import Any, Callable, Sequence
@@ -20,6 +21,7 @@ from typing import Any, Callable, Sequence
 from telegram_tools import __version__
 from telegram_tools._core.archive import Archive, SearchHit, SyncReport
 from telegram_tools._core.config import Budgets, human_bytes
+from telegram_tools._core.contract import utc_now
 from telegram_tools._core.config import load as load_budget_config
 from telegram_tools._core.export import FORMATS as EXPORT_FORMATS
 from telegram_tools._core.paths import ToolPaths, make_private_dir, open_private
@@ -118,12 +120,66 @@ def budget_usage(home: Path | None = None) -> dict[str, Any] | None:
         connection.close()
     used = int(page_count) * int(page_size)
     budgets = Budgets.from_config(load_budget_config(config_path(home)))
+    paths = paths_for(home)
     return {
         "messages": messages,
         "scopes": scopes,
         "bytes": used,
-        "budgets": budgets.report({"archive_max_bytes": used}),
+        "budgets": budgets.report(
+            {
+                "archive_max_bytes": used,
+                "media_max_bytes": _tree_bytes(paths.media),
+                "quarantine_max_bytes": _tree_bytes(paths.quarantine),
+            }
+        ),
     }
+
+
+def _tree_bytes(directory: Path) -> int:
+    """What a directory holds on disk, 0 when it is not there yet."""
+    if not directory.exists():
+        return 0
+    return sum(path.stat().st_size for path in directory.rglob("*") if path.is_file())
+
+
+# -- what a sync learns beyond the rows ------------------------------------
+
+
+def mark_missing_deleted(archive: Archive, rid: str, seen: set[int]) -> int:
+    """Stamp `deleted_at` on every live row of `rid` a full walk did not serve; the count.
+
+    Telegram's history never says what was deleted -- a deleted message is
+    simply absent -- so the only way to see a deletion is to walk the whole
+    scope again and compare. The row and its text stay, per section 8.3: an
+    archive that forgets what was deleted cannot report it.
+    """
+    rows = archive.connection.execute(
+        "SELECT message_id FROM messages WHERE rid = ? AND deleted_at IS NULL", (rid,)
+    ).fetchall()
+    gone = [row["message_id"] for row in rows if not str(row["message_id"]).isdigit() or int(row["message_id"]) not in seen]
+    if not gone:
+        return 0
+    now = utc_now()
+    archive._begin()
+    try:
+        for message_id in gone:
+            archive.connection.execute(
+                "UPDATE messages SET deleted_at = ? WHERE rid = ? AND message_id = ?", (now, rid, message_id)
+            )
+        archive._commit()
+    except Exception:
+        archive._rollback()
+        raise
+    return len(gone)
+
+
+def is_rate_limited(error: str | None) -> bool:
+    """Whether a failed scope's error is Telegram's flood wait, which coverage names `rate_limited`.
+
+    The store keeps the error's text, and Telethon spells a flood wait as
+    "A wait of N seconds is required", so that wording is the mark.
+    """
+    return bool(error) and ("FloodWait" in str(error) or re.search(r"wait of \d+ seconds", str(error)) is not None)
 
 
 # -- what a person reads ---------------------------------------------------
@@ -135,6 +191,8 @@ def format_coverage(report: SyncReport) -> str:
     for scope in report.scopes:
         if scope.status == "skipped":
             what = f"skipped ({scope.skipped_reason})"
+        elif scope.status == "failed" and is_rate_limited(scope.error):
+            what = f"rate_limited ({scope.error})"
         elif scope.status == "failed":
             what = f"failed ({scope.error})"
         else:
@@ -228,7 +286,9 @@ __all__ = [
     "format_hits",
     "format_plan",
     "format_status",
+    "is_rate_limited",
     "list_scopes",
+    "mark_missing_deleted",
     "open_archive",
     "paths_for",
     "read_only",

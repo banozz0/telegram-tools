@@ -345,7 +345,35 @@ def test_full_walks_from_the_top_again_and_since_bounds_the_walk(home):
     with archive_store.open_archive(home / "since") as bounded:
         report = run(bounded.sync(TelegramArchiveSource(FakeClient()), IDENTITY, since="2026-09-01T00:30:00Z", batch=10))
         assert len(ids_in(bounded.connection, DEPLOYS)) == 11
-        assert Cursor.decode(bounded.checkpoint(DEPLOYS, IDENTITY.id).cursor) == Cursor(40, 30, True)
+        assert Cursor.decode(bounded.checkpoint(DEPLOYS, IDENTITY.id).cursor) == Cursor(40, 30, False), (
+            "a walk stopped at a date floor is not done: the history below is still there for a later run"
+        )
+        # A plain sync afterwards continues below the floor and finishes the walk.
+        run(bounded.sync(TelegramArchiveSource(FakeClient()), IDENTITY, batch=10))
+        assert len(ids_in(bounded.connection, DEPLOYS)) == 40
+        assert Cursor.decode(bounded.checkpoint(DEPLOYS, IDENTITY.id).cursor) == Cursor(40, 1, True)
+
+
+def test_a_full_sync_marks_what_telegram_no_longer_has_as_deleted(run_cli, capsys, home):
+    run_cli(["archive", "sync"], capsys=capsys)
+    client = FakeClient()
+    client.rows[(CHANNEL_ID, None)] = [row for row in client.rows[(CHANNEL_ID, None)] if row.id not in (303, 305)]
+    code, out, _err, _fake = run_cli(["--json", "archive", "sync"], client=client, capsys=capsys)
+    assert code == 0 and envelope_of(out)["result"]["deleted"] == {}, "an incremental sync cannot see a deletion"
+
+    client = FakeClient()
+    client.rows[(CHANNEL_ID, None)] = [row for row in client.rows[(CHANNEL_ID, None)] if row.id not in (303, 305)]
+    code, out, err, _fake = run_cli(["--json", "archive", "sync", "--full"], client=client, capsys=capsys)
+    assert code == 0 and envelope_of(out)["result"]["deleted"] == {ALERTS: 2}
+    assert f"{ALERTS} Alerts: 2 marked deleted" in err
+    with archive_store.open_archive() as archive:
+        rows = archive.connection.execute(
+            "SELECT message_id, deleted_at FROM messages WHERE rid = ? ORDER BY message_id", (ALERTS,)
+        ).fetchall()
+        assert [row["message_id"] for row in rows if row["deleted_at"]] == ["303", "305"], "the row and its text stay"
+        assert len(rows) == 7
+        hits = archive.search('"deploy"', scope=ALERTS)
+        assert all(hit.message_id not in ("303", "305") for hit in hits), "a deleted row is out of a search by default"
 
 
 def test_a_flood_wait_is_slept_counted_and_the_walk_continues_without_a_gap(home):
@@ -373,6 +401,7 @@ def test_a_flood_wait_over_the_limit_fails_that_scope_and_the_sync_moves_on(home
     assert "7200" in report.failed[0].error
     assert source.waited_ms == 0
     assert report.rows == 12, "the scopes after the rate-limited one still synced"
+    assert f"{DEPLOYS}\tDeploys\trate_limited (" in archive_store.format_coverage(report)
 
 
 # -- the commands ----------------------------------------------------------
@@ -419,6 +448,8 @@ def test_archive_sync_reports_waited_ms_in_the_envelope(run_cli, capsys, monkeyp
 def test_a_partial_sync_exits_1(run_cli, capsys):
     code, out, _err, _fake = run_cli(["--json", "archive", "sync"], client=FakeClient(flood={(FORUM_ID, 141): 9999}), capsys=capsys)
     assert code == 1 and envelope_of(out)["status"] == "partial"
+    code, out, _err, _fake = run_cli(["--json", "archive", "status"], capsys=capsys)
+    assert envelope_of(out)["result"]["coverage"]["reasons"] == {"rate_limited": 1}
 
 
 def test_archive_status_opens_no_connection_and_prints_no_path(run_cli, capsys, home):
@@ -576,6 +607,14 @@ def test_retention_and_forget_dry_run_by_default_and_gate_on_the_typed_title(run
     code, out, _err, _fake = run_cli(["--json", "archive", "forget", "--scope", "tg:chat:-100404"], capsys=capsys)
     assert code == 2 and envelope_of(out)["error"]["code"] == "TARGET_NOT_FOUND"
 
+    # An identity is forgotten under its label, re-read from its own row after the gate.
+    code, out, _err, _fake = run_cli(["--json", "archive", "forget", "--identity", IDENTITY.id, "--execute"], capsys=capsys, isatty=True, answer="Sven (@sven)")
+    envelope = envelope_of(out)
+    assert code == 0 and envelope["result"]["remaining"] == 0 and envelope["target"]["rid"] == IDENTITY.id
+    with archive_store.open_archive() as archive:
+        assert archive.connection.execute("SELECT COUNT(*) FROM messages").fetchone()[0] == 0
+    assert len(audit.read_text().splitlines()) == 3
+
 
 def test_a_coded_refusal_from_the_store_is_an_exit_2_in_both_modes(run_cli, capsys, home, monkeypatch):
     monkeypatch.setattr("telegram_tools._core.archive.fts5_available", lambda connection=None: False)
@@ -658,7 +697,9 @@ def test_doctor_reports_fts5_the_archive_rows_and_the_budget(run_cli, capsys, ho
     code, out, _err, _fake = run_cli(["--json", "doctor"], capsys=capsys)
     envelope = envelope_of(out)
     archive_line = next(check["message"] for check in envelope["result"]["checks"] if check["message"].startswith("Archive:"))
-    assert "52 message(s) in 3 scope(s)" in archive_line and "archive_max_bytes" in archive_line and "2.0 GiB" in archive_line
+    assert "52 message(s) in 3 scope(s)" in archive_line
+    for budget, limit in (("archive_max_bytes", "2.0 GiB"), ("media_max_bytes", "5.0 GiB"), ("quarantine_max_bytes", "1.0 GiB")):
+        assert f"{budget} " in archive_line and limit in archive_line, budget
     assert str(home) not in out
 
     # A file that is not a database is reported, not raised.

@@ -289,7 +289,11 @@ down and commits in batches, so a sync you kill halfway restarts from the last b
 that landed and never writes a row twice; a second run fetches only what arrived since.
 It prints one line per scope and ends with a coverage table naming every scope it could
 not read and why. Flood waits are slept and counted, and a wait longer than ten minutes
-marks that scope failed rather than holding the run.
+marks that scope failed and `rate_limited` in coverage rather than holding the run.
+`--since` bounds a walk and leaves it open, so a later plain sync continues below the
+floor; `--full` walks everything again, and is how a deletion is found — Telegram's
+history never says what was removed, so a full walk marks every archived row it no
+longer sees as deleted, keeping the row and its text out of searches unless asked for.
 
 ```bash
 telegram-tools archive sync                                   # everything, resuming

@@ -93,8 +93,12 @@ The terms this codebase uses, and the boundaries they imply.
   every id in `[low, top]` is archived, and `done` means everything below `low`
   is too. A run first asks for what arrived above `top` (`min_id`), then
   continues below `low` (`offset_id`) when the walk never finished; one record
-  of lookahead is what lets the last record say `done`. A cursor this adapter
-  did not write reads as none, which is a full walk.
+  of lookahead is what lets the last record say `done`; a walk cut by a
+  `--since` floor stays `open`, so a later plain sync finishes it. A cursor
+  this adapter did not write reads as none, which is a full walk. The source
+  also keeps `seen`, the ids each scope served, because Telegram's history
+  never says what was deleted: `archive sync --full` marks what a full walk
+  did not see (`archive.mark_missing_deleted`).
 - **Coverage** — the row per scope saying what the identity could see of it,
   with a named reason when it could not: `no_access` (a `--scope` the account
   cannot resolve, or a forum whose topics it cannot list), `unsupported_kind`

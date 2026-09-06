@@ -160,12 +160,11 @@ def check_archive(home: Path | None = None) -> DoctorCheck:
         return DoctorCheck("WARN", "No archive yet (run `telegram-tools archive sync` to make one)")
     if "error" in usage:
         return DoctorCheck("FAIL", f"The archive could not be read: {usage['error']}")
-    budget = usage["budgets"][0]
-    status = "FAIL" if budget["over"] else "OK"
+    budgets = ", ".join(f"{row['budget']} {row['used']} of {row['limit']} ({row['percent']}%)" for row in usage["budgets"])
+    status = "FAIL" if any(row["over"] for row in usage["budgets"]) else "OK"
     return DoctorCheck(
         status,
-        f"Archive: {usage['messages']} message(s) in {usage['scopes']} scope(s), "
-        f"{human_bytes(usage['bytes'])} of the {budget['limit']} archive_max_bytes budget ({budget['percent']}%)",
+        f"Archive: {usage['messages']} message(s) in {usage['scopes']} scope(s), {human_bytes(usage['bytes'])}; budgets: {budgets}",
     )
 
 
