@@ -1295,7 +1295,7 @@ async def _flow_archive_sync(*, session, runner, read, write) -> bool:
     staged: dict[str, Any] = {"scope": None, "since": None, "full": False}
     while True:
         rows = [
-            ("scope", f"Scope          [{_shown(staged['scope'], '(every chat this account can read)')}]"),
+            ("scope", f"Chat or topic  [{_shown(staged['scope'], '(every chat this account can read; press 1 to pick one)')}]"),
             ("since", f"Since          [{_shown(staged['since'], '(all history)')}]"),
             ("full", f"Start over     [{_yes_no(staged['full'])}]"),
             ("run", "Sync now (one progress line per scope, then the coverage table)"),
@@ -1325,12 +1325,12 @@ async def _flow_archive_sync(*, session, runner, read, write) -> bool:
         if key == "scope":
             if staged["scope"] is None:
                 # Nothing set yet: straight to the live picker, as Search does.
-                answer = await _pick_live_scope(session, read=read, write=write, trail=crumb(trail, "Scope"))
+                answer = await _pick_live_scope(session, read=read, write=write, trail=crumb(trail, "Chat or topic"))
             else:
-                choice = choose(["Pick another chat or topic", "Clear (every chat)"], title=crumb(trail, "Scope"), read=read, write=write)
+                choice = choose(["Pick another chat or topic", "Clear (every chat)"], title=crumb(trail, "Chat or topic"), read=read, write=write)
                 if choice is BACK:
                     continue
-                answer = CLEAR if choice == 1 else await _pick_live_scope(session, read=read, write=write, trail=crumb(trail, "Scope"))
+                answer = CLEAR if choice == 1 else await _pick_live_scope(session, read=read, write=write, trail=crumb(trail, "Chat or topic"))
         else:
             answer = edit_field(
                 crumb(trail, "Since"),
@@ -1357,7 +1357,7 @@ async def _flow_archive_status(*, session, runner, read, write) -> bool:
 _QUERY_FIELDS = (
     ("query", "Query", "(required)"),
     ("regex", "Regex", "(none)"),
-    ("scope", "Scope", "(every scope)"),
+    ("scope", "Chat or topic", "(every one archived)"),
     ("identity", "Identity", "(every identity)"),
     ("author", "From", "(anyone)"),
     ("since", "Since", "(any date)"),
@@ -1505,7 +1505,7 @@ async def _flow_archive_forget(*, session, runner, read, write) -> bool:
 
 READ_ROWS = (
     ("Search live (asks Telegram)", _flow_search),
-    ("Sync the archive", _flow_archive_sync),
+    ("Sync the archive (everything, or one chat or topic)", _flow_archive_sync),
     ("Archive status", _flow_archive_status),
     ("Search or export the archive", _flow_archive_query),
     ("Prune old rows (retention)", _flow_archive_retention),

@@ -1668,7 +1668,7 @@ def test_read_lists_the_live_search_and_every_archive_row():
     assert "Main › Read\n" in text
     for row in (
         "1. Search live (asks Telegram)",
-        "2. Sync the archive",
+        "2. Sync the archive (everything, or one chat or topic)",
         "3. Archive status",
         "4. Search or export the archive",
         "5. Prune old rows (retention)",
@@ -1691,8 +1691,9 @@ def test_archive_sync_stages_a_scope_a_floor_and_start_over_then_runs():
     text = screens(output)
     assert "Main › Read › Sync the archive\n" in text
     assert "Start over     [yes]" in text
-    assert "Main › Read › Sync the archive › Scope › Pick a chat\n" in text, "a sync picks from the live chats, not the archive"
-    assert "Main › Read › Sync the archive › Scope › Hermes › Topic\n" in text
+    assert "Main › Read › Sync the archive › Chat or topic › Pick a chat\n" in text, "a sync picks from the live chats, not the archive"
+    assert "Main › Read › Sync the archive › Chat or topic › Hermes › Topic\n" in text
+    assert "1. Chat or topic  [(every chat this account can read; press 1 to pick one)]" in text
 
 
 def test_archive_sync_scope_takes_a_whole_forum_a_channel_or_is_cleared_again():

@@ -14,7 +14,7 @@ Choose: 2
 Main › Read
 --------------------------------------------
 1. Search live (asks Telegram)
-2. Sync the archive
+2. Sync the archive (everything, or one chat or topic)
 3. Archive status
 4. Search or export the archive
 5. Prune old rows (retention)
@@ -126,7 +126,7 @@ Main › Read
 Acting as: Sven (@sven) · account
 --------------------------------------------
 1. Search live (asks Telegram)
-2. Sync the archive
+2. Sync the archive (everything, or one chat or topic)
 3. Archive status
 4. Search or export the archive
 5. Prune old rows (retention)
