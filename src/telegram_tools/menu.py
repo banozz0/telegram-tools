@@ -21,6 +21,7 @@ from telegram_tools.config import ConfigError, load_config, lookup_bot_token, re
 from telegram_tools.delete import kind_for_type
 from telegram_tools.discovery import list_dialog_choices
 from telegram_tools.records import parse_date_bound
+from telegram_tools import messages as message_ops
 from telegram_tools.prompts import BACK, CLEAR, EXIT, MENU, RULE, Extra, after_action, after_run, ask_int, ask_lines, ask_text, choose, edit_field, pick, pick_many
 from telegram_tools.resolver import resolve_chat
 from telegram_tools.topics import get_forum_topics
@@ -42,7 +43,7 @@ MAIN = "Main"
 ROOT_ITEMS = (
     "Find IDs (chats, topics)",
     "Read (search live, archive, export)",
-    "Write (send)",
+    "Write (send, reply, message tools)",
     "Build (create, delete)",
     "Clear messages",
     "Manage (admins, members, invites, settings)",
@@ -603,7 +604,7 @@ async def _ask_send_topic(picked, *, session, read, write, trail: str) -> Any:
 
 
 async def _flow_send(*, session, runner, read, write) -> bool:
-    trail = crumb(MAIN, "Send")
+    trail = crumb(MAIN, "Write", "Send")
     while True:
         picked = await _pick_chat(session=session, read=read, write=write, trail=trail)
         if picked is BACK:
@@ -613,6 +614,7 @@ async def _flow_send(*, session, runner, read, write) -> bool:
         topic_info = None
         text: str | None = None
         files: list[str] = []
+        reply_to: int | None = None
         while True:
             rows: list[tuple[str, str]] = []
             if picked.is_forum is not False:
@@ -622,6 +624,7 @@ async def _flow_send(*, session, runner, read, write) -> bool:
                 [
                     ("text", f"Message   [{_preview_line(text)}]"),
                     ("files", f"Files     [{_files_label(files)}]"),
+                    ("reply_to", f"Reply to  [{_shown(reply_to, '(nothing - a new message)')}]"),
                     ("send", "Send it (shows the whole message, then asks y/N)"),
                 ]
             )
@@ -634,7 +637,7 @@ async def _flow_send(*, session, runner, read, write) -> bool:
                 back_label="Back (discards)",
             )
             if choice is BACK:
-                staged = text or files or topic_info is not None
+                staged = text or files or topic_info is not None or reply_to is not None
                 if staged and not _confirm_discard(form, title="Unsent message", said="Discarded the unsent message.", read=read, write=write):
                     continue
                 break
@@ -662,6 +665,22 @@ async def _flow_send(*, session, runner, read, write) -> bool:
                     files = answer
                 continue
 
+            if key == "reply_to":
+                answer = edit_field(
+                    crumb(form, "Reply to"),
+                    str(reply_to),
+                    read=read,
+                    write=write,
+                    ask=lambda: ask_int("Message id to reply to", read=read, write=write),
+                    allow_clear=True,
+                    is_set=reply_to is not None,
+                )
+                if answer is CLEAR:
+                    reply_to = None
+                elif answer is not BACK:
+                    reply_to = answer
+                continue
+
             if not text and not files:
                 write("Type a message or attach a file first.")
                 continue
@@ -672,6 +691,7 @@ async def _flow_send(*, session, runner, read, write) -> bool:
                 topic=None if topic_info is None else topic_info.id,
                 text=text,
                 files=files or None,
+                reply_to=reply_to,
                 # The menu is never the shorter path past a gate: the preview and
                 # its y/N run exactly as they do for the flags.
                 yes=False,
@@ -680,6 +700,241 @@ async def _flow_send(*, session, runner, read, write) -> bool:
             if result is not STAY:
                 return _leave(result)
             continue
+
+
+# -- the message verbs -----------------------------------------------------
+
+# What each verb's form stages, in row order: (namespace key, row label, kind).
+# Kinds: int, text, lines (a body ended by `.`), ids (comma-separated ids),
+# chat (a second chat picker), topic (a topic in the picked chat), toggle,
+# options (poll answers, one per line). The chat itself is always picked first,
+# and the last row is always the run.
+MESSAGE_FORMS = {
+    "reply": (("message_id", "Reply to message", "int"), ("text", "Reply", "lines")),
+    "edit": (("message_id", "Message", "int"), ("text", "New text", "lines")),
+    "delete": (
+        ("ids", "Message ids", "ids"),
+        ("from_search", "Archive query (selects every match here)", "text"),
+        ("limit", "Limit", "int"),
+        ("i_know", "Allow more than 1000", "toggle"),
+        ("execute", "Delete for real (asks you to type DELETE)", "toggle"),
+    ),
+    "forward": (
+        ("ids", "Message ids", "ids"),
+        ("from_search", "Archive query (selects every match here)", "text"),
+        ("limit", "Limit", "int"),
+        ("i_know", "Allow more than 1000", "toggle"),
+        ("to_chat", "Send them to", "chat"),
+        ("to_topic", "Topic there", "int"),
+    ),
+    "copy": (
+        ("ids", "Message ids", "ids"),
+        ("from_search", "Archive query (selects every match here)", "text"),
+        ("limit", "Limit", "int"),
+        ("i_know", "Allow more than 1000", "toggle"),
+        ("to_chat", "Copy them to", "chat"),
+        ("to_topic", "Topic there", "int"),
+    ),
+    "react": (("message_id", "Message", "int"), ("emoji", "Emoji", "text")),
+    "unreact": (("message_id", "Message", "int"), ("emoji", "Emoji (none = every reaction of yours)", "text")),
+    "pin": (("message_id", "Message", "int"),),
+    "unpin": (("message_id", "Message", "int"),),
+    "poll": (
+        ("topic", "Topic", "topic"),
+        ("question", "Question", "text"),
+        ("options", "Answers", "options"),
+        ("multiple", "Several answers allowed", "toggle"),
+    ),
+    "typing": (("seconds", "Seconds", "int"),),
+    "read": (),
+    "unread": (),
+    "bookmark": (("message_id", "Message", "int"), ("label", "Label", "text")),
+    "draft": (("topic", "Topic", "topic"), ("text", "Draft", "lines")),
+}
+# What has to be staged before the run row does anything.
+MESSAGE_REQUIRED = {
+    "reply": ("message_id", "text"),
+    "edit": ("message_id", "text"),
+    "delete": (),
+    "forward": ("to_chat",),
+    "copy": ("to_chat",),
+    "react": ("message_id", "emoji"),
+    "unreact": ("message_id",),
+    "pin": ("message_id",),
+    "unpin": ("message_id",),
+    "poll": ("question", "options"),
+    "typing": (),
+    "read": (),
+    "unread": (),
+    "bookmark": ("message_id",),
+    "draft": ("text",),
+}
+MESSAGE_RUN_ROW = {
+    "delete": "Run it (dry-run unless 'Delete for real' is on)",
+}
+MESSAGE_TITLES = {
+    "reply": "Reply",
+    "edit": "Edit",
+    "delete": "Delete messages",
+    "forward": "Forward",
+    "copy": "Copy",
+    "react": "React",
+    "unreact": "Remove a reaction",
+    "pin": "Pin",
+    "unpin": "Unpin",
+    "poll": "Poll",
+    "typing": "Typing",
+    "read": "Mark read",
+    "unread": "Mark unread",
+    "bookmark": "Bookmark",
+    "draft": "Draft",
+}
+
+
+def _staged_label(kind: str, value: Any) -> str:
+    if kind == "toggle":
+        return "yes" if value else "no"
+    if value in (None, "", [], ()):
+        return "(none)" if kind not in ("topic",) else "(the chat itself)"
+    if kind == "lines":
+        return _preview_line(value)
+    if kind == "ids":
+        return ", ".join(str(number) for number in value)
+    if kind == "options":
+        return " / ".join(value)
+    if kind == "chat":
+        return value.title
+    if kind == "topic":
+        return f"{value.id} {value.title}"
+    return str(value)
+
+
+async def _ask_message_field(key: str, label: str, kind: str, current: Any, *, picked, session, read, write, trail: str) -> Any:
+    """The new value for one row, CLEAR to empty it, or BACK to leave it alone."""
+    if kind == "toggle":
+        return not current
+    if kind == "int":
+        return ask_int(label, read=read, write=write, current=current)
+    if kind == "text":
+        answer = ask_text(label, read=read, write=write, current=current or None)
+        return answer
+    if kind == "lines":
+        return ask_lines(label, read=read, write=write, current=_preview_line(current) if current else None)
+    if kind == "ids":
+        typed = ask_text("Message ids, comma-separated", read=read, write=write, current=_staged_label(kind, current) if current else None)
+        if typed is BACK:
+            return BACK
+        try:
+            return message_ops.parse_ids([typed])
+        except ValueError as exc:
+            write(str(exc))
+            return BACK
+    if kind == "options":
+        body = ask_lines("Answers, one per line", read=read, write=write)
+        if body is BACK:
+            return BACK
+        return [line.strip() for line in body.split("\n") if line.strip()]
+    if kind == "chat":
+        chosen = await _pick_chat(session=session, read=read, write=write, trail=trail)
+        return chosen
+    if kind == "topic":
+        answer = await _ask_send_topic(picked, session=session, read=read, write=write, trail=trail)
+        return answer
+    raise ValueError(kind)
+
+
+def _flow_message(verb: str):
+    """One row under Write: pick the chat, stage the verb's fields, run it behind its gate."""
+    fields = MESSAGE_FORMS[verb]
+    title = MESSAGE_TITLES[verb]
+
+    async def flow(*, session, runner, read, write) -> bool:
+        trail = crumb(MAIN, "Write", title)
+        while True:
+            picked = await _pick_chat(session=session, read=read, write=write, trail=trail)
+            if picked is BACK:
+                return True
+            form = crumb(trail, picked.title)
+            staged: dict[str, Any] = {key: (False if kind == "toggle" else None) for key, _label, kind in fields}
+            if verb == "typing":
+                staged["seconds"] = 5
+            while True:
+                rows = [(key, f"{label:<12} [{_staged_label(kind, staged[key])}]") for key, label, kind in fields]
+                rows.append(("run", MESSAGE_RUN_ROW.get(verb, "Do it (shows the preview, then asks)")))
+                choice = choose([label for _key, label in rows], title=form, read=read, write=write, back_label="Back (discards)")
+                if choice is BACK:
+                    dirty = any(staged[key] not in (None, False, 5 if verb == "typing" else None) for key, _l, _k in fields)
+                    if dirty and not _confirm_discard(form, title="Unfinished form", said="Discarded it.", read=read, write=write):
+                        continue
+                    break
+                key = rows[choice][0]
+                if key != "run":
+                    _key, label, kind = fields[choice]
+                    answer = await _ask_message_field(
+                        key, label, kind, staged[key], picked=picked, session=session, read=read, write=write, trail=form
+                    )
+                    if answer is BACK:
+                        continue
+                    staged[key] = None if answer is CLEAR else answer
+                    continue
+
+                missing = [label for key, label, _kind in fields if key in MESSAGE_REQUIRED[verb] and staged[key] in (None, "", [])]
+                if verb in message_ops.BULK_VERBS and not staged.get("ids") and not staged.get("from_search"):
+                    missing.append("Message ids or an archive query")
+                if missing:
+                    write("Fill in first: " + ", ".join(missing) + ".")
+                    continue
+
+                values = dict(staged)
+                if "to_chat" in values and values["to_chat"] is not None:
+                    values["to_chat"] = values["to_chat"].reference
+                if "topic" in values and values["topic"] is not None:
+                    values["topic"] = values["topic"].id
+                if "ids" in values:
+                    values["ids"] = [",".join(str(number) for number in values["ids"])] if values["ids"] else None
+                if "label" in values:
+                    values["label"] = values["label"] or ""
+                # The menu is never the shorter path past a gate: no verb here
+                # sets yes, and delete's execute is the person's own toggle.
+                args = _namespace(command="message", message_verb=verb, chat=picked.reference, yes=False, **values)
+                result = await _act(args, session=session, runner=runner, read=read, write=write, trail=form)
+                if result is not STAY:
+                    return _leave(result)
+                continue
+
+    return flow
+
+
+WRITE_ROWS = (
+    ("Send a message", _flow_send),
+    ("Reply to a message", _flow_message("reply")),
+    ("Edit a message", _flow_message("edit")),
+    ("Delete messages (dry-run first)", _flow_message("delete")),
+    ("Forward messages", _flow_message("forward")),
+    ("Copy messages (text and links, never the bytes)", _flow_message("copy")),
+    ("React to a message", _flow_message("react")),
+    ("Remove a reaction", _flow_message("unreact")),
+    ("Pin a message", _flow_message("pin")),
+    ("Unpin a message", _flow_message("unpin")),
+    ("Post a poll", _flow_message("poll")),
+    ("Show typing", _flow_message("typing")),
+    ("Mark a chat read", _flow_message("read")),
+    ("Mark a chat unread", _flow_message("unread")),
+    ("Bookmark a message (Saved Messages)", _flow_message("bookmark")),
+    ("Save a draft", _flow_message("draft")),
+)
+
+
+async def _flow_write(*, session, runner, read, write) -> bool:
+    """Row 3. Send, and every message verb."""
+    trail = crumb(MAIN, "Write")
+    while True:
+        choice = choose([label for label, _flow in WRITE_ROWS], title=trail, read=read, write=write)
+        if choice is BACK:
+            return True
+        outcome = await _group(WRITE_ROWS[choice][1], session=session, runner=runner, read=read, write=write)
+        if outcome is not True:
+            return outcome
 
 
 # Running a create again would make a second, identical object, so the row after
@@ -1701,7 +1956,7 @@ async def run_menu(*, read=None, write=None, session=None, runner=None, profile=
     flows = (
         _flow_discover,
         _flow_read,
-        _flow_send,
+        _flow_write,
         _flow_build,
         _flow_clear,
         _flow_later(5),

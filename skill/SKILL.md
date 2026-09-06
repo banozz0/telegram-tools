@@ -1,13 +1,13 @@
 ---
 name: telegram-tools
-description: "Use when you need the real numeric ID of a Telegram chat, channel, group or forum topic — 'what's the ID of that topic?', 'which chat is -100…?', 'where do I send this?' — when the user wants their own Telegram messages searched or exported (JSON, CSV, JSONL, Markdown, HTML), when a history question can be answered from the local archive instead of a fresh fetch, or when a message must be posted to a chat or topic the user has allowlisted."
-version: 1.7.0
+description: "Use when you need the real numeric ID of a Telegram chat, channel, group or forum topic — 'what's the ID of that topic?', 'which chat is -100…?', 'where do I send this?' — when the user wants their own Telegram messages searched or exported (JSON, CSV, JSONL, Markdown, HTML), when a history question can be answered from the local archive instead of a fresh fetch, when a message must be posted to a chat or topic the user has allowlisted, or when a message the user named should get a reply, a reaction, a pin, or be forwarded, copied or bookmarked."
+version: 1.8.0
 author: banozz0
 license: MIT
 platforms: [macos]
 metadata:
   hermes:
-    tags: [telegram, chat-ids, topic-ids, forum, search, archive, export, send, cli]
+    tags: [telegram, chat-ids, topic-ids, forum, search, archive, export, send, reply, react, message, cli]
 ---
 
 # telegram-tools
@@ -55,9 +55,11 @@ question is about the past — "when did we decide X?", "find every mention of Y
 the archive is the cheap way to answer it; the live `search` is for what happened
 since the last sync, or a chat the archive does not hold yet.
 
-It can also **send** a message and **create** — or **delete** — a group, channel or topic. Those write
-to Telegram as the user, so rules 2 and 3 below govern them — read those before
-running either. It still does not run bots, download media, or delete topics.
+It can also **send** a message, act on one that exists (**`message`**: reply, react,
+pin, forward, copy, bookmark and more), and **create** — or **delete** — a group,
+channel or topic. Those write to Telegram as the user, so rules 2, 3 and 10 below
+govern them — read those before running any. It still does not run bots or download
+media.
 
 ## Hard rules
 
@@ -120,6 +122,19 @@ to run without the flag — relay that, do not retry without it on your own
 initiative if the user asked for the bot. The allowlist (rule 2) binds a bot send
 exactly as it binds an account send.
 
+**10. The message verbs are `send`'s rule, and the bulk ones are `delete`'s.**
+`message reply`, `react`, `unreact`, `pin`, `unpin`, `poll`, `typing`, `read`,
+`unread`, `bookmark` and `draft` post or change something visible as the user; run
+one only for a message the user named in this conversation, and only with `--yes`
+into a chat their allowlist names (rule 2, unchanged — the refusal is
+`NOT_ALLOWLISTED`, relay it). **Never run `message delete`**, in any form: it removes
+real messages for everyone, has no `--yes`, and its `--execute` needs `DELETE` typed
+at a prompt — hand the user the command. **Never run `message edit` on a message the
+user did not write**, and never `forward` or `copy` a selection the user did not
+name: `--from-search` selects every archived match, and a wide query moves a wide
+selection. A refusal of `BULK_LIMIT` means the selection was bigger than the tool
+acts on at once; narrow it, never add `--i-know` yourself.
+
 ## Machine-readable output
 
 Put `--json` **before** the subcommand and the command prints exactly one object
@@ -170,7 +185,8 @@ question), `PLAN_DRIFT` (the chat changed mid-run — re-run and re-read),
 `LOGIN_REQUIRED` (that profile has no session — rule 6, hand over the `auth`
 command in the hint), `IDENTITY_MODE_UNSUPPORTED` (that command needs the
 account, not a bot — rule 9; the hint is the same command without `--as-bot`),
-`CONFIG_INVALID` (often the file-mode refusal: something
+`BULK_LIMIT` (a `message delete`, `forward` or `copy`
+selection above `--limit` — narrow it; rule 10), `CONFIG_INVALID` (often the file-mode refusal: something
 under `~/.telegram-tools` is readable by others and every write refuses until it
 is not; the hint carries the `chmod`, and `telegram-tools doctor`
 names the files).
@@ -195,6 +211,12 @@ names the files).
 | "post this to that topic" (allowlisted) | `telegram-tools send --chat <id> --topic <topic-id> --text "..." --yes` |
 | a long or multi-line message | pipe it: `... \| telegram-tools send --chat <id> --text - --yes` |
 | "send them that file" (allowlisted) | `telegram-tools send --chat <id> --file /path/to/file --text "caption" --yes` |
+| "reply to that message" (they named it, allowlisted) | `telegram-tools --json message reply --chat <id> --to <msg-id> --text "..." --yes` |
+| "react to it with 🔥" / "pin it" (they named it, allowlisted) | `telegram-tools --json message react --chat <id> --id <msg-id> --emoji 🔥 --yes`, `message pin --chat <id> --id <msg-id> --yes` |
+| "forward that to the releases channel" (both named, allowlisted) | `telegram-tools --json message forward --chat <id> --ids <msg-id> --to <chat> --yes` (`copy` re-posts the text; an attachment becomes a link) |
+| "save that message" / "bookmark it" | `telegram-tools --json message bookmark --chat <id> --id <msg-id> --label "..." --yes` — Saved Messages plus an archive row |
+| "mark it read" / "draft this for me" | `telegram-tools --json message read --chat <id> --yes`, `message draft --chat <id> --text "..." --yes` |
+| "delete those messages" | hand them `telegram-tools message delete --chat <id> --ids <a>,<b> --execute` — rule 10, they type DELETE |
 | "make me a group with topics" (they asked) | `telegram-tools create group --title "..." --forum --yes` |
 | "add a topic to that group" (they asked) | `telegram-tools create topic --chat <id> --title "..." --yes` |
 | "delete that topic/group" | hand them `telegram-tools delete topic --chat <id> --topic <id> --execute` — rule 4, they run it |
@@ -238,6 +260,10 @@ names the files).
   type. With `--yes` it refuses anything outside `TELEGRAM_SEND_ALLOWLIST` and the
   error names the destination to add — relay that to the user verbatim rather than
   retrying. `doctor` says how many destinations are listed, never which.
+- **A message verb shows the message it acts on**, and refuses with `TARGET_NOT_FOUND`
+  when the id is not in that chat — so a wrong id costs nothing. The id comes from
+  `search`, `archive search` (`result.messages[].message_id`) or the user; never
+  guess one. `send --reply-to <msg-id>` posts a reply from the send command itself.
 - **`send --topic` is the difference between delivered and lost.** Omitting it posts
   to the chat itself, not the thread. Confirm the topic ID with `discover` first;
   never guess one.
@@ -248,7 +274,7 @@ names the files).
 - **A held session is not a bug to retry.** "Another telegram-tools is already using
   the login session" means the user has the menu open somewhere. Say so; a retry
   loop will not free it.
-- **A write leaves a local record.** Every executed send, create, clear, delete
+- **A write leaves a local record.** Every executed send, message verb, create, clear, delete
   or bot edit appends one line to `~/.telegram-tools/audit.jsonl`. It is the
   user's log, it holds no secrets, and you never need to read it — but do not
   suggest deleting it either.
@@ -277,6 +303,10 @@ names the files).
   it. Rule 4 above. It refuses to run unattended by construction; hand the user
   the command instead.
 - **`clear-messages`** — irreversible deletion of the user's messages. Rule 5 above.
+- **`message delete`** — the same, on a selection. Rule 10. It has no `--yes`; the
+  dry-run (no `--execute`) is safe to run to show the user what would go.
+- **`message edit` of someone else's message, and any `--from-search` selection the
+  user did not name** — rule 10.
 - **`create` on your own initiative** — rule 3. If a new group or topic looks like
   the right answer, propose it and let the user say yes; do not create it and report
   back.

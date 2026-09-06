@@ -121,7 +121,7 @@ ARCHIVE_STATUS = ("2", "3")
 ARCHIVE_QUERY = ("2", "4")
 ARCHIVE_RETENTION = ("2", "5")
 ARCHIVE_FORGET = ("2", "6")
-SEND = "3"
+SEND = ("3", "1")
 BUILD = "4"
 CREATE = ("4", "1")
 DELETE = ("4", "2")
@@ -158,7 +158,7 @@ def run_menu(answers, *, session=None, runner=None, output=None):
 ROOT_ROWS = (
     "1. Find IDs (chats, topics)",
     "2. Read (search live, archive, export)",
-    "3. Write (send)",
+    "3. Write (send, reply, message tools)",
     "4. Build (create, delete)",
     "5. Clear messages",
     "6. Manage (admins, members, invites, settings)",
@@ -847,9 +847,9 @@ def test_a_picker_error_prints_and_returns_to_the_menu():
 
 
 def test_send_stages_a_topic_and_a_message():
-    # 3 = send, 1 = forum groups, 1 = Hermes, 1 = Topic row, 1 = Deploys,
-    # 2 = Message, 3 = Send it
-    answers = [SEND, "1", "1", "1", "1", "2", "ship it", ".", "4", "", "0"]
+    # 3 1 = write > send, 1 = forum groups, 1 = Hermes, 1 = Topic row, 1 = Deploys,
+    # 2 = Message, 5 = Send it (4 is Reply to)
+    answers = [SEND, "1", "1", "1", "1", "2", "ship it", ".", "5", "", "0"]
     code, calls, output = run_menu(answers)
 
     assert code == 0
@@ -864,7 +864,7 @@ def test_send_stages_a_topic_and_a_message():
 
 
 def test_send_without_choosing_a_topic_goes_to_the_chat_itself():
-    answers = [SEND, "1", "1", "2", "hi", ".", "4", "", "0"]
+    answers = [SEND, "1", "1", "2", "hi", ".", "5", "", "0"]
     code, calls, output = run_menu(answers)
 
     assert code == 0
@@ -874,7 +874,7 @@ def test_send_without_choosing_a_topic_goes_to_the_chat_itself():
 
 def test_send_topic_picker_offers_the_chat_itself():
     # Topic > row 3 is the extra after the two topics
-    answers = [SEND, "1", "1", "1", "3", "2", "hi", ".", "4", "", "0"]
+    answers = [SEND, "1", "1", "1", "3", "2", "hi", ".", "5", "", "0"]
     code, calls, output = run_menu(answers)
 
     assert code == 0
@@ -883,8 +883,8 @@ def test_send_topic_picker_offers_the_chat_itself():
 
 
 def test_send_hides_the_topic_row_for_a_non_forum_chat():
-    # 3 = send, 2 = Channels, 1 = Alerts, 1 = Message, 2 = Send it
-    answers = [SEND, "2", "1", "1", "hi", ".", "3", "", "0"]
+    # 3 1 = write > send, 2 = Channels, 1 = Alerts, 1 = Message, 4 = Send it
+    answers = [SEND, "2", "1", "1", "hi", ".", "4", "", "0"]
     code, calls, output = run_menu(answers)
 
     assert code == 0
@@ -894,7 +894,7 @@ def test_send_hides_the_topic_row_for_a_non_forum_chat():
 
 def test_send_says_a_chat_with_no_topics_goes_to_the_chat():
     session = FakeSession(topics=[])
-    answers = [SEND, "1", "1", "1", "2", "hi", ".", "4", "", "0"]
+    answers = [SEND, "1", "1", "1", "2", "hi", ".", "5", "", "0"]
     code, calls, output = run_menu(answers, session=session)
 
     assert code == 0
@@ -903,8 +903,8 @@ def test_send_says_a_chat_with_no_topics_goes_to_the_chat():
 
 
 def test_send_refuses_to_run_without_a_message():
-    # 4 = Send it with nothing staged, then 0 back out of each screen to the root.
-    answers = [SEND, "1", "1", "4", "0", "0", "0"]
+    # 5 = Send it with nothing staged, then 0 back out of each screen to the root.
+    answers = [SEND, "1", "1", "5", "0", "0", "0", "0"]
     code, calls, output = run_menu(answers)
 
     assert code == 0
@@ -914,7 +914,7 @@ def test_send_refuses_to_run_without_a_message():
 
 def test_send_shows_a_long_message_on_one_line():
     body = "line one\nline two that keeps going well past the width of the row"
-    answers = [SEND, "1", "1", "2", body, ".", "4", "", "0"]
+    answers = [SEND, "1", "1", "2", body, ".", "5", "", "0"]
     code, calls, output = run_menu(answers)
 
     assert code == 0
@@ -985,7 +985,7 @@ def test_create_cancelling_the_title_returns_to_the_kind_list():
 def test_send_reoffers_the_staged_message_in_the_header():
     # 2 = Message twice: the second header must carry what was already typed, so
     # keeping it does not mean typing it again. A blank first line keeps it.
-    answers = [SEND, "1", "1", "2", "hiiiii", ".", "2", "", "4", "", "0"]
+    answers = [SEND, "1", "1", "2", "hiiiii", ".", "2", "", "5", "", "0"]
     code, calls, output = run_menu(answers)
 
     assert code == 0
@@ -994,7 +994,7 @@ def test_send_reoffers_the_staged_message_in_the_header():
 
 
 def test_send_message_header_is_bare_before_anything_is_typed():
-    answers = [SEND, "1", "1", "2", "hi", ".", "4", "", "0"]
+    answers = [SEND, "1", "1", "2", "hi", ".", "5", "", "0"]
     _code, _calls, output = run_menu(answers)
 
     assert "Message (blank cancels, . on its own line ends it):" in screens(output)
@@ -1002,7 +1002,7 @@ def test_send_message_header_is_bare_before_anything_is_typed():
 
 def test_send_shows_a_long_staged_message_cut_in_the_header():
     body = "line one\nline two that keeps going well past the width of the row"
-    answers = [SEND, "1", "1", "2", body, ".", "2", "", "4", "", "0"]
+    answers = [SEND, "1", "1", "2", body, ".", "2", "", "5", "", "0"]
     _code, calls, output = run_menu(answers)
 
     assert calls[0].text == body
@@ -1012,7 +1012,7 @@ def test_send_shows_a_long_staged_message_cut_in_the_header():
 
 
 def test_send_takes_a_multi_line_message_from_the_menu():
-    answers = [SEND, "1", "1", "2", "deploy is green", "all 300 tests pass", ".", "4", "", "0"]
+    answers = [SEND, "1", "1", "2", "deploy is green", "all 300 tests pass", ".", "5", "", "0"]
     code, calls, _output = run_menu(answers)
 
     assert code == 0
@@ -1021,7 +1021,7 @@ def test_send_takes_a_multi_line_message_from_the_menu():
 
 def test_send_pasted_lines_become_body_not_menu_answers():
     # The hazard this replaced: line two used to be read as the next menu choice.
-    answers = [SEND, "1", "1", "2", "one", "2", "3", ".", "4", "", "0"]
+    answers = [SEND, "1", "1", "2", "one", "2", "3", ".", "5", "", "0"]
     code, calls, _output = run_menu(answers)
 
     assert code == 0
@@ -1029,8 +1029,8 @@ def test_send_pasted_lines_become_body_not_menu_answers():
 
 
 def test_send_attaches_a_file_from_the_menu():
-    # 3 = Files row, then a path; 4 = Send it
-    answers = [SEND, "1", "1", "3", "/tmp/shot.png", "4", "", "0"]
+    # 3 = Files row, then a path; 5 = Send it
+    answers = [SEND, "1", "1", "3", "/tmp/shot.png", "5", "", "0"]
     code, calls, output = run_menu(answers)
 
     assert code == 0
@@ -1042,7 +1042,7 @@ def test_send_attaches_a_file_from_the_menu():
 
 def test_send_attaches_several_files():
     # Files row a second time offers Add another / Remove them all
-    answers = [SEND, "1", "1", "3", "/tmp/a.png", "3", "1", "/tmp/b.pdf", "4", "", "0"]
+    answers = [SEND, "1", "1", "3", "/tmp/a.png", "3", "1", "/tmp/b.pdf", "5", "", "0"]
     code, calls, output = run_menu(answers)
 
     assert code == 0
@@ -1051,7 +1051,7 @@ def test_send_attaches_several_files():
 
 
 def test_send_can_clear_the_attachments():
-    answers = [SEND, "1", "1", "3", "/tmp/a.png", "3", "2", "2", "hi", ".", "4", "", "0"]
+    answers = [SEND, "1", "1", "3", "/tmp/a.png", "3", "2", "2", "hi", ".", "5", "", "0"]
     code, calls, output = run_menu(answers)
 
     assert code == 0
@@ -1061,7 +1061,7 @@ def test_send_can_clear_the_attachments():
 
 
 def test_send_a_caption_with_a_file_sends_both():
-    answers = [SEND, "1", "1", "2", "look at this", ".", "3", "/tmp/a.png", "4", "", "0"]
+    answers = [SEND, "1", "1", "2", "look at this", ".", "3", "/tmp/a.png", "5", "", "0"]
     code, calls, _output = run_menu(answers)
 
     assert code == 0
@@ -1070,7 +1070,7 @@ def test_send_a_caption_with_a_file_sends_both():
 
 
 def test_send_cancelling_the_file_path_stages_nothing():
-    answers = [SEND, "1", "1", "3", "", "2", "hi", ".", "4", "", "0"]
+    answers = [SEND, "1", "1", "3", "", "2", "hi", ".", "5", "", "0"]
     code, calls, _output = run_menu(answers)
 
     assert code == 0
@@ -1133,9 +1133,9 @@ def test_doctor_keeps_the_plain_enter_or_zero_prompt():
 
 
 def test_send_tweak_keeps_the_message_files_and_topic():
-    # 3 = send, 1 = forum groups, 1 = Hermes, 2 = message, "hi", ".", 4 = send,
-    # 2 = tweak, 4 = send again, Enter, 0
-    answers = [SEND, "1", "1", "2", "hi", ".", "4", "2", "4", "", "0"]
+    # 3 1 = write > send, 1 = forum groups, 1 = Hermes, 2 = message, "hi", ".", 5 = send,
+    # 2 = tweak, 5 = send again, Enter, 0
+    answers = [SEND, "1", "1", "2", "hi", ".", "5", "2", "5", "", "0"]
     _code, calls, output = run_menu(answers)
 
     assert [call.text for call in calls] == ["hi", "hi"]
@@ -1158,8 +1158,8 @@ def test_create_offers_another_instead_of_a_rerun():
 
 def test_send_back_with_a_message_asks_before_discarding():
     # ... 2 = message, "hi", ".", 0 = back -> asks, 1 = keep editing, 0 = back -> asks
-    # again, 0 = discard -> the chat picker, 0 = root, 0 = exit
-    answers = [SEND, "1", "1", "2", "hi", ".", "0", "1", "0", "0", "0", "0"]
+    # again, 0 = discard -> the chat picker, 0 = Write, 0 = root, 0 = exit
+    answers = [SEND, "1", "1", "2", "hi", ".", "0", "1", "0", "0", "0", "0", "0"]
     _code, calls, output = run_menu(answers)
 
     text = screens(output)
@@ -1173,7 +1173,7 @@ def test_send_back_with_a_message_asks_before_discarding():
 
 
 def test_send_back_with_nothing_staged_does_not_ask():
-    _code, calls, output = run_menu([SEND, "1", "1", "0", "0", "0"])
+    _code, calls, output = run_menu([SEND, "1", "1", "0", "0", "0", "0"])
 
     assert calls == []
     assert "Unsent message" not in screens(output)
@@ -1865,3 +1865,148 @@ def test_a_date_prompt_takes_european_and_iso_and_asks_again_for_anything_else()
     assert code == 0 and (calls[0].since, calls[0].until) == ("2026-02-01", "2026-12-31")
     code, calls, _output = run_menu([ARCHIVE_QUERY, "1", "deploy", "6", "05/09/2026", "10", "", "0"])
     assert code == 0 and calls[0].since == "2026-09-05"
+
+
+# --- the message rows under Write --------------------------------------------
+
+WRITE = "3"
+REPLY = ("3", "2")
+EDIT_MSG = ("3", "3")
+DELETE_MSGS = ("3", "4")
+FORWARD = ("3", "5")
+REACT = ("3", "7")
+POLL = ("3", "11")
+MARK_READ = ("3", "13")
+
+
+def test_write_lists_send_and_every_message_verb():
+    _code, _calls, output = run_menu([WRITE, "0", "0"])
+    text = screens(output)
+    assert "Main › Write\n" in text
+    for row in (
+        "1. Send a message",
+        "2. Reply to a message",
+        "3. Edit a message",
+        "4. Delete messages (dry-run first)",
+        "5. Forward messages",
+        "6. Copy messages (text and links, never the bytes)",
+        "7. React to a message",
+        "8. Remove a reaction",
+        "9. Pin a message",
+        "10. Unpin a message",
+        "11. Post a poll",
+        "12. Show typing",
+        "13. Mark a chat read",
+        "14. Mark a chat unread",
+        "15. Bookmark a message (Saved Messages)",
+        "16. Save a draft",
+    ):
+        assert row in text, row
+
+
+def test_reply_stages_the_message_and_the_text_then_runs_without_yes():
+    # 3 2 = write > reply, 1 = forum groups, 1 = Hermes, 1 = Reply to message, 4812,
+    # 2 = Reply, body, ., 3 = Do it, Enter = menu, 0 = exit
+    answers = [REPLY, "1", "1", "1", "4812", "2", "on it", ".", "3", "", "0"]
+    code, calls, output = run_menu(answers)
+
+    assert code == 0
+    args = calls[0]
+    assert (args.command, args.message_verb, args.chat, args.message_id, args.text, args.yes) == (
+        "message", "reply", "-100111", 4812, "on it", False
+    )
+    text = screens(output)
+    assert "Main › Write › Reply › Hermes\n" in text
+    assert "Reply to message [4812]" in text
+    assert "3. Do it (shows the preview, then asks)" in text
+
+
+def test_reply_refuses_to_run_with_nothing_staged():
+    answers = [REPLY, "1", "1", "3", "0", "0", "0", "0"]
+    code, calls, output = run_menu(answers)
+    assert code == 0 and calls == []
+    assert "Fill in first: Reply to message, Reply." in screens(output)
+
+
+def test_delete_messages_dry_runs_unless_the_person_toggles_delete_for_real():
+    # 1 = Message ids, "10, 11", 6 = Run it (dry-run)
+    answers = [DELETE_MSGS, "1", "1", "1", "10, 11", "6", "", "0"]
+    code, calls, output = run_menu(answers)
+    assert code == 0
+    args = calls[0]
+    assert (args.message_verb, args.ids, args.execute, args.from_search) == ("delete", ["10,11"], False, None)
+    assert not hasattr(args, "yes") or args.yes is False
+    text = screens(output)
+    assert "Message ids  [10, 11]" in text
+    assert "5. Delete for real (asks you to type DELETE) [no]" in text
+    assert "6. Run it (dry-run unless 'Delete for real' is on)" in text
+
+    # 2 = Archive query, 5 = toggle Delete for real, 6 = run: execute is on, the
+    # DELETE prompt is the CLI's, and yes is still never set.
+    answers = [DELETE_MSGS, "1", "1", "2", "deploy AND red", "5", "6", "", "0"]
+    code, calls, output = run_menu(answers)
+    assert code == 0
+    args = calls[0]
+    assert (args.from_search, args.execute, args.ids) == ("deploy AND red", True, None)
+    assert "[yes]" in screens(output)
+
+
+def test_delete_messages_needs_ids_or_a_query():
+    answers = [DELETE_MSGS, "1", "1", "6", "0", "0", "0", "0"]
+    _code, calls, output = run_menu(answers)
+    assert calls == []
+    assert "Fill in first: Message ids or an archive query." in screens(output)
+
+
+def test_forward_picks_a_destination_chat_and_a_topic_there():
+    # 1 = ids, "11", 5 = Send them to > 2 = Channels > 1 = Alerts, 6 = Topic there, 141, 7 = Do it
+    answers = [FORWARD, "1", "1", "1", "11", "5", "2", "1", "6", "141", "7", "", "0"]
+    code, calls, output = run_menu(answers)
+    assert code == 0
+    args = calls[0]
+    assert (args.message_verb, args.ids, args.to_chat, args.to_topic, args.limit, args.i_know) == (
+        "forward", ["11"], "-100222", 141, None, False
+    )
+    assert "Send them to [Alerts]" in screens(output)
+
+
+def test_react_stages_an_emoji_and_a_poll_stages_its_answers_and_topic():
+    answers = [REACT, "1", "1", "1", "11", "2", "🔥", "3", "", "0"]
+    code, calls, _output = run_menu(answers)
+    assert code == 0 and (calls[0].message_verb, calls[0].message_id, calls[0].emoji) == ("react", 11, "🔥")
+
+    # 1 = Topic > 1 = Deploys, 2 = Question, 3 = Answers (lines), 4 = toggle several, 5 = Do it
+    answers = [POLL, "1", "1", "1", "1", "2", "Ship it?", "3", "yes", "no", ".", "4", "5", "", "0"]
+    code, calls, output = run_menu(answers)
+    assert code == 0
+    args = calls[0]
+    assert (args.message_verb, args.topic, args.question, args.options, args.multiple) == ("poll", 141, "Ship it?", ["yes", "no"], True)
+    assert "Answers      [yes / no]" in screens(output)
+
+
+def test_mark_read_needs_only_the_chat():
+    answers = [MARK_READ, "2", "1", "1", "", "0"]
+    code, calls, output = run_menu(answers)
+    assert code == 0
+    assert (calls[0].message_verb, calls[0].chat) == ("read", "-100222")
+    assert "1. Do it (shows the preview, then asks)" in screens(output)
+
+
+def test_send_stages_a_reply_to_and_can_clear_it_again():
+    # 4 = Reply to, 4812; then 4 again offers keep/change/clear, 3 = clear; 2 = message, 5 = send
+    answers = [SEND, "1", "1", "4", "4812", "2", "hi", ".", "5", "", "0"]
+    code, calls, output = run_menu(answers)
+    assert code == 0 and calls[0].reply_to == 4812
+    assert "Reply to  [4812]" in screens(output)
+
+    answers = [SEND, "1", "1", "4", "4812", "4", "3", "2", "hi", ".", "5", "", "0"]
+    code, calls, output = run_menu(answers)
+    assert code == 0 and calls[0].reply_to is None
+    assert "Reply to  [(nothing - a new message)]" in screens(output)
+
+
+def test_main_menu_after_a_message_verb_lands_on_the_root():
+    answers = [MARK_READ, "2", "1", "1", "", "0"]
+    _code, _calls, output = run_menu(answers)
+    text = screens(output)
+    assert text.count("Main › Write\n") == 1, "the group screen is drawn once, on the way in"

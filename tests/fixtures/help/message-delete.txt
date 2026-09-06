@@ -1,0 +1,15 @@
+usage: telegram-tools message delete [-h] --chat CHAT (--ids ID[,ID…] |
+                                     --from-search QUERY) [--limit N]
+                                     [--i-know] [--execute]
+
+options:
+  -h, --help           show this help message and exit
+  --chat CHAT          Chat/channel username, link, or ID the message is in
+  --ids ID[,ID…]       Message ids; repeatable, comma-separated
+  --from-search QUERY  Select every archived message in this chat matching an
+                       archive search query
+  --limit N            Refuse a selection larger than this (default 200, at
+                       most 1000)
+  --i-know             Allow more than 1000 messages; the count is asked for
+                       at the prompt
+  --execute            Actually delete them after typing DELETE

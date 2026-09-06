@@ -1,0 +1,10 @@
+usage: telegram-tools message reply [-h] --chat CHAT --to MSG --text TEXT
+                                    [--yes]
+
+options:
+  -h, --help   show this help message and exit
+  --chat CHAT  Chat/channel username, link, or ID the message is in
+  --to MSG     The message id to reply to
+  --text TEXT  Reply text, or - to read it from stdin
+  --yes        Skip the preview; the chat it lands in must be in
+               TELEGRAM_SEND_ALLOWLIST

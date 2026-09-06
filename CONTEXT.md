@@ -69,8 +69,32 @@ The terms this codebase uses, and the boundaries they imply.
   `create` = preview + `y/N`; `clear-messages` = dry-run default + `--execute`
   + a typed `DELETE`; `delete` = dry-run default + `--execute` + the target's
   **own title** typed back, and no `--yes` at all; bot edits = a diff +
-  confirm. The menu builds the same args the flags would and never sets
+  confirm; `message delete` = `clear-messages`' gate on a selection, plus the
+  count typed above 1000; every other message verb = `send`'s gate, with
+  `--yes` bound to the chat the write *lands in*. The menu builds the same args the flags would and never sets
   `yes`/`execute` itself — it is never a shorter path past a gate.
+- **Message verb** — one of the fifteen things `message` does to a message
+  (`messages.VERBS`). Each is an `Op`: its approval kind, the rights its plan
+  states, the mutation op the plan records (one per message), and the heading
+  its preview opens with. `read`, `unread`, `bookmark` and `draft` are the
+  account's own and refuse under bot mode; the rest are `BOT_VERBS`.
+- **Selection** — the messages a bulk verb (`delete`, `forward`, `copy`) acts
+  on: `--ids` as typed, or `--from-search`, an archive query answered from the
+  archive's scopes for that chat. Always resolved to ids before anything is
+  fetched, and every id is in the plan and the preview.
+- **Bulk bound** — section 7's rule, `messages.bound_selection`: more than
+  `--limit` (200) refuses with `BULK_LIMIT` rather than cutting the selection,
+  and more than 1000 needs `--i-know` *and* the count typed after `DELETE`.
+  Refused by count, before a single message is fetched.
+- **Brief** — one message as a preview shows it: id, date, sender, first line,
+  a `[media]` mark, and whether it is the identity's own (`out`, else the
+  sender id). Own-ness decides whether `edit` and `delete` add a right.
+- **Copy** — `message copy` re-posts a message's text as the identity and, for
+  an attachment, a link to the original (`messages.message_link`). Never the
+  bytes: downloads belong to the review queue and its quarantine.
+- **Mentions line** — `Mentions @harry, @all (everyone in the chat)`, above the
+  body of every posting preview (`mentions.py`). Telegram has no mass-mention
+  control beyond the text, so naming them is the whole control.
 - **Allowlist** — `TELEGRAM_SEND_ALLOWLIST`: the `chat[:topic]` destinations an
   unattended (`--yes`) send may reach. Unset refuses every one of them; only
   the unattended path consults it, because a human who saw the preview has

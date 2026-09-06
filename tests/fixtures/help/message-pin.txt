@@ -1,0 +1,8 @@
+usage: telegram-tools message pin [-h] --chat CHAT --id MSG [--yes]
+
+options:
+  -h, --help   show this help message and exit
+  --chat CHAT  Chat/channel username, link, or ID the message is in
+  --id MSG     The message id
+  --yes        Skip the preview; the chat it lands in must be in
+               TELEGRAM_SEND_ALLOWLIST

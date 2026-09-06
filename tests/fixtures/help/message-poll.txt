@@ -1,0 +1,13 @@
+usage: telegram-tools message poll [-h] --chat CHAT [--topic TOPIC]
+                                   --question QUESTION --option TEXT
+                                   [--multiple] [--yes]
+
+options:
+  -h, --help           show this help message and exit
+  --chat CHAT          Chat/channel username, link, or ID the message is in
+  --topic TOPIC        Topic ID to post into; omit for the chat itself
+  --question QUESTION  The question
+  --option TEXT        An answer; repeat for each, 2 to 10
+  --multiple           Let people pick more than one answer
+  --yes                Skip the preview; the chat it lands in must be in
+                       TELEGRAM_SEND_ALLOWLIST

@@ -33,3 +33,13 @@ Checked on 2026-08-25 for `send --file` and the session lock (Telethon 1.44.0):
 
 - `TelegramClient.send_file(entity, file, caption=..., reply_to=...)` accepts a list for `file` and groups it into a single album; passing a one-item list is the same as passing the item, so the caller never has to special-case one attachment. It returns a list of messages for a list and a single message otherwise.
 - The SQLite session raises a bare `sqlite3.OperationalError("database is locked")` when a second client opens a session file another already holds — no Telethon-specific exception wraps it. Matching on that wording is the only way to tell "someone else has it" from a corrupt database, so the check is narrow on purpose and any other `OperationalError` still propagates.
+
+Checked on 2026-09-06 for the `message` verbs (Telethon 1.44.0):
+
+- `TelegramClient.edit_message(entity, message_id, text)`, `delete_messages(entity, ids, revoke=True)`, `forward_messages(to, ids, from_peer=...)`, `pin_message` / `unpin_message(entity, id)` and `send_read_acknowledge(entity)` cover reply, edit, delete, forward, pin, unpin and read. `forward_messages` has no topic parameter; a forward into a topic goes through the raw `messages.ForwardMessagesRequest` with `top_msg_id`, whose `Updates` carry the new messages.
+- A reply is `send_message(entity, text, reply_to=<message id>)`; Telegram threads it into that message's topic itself, so a reply needs no topic id.
+- Reactions are `messages.SendReactionRequest(peer, msg_id, reaction=[ReactionEmoji(emoticon)])`; an empty list removes the caller's reactions. A message's `reactions.results[].chosen_order` is set on the ones the caller placed, which is what the readback checks.
+- A poll is `send_message(entity, file=InputMediaPoll(Poll(id=0, hash=0, question=TextWithEntities(...), answers=[PollAnswer(TextWithEntities(...), option=bytes)])))`; `id` and `hash` are zero on a new poll and Telegram assigns them.
+- `client.action(entity, "typing")` is an async context manager that keeps the status alive until it exits. There is nothing to read back afterwards.
+- `messages.MarkDialogUnreadRequest(peer=InputDialogPeer(peer), unread=True)` marks unread; `messages.SaveDraftRequest(peer, message, reply_to=InputReplyToMessage(reply_to_msg_id=topic, top_msg_id=topic))` saves a draft in a topic. `messages.GetPeerDialogsRequest(peers=[InputDialogPeer(peer)])` returns `dialogs[0]` with `unread_count`, `unread_mark` and `draft`, which is the one readback for read, unread and draft.
+- Saved Messages is the entity `"me"`; `forward_messages("me", ids, from_peer=...)` is a bookmark.

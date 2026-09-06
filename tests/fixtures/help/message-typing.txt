@@ -1,0 +1,9 @@
+usage: telegram-tools message typing [-h] --chat CHAT [--seconds SECONDS]
+                                     [--yes]
+
+options:
+  -h, --help         show this help message and exit
+  --chat CHAT        Chat/channel username, link, or ID the message is in
+  --seconds SECONDS  How long to show it (default 5)
+  --yes              Skip the preview; the chat it lands in must be in
+                     TELEGRAM_SEND_ALLOWLIST

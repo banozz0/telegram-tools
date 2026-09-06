@@ -60,6 +60,22 @@ COMMANDS = {
     "archive-export": ("archive", "export"),
     "archive-retention": ("archive", "retention"),
     "archive-forget": ("archive", "forget"),
+    "message": ("message",),
+    "message-reply": ("message", "reply"),
+    "message-edit": ("message", "edit"),
+    "message-delete": ("message", "delete"),
+    "message-forward": ("message", "forward"),
+    "message-copy": ("message", "copy"),
+    "message-react": ("message", "react"),
+    "message-unreact": ("message", "unreact"),
+    "message-pin": ("message", "pin"),
+    "message-unpin": ("message", "unpin"),
+    "message-poll": ("message", "poll"),
+    "message-typing": ("message", "typing"),
+    "message-read": ("message", "read"),
+    "message-unread": ("message", "unread"),
+    "message-bookmark": ("message", "bookmark"),
+    "message-draft": ("message", "draft"),
 }
 
 # The only text this card was allowed to add, spelled exactly as the help spells
@@ -91,6 +107,13 @@ ALLOWED_ADDITIONS = (
     "archive Sync, search and export the local archive",
     "[--archive]",
     "--archive Search the local archive instead of Telegram (the same as `archive search`)",
+    # The message-ops card (agent-bo-95421945): one new subcommand group, and
+    # on `send` the one flag section 15 gives it here, `--reply-to`. Both
+    # spellings the subcommand name takes, as `archive,` does.
+    "message,",
+    "message Act on messages: reply, edit, delete, forward, copy, react, pin, poll, read, bookmark, draft",
+    "[--reply-to MSG]",
+    "--reply-to MSG Post it as a reply to this message id",
 )
 
 # A choice list that grew. The help line is the same words; the braces name

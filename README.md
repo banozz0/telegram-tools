@@ -14,18 +14,19 @@ Built on [Telethon](https://github.com/LonamiWebs/Telethon). Everything runs on 
 - **`search`** — searches messages by text, sender, date range, or topic, and prints a table or exports JSON, CSV, JSON lines, Markdown or HTML. Messages carrying a photo or file are marked `[media]`. `search --archive` answers the same flags from the local archive, offline.
 - **`archive`** — a local, searchable copy of everything your account can read: `archive sync` fills it and resumes where it stopped, `archive search` is full-text search over it with no connection, `archive export` writes one search in five formats, `archive status` says what it holds, and `archive retention` / `archive forget` prune it behind the same typed-title gate `delete` has. See [The local archive](#the-local-archive).
 - **`clear-messages`** — deletes all messages inside selected forum topic(s) while preserving the topics and their IDs. Dry-run by default; deleting requires both `--execute` *and* typing `DELETE` at a prompt.
-- **`send`** — posts a message, a file, or both to a chat or into one forum topic. Shows you the whole message and its destination, then asks `y/N`.
+- **`send`** — posts a message, a file, or both to a chat or into one forum topic, optionally as a reply (`--reply-to`). Shows you the whole message, its destination and every `@mention` in it, then asks `y/N`.
+- **`message`** — what you do to a message once it exists: `reply`, `edit`, `delete`, `forward`, `copy`, `react`, `unreact`, `pin`, `unpin`, `poll`, `typing`, `read`, `unread`, `bookmark`, `draft`. Each shows the chat and the message it is about to act on, then asks. Deleting is dry-run by default, bounded, and needs `--execute` plus a typed `DELETE`. See [Message tools](#message-tools).
 - **`create`** — makes a supergroup (optionally with topics already on), a broadcast channel, or a topic inside a forum group, and prints the new ID.
 - **`delete`** — removes a supergroup, a broadcast channel, or a forum topic: the thing itself, not just its messages. Dry-run by default; deleting requires `--execute` *and* typing the target's exact title at a prompt. It deletes exactly what `create` can make, so nothing this tool removes is beyond making again.
 - **`bots`** — lists the bots you own with their numeric IDs, and edits what @BotFather edits: display name, bio, description, commands, profile photo, and default admin rights.
 - **`doctor`** — checks your local setup without printing any secrets.
-- **`--as-bot NICK`** — runs `send` or `create topic` as one of your own bots instead of as you, naming both on every screen. See [Acting as a bot](#acting-as-a-bot).
+- **`--as-bot NICK`** — runs `send`, `create topic` or a message verb as one of your own bots instead of as you, naming both on every screen. See [Acting as a bot](#acting-as-a-bot).
 - **`--json`** — any command, machine-readable: one object on stdout carrying the result, the target, the gate and the error code. For agents and scripts; see [For scripts and agents](#for-scripts-and-agents).
 
 ## What it doesn't do (on purpose)
 
-- No deleting forum topics, and no renaming them — `clear-messages` leaves topic IDs untouched.
-- No media downloads. `send` can attach files; nothing downloads them back — the archive keeps text and a `has_media` mark, never the files.
+- No renaming forum topics — `clear-messages` leaves topic IDs untouched, and `delete topic` is the only way a topic goes.
+- No media downloads. `send` can attach files; nothing downloads them back — the archive keeps text and a `has_media` mark, never the files, and `message copy` links to an attachment rather than fetching it.
 - No automation loops. The `bots` command edits bot *settings*; it never runs a bot.
 - No changing a bot's `@username`, creating or deleting bots, or reading/revoking bot tokens — those stay with @BotFather.
 - No cloud anything — credentials and session files stay in `~/.telegram-tools/`.
@@ -239,6 +240,19 @@ cat notes.txt | telegram-tools send --chat -1001234567890 --text -
 # The same, posted by one of your bots instead of by you
 telegram-tools --as-bot alerts send --chat -1001234567890 --topic 141 --text "deploy is green"
 
+# Reply to a message, react to one, pin one (each shows the message first, then asks)
+telegram-tools message reply --chat -1001234567890 --to 4812 --text "on it"
+telegram-tools message react --chat -1001234567890 --id 4812 --emoji 🔥
+telegram-tools message pin --chat -1001234567890 --id 4812
+
+# Delete messages: dry-run first, then --execute and type DELETE
+telegram-tools message delete --chat -1001234567890 --ids 4812,4813
+telegram-tools message delete --chat -1001234567890 --from-search "deploy AND red" --execute
+
+# Forward with the header, or copy the text (an attachment becomes a link)
+telegram-tools message forward --chat -1001234567890 --ids 4812 --to @releases
+telegram-tools message copy --chat -1001234567890 --ids 4812 --to @releases --to-topic 7
+
 # Attach files (repeatable; several go as one album, --text is the caption)
 telegram-tools send --chat -1001234567890 --file shot.png --file notes.pdf --text "the numbers"
 
@@ -279,6 +293,44 @@ Topics
 217   🔎 Support
 16    General
 ```
+
+## Message tools
+
+`telegram-tools message <verb> --chat CHAT …` does to a message what the app's long-press
+menu does, from a terminal. The verbs:
+
+| Verb | Does | Flags |
+| --- | --- | --- |
+| `reply` | posts a reply | `--to MSG --text` |
+| `edit` | changes the text of your own message, or anyone's with the edit right | `--id MSG --text` |
+| `delete` | deletes messages, dry-run by default | `--ids 1,2` or `--from-search QUERY`, `--limit`, `--i-know`, `--execute` |
+| `forward` | forwards, header and all | `--ids` / `--from-search`, `--to CHAT`, `--to-topic` |
+| `copy` | re-posts the text as you; an attachment becomes a link to the original, never the bytes | the same as `forward` |
+| `react` / `unreact` | puts your reaction on, takes it off | `--id MSG`, `--emoji 🔥` (`unreact` without `--emoji` removes every reaction of yours) |
+| `pin` / `unpin` | needs the pin right | `--id MSG` |
+| `poll` | posts a poll | `--question`, `--option` (2 to 10), `--multiple`, `--topic` |
+| `typing` | shows *typing…* | `--seconds` |
+| `read` / `unread` | marks the chat read, or unread | — |
+| `bookmark` | forwards to Saved Messages and writes a `bookmarks` row in the archive | `--id MSG`, `--label` |
+| `draft` | saves a draft in the chat, or a topic in it | `--text`, `--topic` |
+
+Every verb resolves the chat, fetches the message it is about to act on, and shows both
+— the chat, and the message's id, date, sender and first line — before asking. A
+message id that is not there refuses with `TARGET_NOT_FOUND` before any prompt.
+
+**`delete` is `clear-messages`' gate on a selection.** It lists every id it would
+remove and stops; `--execute` asks you to type `DELETE`, and there is no `--yes`.
+`--from-search` is an archive query (`archive search` syntax), so the archive has to
+hold the chat; the ids it selects are shown in full. More than `--limit` messages
+(200 by default) refuses with `BULK_LIMIT` rather than cutting the selection, and
+above 1000 you also need `--i-know` and to type the exact count at the prompt.
+Someone else's message needs the delete-messages right; your own needs none.
+
+**Everything else is `send`'s gate.** A preview and a `y/N`; `--yes` skips it only when
+the chat the write lands in — `--to` for `forward` and `copy`, `--chat` otherwise — is
+in `TELEGRAM_SEND_ALLOWLIST`. `read`, `unread`, `bookmark` and `draft` are the
+account's own and refuse under `--as-bot`; the rest run as the bot where it is a member
+and holds the right.
 
 ## The local archive
 
@@ -329,7 +381,7 @@ Acting as: Sven (@sven) · account
 --------------------------------------------
 1. Find IDs (chats, topics)
 2. Read (search live, archive, export)
-3. Write (send)
+3. Write (send, reply, message tools)
 4. Build (create, delete)
 5. Clear messages
 6. Manage (admins, members, invites, settings)
@@ -363,6 +415,9 @@ whole bot list to JSON and look up a bot you do not own, read-only, and *Read* o
 a screen of six — the live search, then sync, status, search or export, prune and
 forget for the archive. Sync picks its scope from your live chats and topics, the same
 picker Search uses; search, prune and forget pick from what the archive already holds.
+*Write* opens a screen of sixteen — Send, then one row per message verb — each picking
+the chat from your live chats and staging the verb's fields; Send's form has a *Reply to*
+row, and Delete's *Delete for real* toggle is its `--execute`.
 
 The menu is in colour when it is talking to a terminal, and plain text in a pipe, under
 `NO_COLOR`, or with `TERM=dumb`.
@@ -373,8 +428,9 @@ a multi-line message works instead of feeding its later lines to the menu as ans
 The safety gates are the same as the flags', not looser: clearing topic messages
 dry-runs first and still asks you to type `DELETE`, deleting a group, channel or topic
 dry-runs first and still asks you to type its exact title, pruning or forgetting part
-of the archive dry-runs first and asks for the scope's title too, sending shows the whole
-message and asks `y/N`, and bot edits still print a diff and ask before writing. The
+of the archive dry-runs first and asks for the scope's title too, deleting messages
+dry-runs first and still asks for `DELETE`, sending or any other message verb shows
+the whole thing and asks `y/N`, and bot edits still print a diff and ask before writing. The
 menu has no equivalent of `--yes` at all. With no terminal attached it prints this help instead.
 
 ## For scripts and agents
@@ -412,7 +468,7 @@ telegram-tools --json send --chat -1001234567890 --topic 141 --text "deploy is g
 - **Everything a person would read moves to stderr** under either flag — tables,
   previews, progress, prompts — so stdout stays parseable.
 - **`error.code` is stable.** `NOT_ALLOWLISTED`, `TARGET_NOT_FOUND`,
-  `TARGET_KIND_MISMATCH`, `PERMISSION_DENIED`, `PLAN_DRIFT`, `APPROVAL_REQUIRED`,
+  `TARGET_KIND_MISMATCH`, `PERMISSION_DENIED`, `PLAN_DRIFT`, `APPROVAL_REQUIRED`, `BULK_LIMIT`,
   `SESSION_IN_USE`, `CONFIG_MISSING`, `CONFIG_INVALID`, `LOGIN_REQUIRED`,
   `RATE_LIMITED` and others. `error.hint` is the exact command or edit that
   would fix it — worth relaying verbatim.
@@ -444,8 +500,9 @@ exactly as before; a bare `--json` on either means the envelope. A run whose
 output goes to a file prints no `Acting as:` banner, so its stdout stays what it
 has always been: empty.
 
-`--as-bot NICK` goes before the subcommand too and runs `send` or `create topic`
-as that bot; any other command under it refuses with `IDENTITY_MODE_UNSUPPORTED`
+`--as-bot NICK` goes before the subcommand too and runs `send`, `create topic` or a
+message verb (all but `read`, `unread`, `bookmark` and `draft`) as that bot; any other
+command under it refuses with `IDENTITY_MODE_UNSUPPORTED`
 and the same command minus the flag as the hint. An agent should pass it only
 when the user named the bot.
 
@@ -465,6 +522,8 @@ for a code or a password. Relay the refusal and let the person run it.
 | `auth` | Local only — writes or removes this machine's login. `--logout` needs the profile's name typed back, `--migrate` a `y/N`; there is no `--yes`, and it cannot run unattended. Nothing it asks for is stored: a two-step-verification password goes straight into the sign-in call |
 | `create` | No — makes new things, changes nothing existing, after a `y/N` unless you pass `--yes` |
 | `send` | Outward-facing — posts publicly as you (text, files, or both), after showing the whole message and asking `y/N`. `--yes` skips the prompt only for destinations in `TELEGRAM_SEND_ALLOWLIST`. Under `--as-bot` it posts as that bot, only into chats the bot is in, behind the same preview and the same allowlist |
+| `message reply/edit/forward/copy/react/unreact/pin/unpin/poll/typing/read/unread/bookmark/draft` | Outward-facing where it posts, visible to the chat where it reacts or pins — each shows the chat and the message it acts on, then asks `y/N`; `--yes` only for a landing chat in `TELEGRAM_SEND_ALLOWLIST`. `edit` of someone else's message needs the edit right, `pin` the pin right |
+| `message delete` | Yes — messages, for everyone. Dry-run by default and lists every id; only with `--execute` **and** a typed `DELETE`, never more than `--limit` (200) without raising it, never more than 1000 without `--i-know` and the count typed too; there is no `--yes`. Someone else's message needs the delete-messages right |
 | `bots` | No — changes settings on bots you own, after a diff and a `y/N` unless you pass `--yes`; reversible if you still have the old values, but `--remove-photo` and `--clear-commands` discard data Telegram will not hand back |
 | `clear-messages` | Yes — but only with `--execute` **and** a typed `DELETE`, only messages, never topics |
 | `delete` | Yes, and further than `clear-messages` goes — the group, channel or topic itself, for everyone in it. Only with `--execute` **and** the target's exact title typed back; there is no `--yes`, so it never runs unattended. It removes only what `create` can make: a basic group is refused, because this tool cannot make one back |
@@ -473,7 +532,7 @@ for a code or a password. Relay the refusal and let the person run it.
 
 `bots` refuses to edit a bot you do not own, and it never fetches or exports a bot token from Telegram — the three token-only edits simply fail with a message naming the fields they need one for.
 
-Every write — sending, creating, clearing, deleting, editing a bot — now also
+Every write — sending, a message verb, creating, clearing, deleting, editing a bot — now also
 asks Telegram what rights your account actually holds in that chat before it
 does anything, and refuses by name when one it needs is missing. Once you have
 answered the gate, the target is resolved a second time and compared with the

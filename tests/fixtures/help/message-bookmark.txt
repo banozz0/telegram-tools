@@ -1,0 +1,10 @@
+usage: telegram-tools message bookmark [-h] --chat CHAT --id MSG
+                                       [--label LABEL] [--yes]
+
+options:
+  -h, --help     show this help message and exit
+  --chat CHAT    Chat/channel username, link, or ID the message is in
+  --id MSG       The message id
+  --label LABEL  A label for the archive's bookmark row
+  --yes          Skip the preview; the chat it lands in must be in
+                 TELEGRAM_SEND_ALLOWLIST

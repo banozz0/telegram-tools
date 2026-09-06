@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from telegram_tools.mentions import mentions_line
 from telegram_tools.models import TopicInfo
 
 RULE = "--------------------------------------------"
@@ -23,10 +24,18 @@ class SendTarget:
     chat_id: int
     chat_title: str
     topic: TopicInfo | None = None
+    # A message id to post this as a reply to. Telegram threads the reply into
+    # that message's topic itself, so it stands in for the topic as `reply_to`.
+    reply_to: int | None = None
 
     @property
     def topic_id(self) -> int | None:
         return None if self.topic is None else self.topic.id
+
+    @property
+    def threaded_to(self) -> int | None:
+        """What Telethon's `reply_to` gets: the message replied to, else the topic."""
+        return self.reply_to if self.reply_to is not None else self.topic_id
 
 
 @dataclass(frozen=True)
@@ -68,6 +77,8 @@ def format_send_preview(
         f"Chat    {target.chat_title} ({target.chat_id})",
         f"Topic   {topic}",
     ]
+    if target.reply_to is not None:
+        lines.append(f"Reply to message {target.reply_to}")
     for index, raw in enumerate(files):
         path = Path(raw)
         # Sizes come off disk, not from the argument: naming a file that is not the
@@ -75,6 +86,11 @@ def format_send_preview(
         size = format_size(path.stat().st_size) if path.is_file() else "missing"
         lines.append(f"{'Files   ' if index == 0 else '        '}{path.name} ({size})")
     lines.append(RULE)
+    # Telegram has no mass-mention control beyond the text itself, so the
+    # preview names every @mention, and an everyone-token as what it is.
+    mentions = mentions_line(text)
+    if mentions:
+        lines.append(mentions)
     lines.append(text if text else "(no caption)" if files else "")
     lines.append(RULE)
     return "\n".join(lines)
@@ -141,10 +157,10 @@ async def send_message(
     if files:
         # Always a list, even for one file: Telethon groups a list into a single
         # album, which is what several attachments in one send should look like.
-        sent = await client.send_file(peer, files, caption=text or None, reply_to=target.topic_id)
+        sent = await client.send_file(peer, files, caption=text or None, reply_to=target.threaded_to)
         first = sent[0] if isinstance(sent, list) else sent
     else:
-        first = await client.send_message(peer, text, reply_to=target.topic_id)
+        first = await client.send_message(peer, text, reply_to=target.threaded_to)
 
     return SendResult(
         chat_id=target.chat_id,

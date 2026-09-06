@@ -1,0 +1,10 @@
+usage: telegram-tools message draft [-h] --chat CHAT [--topic TOPIC]
+                                    --text TEXT [--yes]
+
+options:
+  -h, --help     show this help message and exit
+  --chat CHAT    Chat/channel username, link, or ID the message is in
+  --topic TOPIC  Topic ID the draft belongs to; omit for the chat itself
+  --text TEXT    The draft text, or - to read it from stdin
+  --yes          Skip the preview; the chat it lands in must be in
+                 TELEGRAM_SEND_ALLOWLIST

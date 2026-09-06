@@ -1,0 +1,27 @@
+usage: telegram-tools message [-h]
+                              {reply,edit,delete,forward,copy,react,unreact,pin,unpin,poll,typing,read,unread,bookmark,draft} ...
+
+positional arguments:
+  {reply,edit,delete,forward,copy,react,unreact,pin,unpin,poll,typing,read,unread,bookmark,draft}
+    reply               Reply to one message
+    edit                Change the text of a message (your own, or with the
+                        edit right)
+    delete              Delete messages, from ids or an archive query (dry-run
+                        by default)
+    forward             Forward messages to another chat, with their header
+    copy                Re-post messages' text to another chat, linking to any
+                        attachment; never the bytes
+    react               Put an emoji reaction on a message
+    unreact             Take your reaction off a message
+    pin                 Pin a message
+    unpin               Unpin a message
+    poll                Post a poll
+    typing              Show 'typing…' in a chat for a few seconds
+    read                Mark a chat read (account only)
+    unread              Mark a chat unread (account only)
+    bookmark            Forward a message to Saved Messages and note it in the
+                        archive (account only)
+    draft               Save a draft in a chat or topic (account only)
+
+options:
+  -h, --help            show this help message and exit

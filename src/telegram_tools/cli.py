@@ -12,7 +12,7 @@ from typing import Sequence
 from telegram_tools._core import export as _export
 from telegram_tools._core import rid as _rid
 from telegram_tools._core.audit import AuditLog
-from telegram_tools._core.contract import CodedError, exit_code
+from telegram_tools._core.contract import CodedError, exit_code, utc_now
 from telegram_tools._core.identity import Identity, Target
 from telegram_tools._core.plan import Evidence, Mutation
 from telegram_tools import archive as archive_store
@@ -53,6 +53,7 @@ from telegram_tools.discovery import classify_entity, discover_chats, filter_cha
 from telegram_tools.doctor import require_tight_modes, run_doctor
 from telegram_tools.envelope import PLATFORM, PREFIX, TOOL, CommandError, Reporter, account_command, error_for, platform_error
 from telegram_tools.exporters import SEARCH_FORMATS, json_text, write_records
+from telegram_tools import messages as message_ops
 from telegram_tools.resolver import EntityResolutionError, resolve_chat
 from telegram_tools.search import format_message_records, search_messages
 from telegram_tools.send import SendTarget, confirm_send, format_send_preview, require_send_allowed, send_message
@@ -73,7 +74,7 @@ DELETE_TOPIC_RIGHTS = ("delete_messages",)
 # The commands that change something at Telegram's end or on this machine.
 # `auth` is here because it writes a session, which is the one local file worth
 # being strict about.
-WRITES = ("send", "create", "delete", "clear-messages", "bots", "auth")
+WRITES = ("send", "message", "create", "delete", "clear-messages", "bots", "auth")
 # The archive commands that write the local store. `status`, `search` and
 # `export` read it, and a read is left alone for the same reason `doctor` is.
 ARCHIVE_WRITES = ("sync", "retention", "forget")
@@ -84,7 +85,10 @@ ARCHIVE_WRITES = ("sync", "retention", "forget")
 # opening a topic in a group it administers. Everything else refuses by name
 # before any connection is opened, with the same command minus the flag as the
 # hint. `doctor` and `profiles` act as nobody and are not on either list.
-BOT_MODE_COMMANDS = ("send", "create")
+# `message` runs the verbs a bot can perform (`messages.BOT_VERBS`): the four
+# that need a dialog of the account's own -- read, unread, bookmark, draft --
+# refuse here too.
+BOT_MODE_COMMANDS = ("send", "create", "message")
 BOT_MODE_CREATE_KINDS = ("topic",)
 
 
@@ -227,6 +231,63 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Skip the preview and send; the destination must be in TELEGRAM_SEND_ALLOWLIST",
     )
+    send_parser.add_argument("--reply-to", dest="reply_to", type=positive_int, metavar="MSG", help="Post it as a reply to this message id")
+
+    message_parser = subparsers.add_parser("message", help="Act on messages: reply, edit, delete, forward, copy, react, pin, poll, read, bookmark, draft")
+    verbs = message_parser.add_subparsers(dest="message_verb")
+    verb_parsers: dict[str, argparse.ArgumentParser] = {}
+    for verb, text in (
+        ("reply", "Reply to one message"),
+        ("edit", "Change the text of a message (your own, or with the edit right)"),
+        ("delete", "Delete messages, from ids or an archive query (dry-run by default)"),
+        ("forward", "Forward messages to another chat, with their header"),
+        ("copy", "Re-post messages' text to another chat, linking to any attachment; never the bytes"),
+        ("react", "Put an emoji reaction on a message"),
+        ("unreact", "Take your reaction off a message"),
+        ("pin", "Pin a message"),
+        ("unpin", "Unpin a message"),
+        ("poll", "Post a poll"),
+        ("typing", "Show 'typing…' in a chat for a few seconds"),
+        ("read", "Mark a chat read (account only)"),
+        ("unread", "Mark a chat unread (account only)"),
+        ("bookmark", "Forward a message to Saved Messages and note it in the archive (account only)"),
+        ("draft", "Save a draft in a chat or topic (account only)"),
+    ):
+        verb_parsers[verb] = verbs.add_parser(verb, help=text)
+    for verb, verb_parser in verb_parsers.items():
+        verb_parser.add_argument("--chat", required=True, help="Chat/channel username, link, or ID the message is in")
+    verb_parsers["reply"].add_argument("--to", dest="message_id", required=True, type=positive_int, metavar="MSG", help="The message id to reply to")
+    verb_parsers["reply"].add_argument("--text", required=True, help="Reply text, or - to read it from stdin")
+    verb_parsers["edit"].add_argument("--id", dest="message_id", required=True, type=positive_int, metavar="MSG", help="The message id to edit")
+    verb_parsers["edit"].add_argument("--text", required=True, help="The new text, or - to read it from stdin")
+    for verb in ("delete", "forward", "copy"):
+        selection = verb_parsers[verb].add_mutually_exclusive_group(required=True)
+        selection.add_argument("--ids", action="append", metavar="ID[,ID…]", help="Message ids; repeatable, comma-separated")
+        selection.add_argument("--from-search", dest="from_search", metavar="QUERY", help="Select every archived message in this chat matching an archive search query")
+        verb_parsers[verb].add_argument("--limit", type=positive_int, metavar="N", help="Refuse a selection larger than this (default 200, at most 1000)")
+        verb_parsers[verb].add_argument("--i-know", dest="i_know", action="store_true", help="Allow more than 1000 messages; the count is asked for at the prompt")
+    verb_parsers["delete"].add_argument("--execute", action="store_true", help="Actually delete them after typing DELETE")
+    for verb in ("forward", "copy"):
+        verb_parsers[verb].add_argument("--to", dest="to_chat", required=True, metavar="CHAT", help="The chat to post them into")
+        verb_parsers[verb].add_argument("--to-topic", dest="to_topic", type=positive_int, metavar="TOPIC", help="A topic in that chat; omit for the chat itself")
+    for verb in ("react", "unreact", "pin", "unpin", "bookmark"):
+        verb_parsers[verb].add_argument("--id", dest="message_id", required=True, type=positive_int, metavar="MSG", help="The message id")
+    verb_parsers["react"].add_argument("--emoji", required=True, help="The reaction, as the emoji itself")
+    verb_parsers["unreact"].add_argument("--emoji", help="The reaction to remove; omit to remove every reaction of yours")
+    verb_parsers["poll"].add_argument("--topic", type=positive_int, help="Topic ID to post into; omit for the chat itself")
+    verb_parsers["poll"].add_argument("--question", required=True, help="The question")
+    verb_parsers["poll"].add_argument("--option", dest="options", action="append", required=True, metavar="TEXT", help="An answer; repeat for each, 2 to 10")
+    verb_parsers["poll"].add_argument("--multiple", action="store_true", help="Let people pick more than one answer")
+    verb_parsers["typing"].add_argument("--seconds", type=positive_int, default=5, help="How long to show it (default 5)")
+    verb_parsers["bookmark"].add_argument("--label", default="", help="A label for the archive's bookmark row")
+    verb_parsers["draft"].add_argument("--topic", type=positive_int, help="Topic ID the draft belongs to; omit for the chat itself")
+    verb_parsers["draft"].add_argument("--text", required=True, help="The draft text, or - to read it from stdin")
+    for verb, verb_parser in verb_parsers.items():
+        if verb == "delete":
+            # Deleting messages is typed_delete: --execute plus DELETE at the
+            # prompt, and no --yes, so it never runs unattended.
+            continue
+        verb_parser.add_argument("--yes", action="store_true", help="Skip the preview; the chat it lands in must be in TELEGRAM_SEND_ALLOWLIST")
 
     create_parser = subparsers.add_parser("create", help="Create a group, channel, or forum topic")
     create_kinds = create_parser.add_subparsers(dest="create_kind")
@@ -802,15 +863,19 @@ async def _run_send(client, args, config, *, report: Reporter | None = None) -> 
     destination = chat if topic is None else ChatTargets.topic_target(chat, topic)
     report.set_target(destination)
     report.show_banner()
-    target = SendTarget(chat_id=resolved.id, chat_title=chat.title, topic=topic)
+    reply_to = getattr(args, "reply_to", None)
+    target = SendTarget(chat_id=resolved.id, chat_title=chat.title, topic=topic, reply_to=reply_to)
 
     rights = await _rights(client, report, peer)
     identity = await _acting(client, report)
+    mutation_params = {"files": len(files), "text": bool(text)}
+    if reply_to is not None:
+        mutation_params["reply_to"] = int(reply_to)
     plan, warnings = build_plan(
         identity=identity,
         command="send",
         targets=[destination],
-        mutations=[Mutation("send_message", destination.rid, {"files": len(files), "text": bool(text)})],
+        mutations=[Mutation("send_message", destination.rid, mutation_params)],
         approval="yes_allowlist" if args.yes else "prompt_y",
         rights=rights,
         required=SEND_RIGHTS,
@@ -849,7 +914,7 @@ async def _run_send(client, args, config, *, report: Reporter | None = None) -> 
             identity=identity,
             command="send",
             targets=[fresh],
-            mutations=[Mutation("send_message", fresh.rid, {"files": len(files), "text": bool(text)})],
+            mutations=[Mutation("send_message", fresh.rid, mutation_params)],
             approval="yes_allowlist" if args.yes else "prompt_y",
             rights=rights,
             required=SEND_RIGHTS,
@@ -876,6 +941,261 @@ async def _sent_message(client, peer, destination, message_id) -> str:
     if message is None:
         raise LookupError("Telegram returned no message under that id")
     return f"message {int(getattr(message, 'id'))} is in {destination.display}"
+
+
+# -- message verbs ---------------------------------------------------------
+
+
+async def _resolve_destination(client, report: Reporter, reference, topic_id: int | None):
+    """A chat, and a topic in it when one was named, as a Target plus what the calls need."""
+    resolved = await _resolve(client, report, reference)
+    chat = ChatTargets.chat_target(resolved, reference)
+    topic = None
+    if topic_id is not None:
+        found = await get_forum_topics_by_ids(client, resolved.input_entity, [topic_id])
+        topic = found[0] if found else None
+        if topic is None or topic.title == str(topic_id):
+            raise CommandError(
+                f"No topic {topic_id} in {chat.title} - list them with `discover`.",
+                code="TARGET_NOT_FOUND",
+                hint="telegram-tools discover",
+            )
+    target = chat if topic is None else ChatTargets.topic_target(chat, topic)
+    return resolved, chat, topic, target
+
+
+def _selection_ids(args, archive_scope) -> list[int]:
+    """The ids a bulk verb acts on: `--ids` as typed, or `--from-search` answered by the archive."""
+    if getattr(args, "from_search", None):
+        with archive_store.open_archive() as archive:
+            rids = archive_scope(archive.connection)
+            return message_ops.ids_from_search(
+                archive, args.from_search, scope=rids, limit=getattr(args, "limit", None), i_know=bool(getattr(args, "i_know", False))
+            )
+    ids = message_ops.parse_ids(getattr(args, "ids", None))
+    if not ids:
+        raise ValueError("Nothing selected: pass --ids with at least one message id.")
+    message_ops.bound_selection(len(ids), limit=getattr(args, "limit", None), i_know=bool(getattr(args, "i_know", False)))
+    return ids
+
+
+async def _run_message(client, args, config, *, report: Reporter | None = None) -> int:
+    """One message verb, behind the four steps every write here takes.
+
+    Plan, preflight, gate, re-derivation, call, readback, audit -- the order
+    `send` and `delete` follow. What differs per verb is in `messages.py`;
+    what is the same is here, once.
+    """
+    report = report or Reporter()
+    verb = getattr(args, "message_verb", None)
+    if verb not in message_ops.OPS:
+        raise ValueError("message needs one of: " + ", ".join(message_ops.VERBS) + ".")
+    op = message_ops.OPS[verb]
+    identity = await _acting(client, report)
+    me = report.me or await client.get_me()
+    me_id = int(getattr(me, "id", 0) or 0)
+
+    topic_flag = getattr(args, "topic", None)
+    resolved, chat, topic, target = await _resolve_destination(client, report, args.chat, topic_flag)
+    peer = resolved.input_entity
+    report.set_target(target)
+    report.show_banner()
+
+    # -- what the verb acts on ------------------------------------------
+    text = None
+    if verb in ("reply", "edit", "draft"):
+        text = _message_text(args.text, has_files=False)
+    if verb in message_ops.BULK_VERBS:
+        ids = _selection_ids(args, lambda connection: _archive_scope_rids(connection, str(resolved.id), None))
+    elif verb in message_ops.SINGLE_VERBS or verb == "reply":
+        ids = [int(args.message_id)]
+    else:
+        ids = []
+    briefs = await message_ops.fetch_briefs(client, peer, ids, me_id=me_id) if ids else []
+
+    # -- the rights the plan needs --------------------------------------
+    required = list(op.required)
+    others = [brief for brief in briefs if not brief.own]
+    if verb == "edit" and others:
+        required.append("edit_messages")
+    if verb == "delete" and others:
+        required.append("delete_messages")
+    rights = await _rights(client, report, peer)
+
+    # -- a destination, for the verbs that post elsewhere -------------------
+    to_resolved = to_chat = to_topic = to_target = None
+    to_rights = rights
+    if verb in message_ops.DESTINATION_VERBS:
+        to_resolved, to_chat, to_topic, to_target = await _resolve_destination(client, report, args.to_chat, getattr(args, "to_topic", None))
+        to_rights = await _rights(client, report, to_resolved.input_entity)
+
+    execute = bool(getattr(args, "execute", False))
+    yes = bool(getattr(args, "yes", False))
+    if op.approval == "typed_delete":
+        approval = "typed_delete"
+    else:
+        approval = "yes_allowlist" if yes else "prompt_y"
+
+    def params_for(brief_id: int | None) -> dict:
+        params: dict = {}
+        if text is not None:
+            params["text"] = text
+        if getattr(args, "emoji", None):
+            params["emoji"] = args.emoji
+        if to_target is not None:
+            params["to"] = to_target.rid
+        if verb == "poll":
+            params.update({"question": args.question, "options": list(args.options), "multiple": bool(args.multiple)})
+        if verb == "typing":
+            params["seconds"] = int(args.seconds)
+        if verb == "bookmark":
+            params["label"] = args.label or ""
+        return params
+
+    def build(chat_target, dest_target, message_ids):
+        targets = [chat_target] + ([dest_target] if dest_target is not None else [])
+        if message_ids:
+            mutations = [Mutation(op.mutation, message_ops.message_rid(chat_target.ids["chat"], number), params_for(number)) for number in message_ids]
+        else:
+            mutations = [Mutation(op.mutation, chat_target.rid, params_for(None))]
+        return build_plan(
+            identity=identity,
+            command=f"message {verb}",
+            targets=targets,
+            mutations=mutations,
+            approval=approval,
+            rights=rights if verb not in message_ops.DESTINATION_VERBS else to_rights,
+            required=required,
+        )
+
+    plan, warnings = build(target, to_target, ids)
+    report.set_plan(plan)
+    for warning in warnings:
+        report.warn(warning)
+    require_rights(plan, rights if verb not in message_ops.DESTINATION_VERBS else to_rights, required)
+    if verb == "delete" and others:
+        # The gate clear-messages has always had: an unknown right refuses a
+        # delete that reaches other people's messages, rather than letting
+        # Telegram answer after DELETE was typed.
+        _require_delete_permission(rights, what="deleting other people's messages")
+
+    # -- the preview ----------------------------------------------------
+    if _in_bot_mode(report):
+        actor = f"{report.acting.label} (via {report.via_label})"
+    else:
+        actor = _entity_title(me, "you")
+    details: list[str] = []
+    if verb == "poll":
+        details.append(f"Poll    {args.question}")
+        details.extend(f"        - {option}" for option in args.options)
+        if args.multiple:
+            details.append("        (several answers allowed)")
+    if verb in ("react", "unreact"):
+        details.append(f"Emoji   {args.emoji or '(every reaction of yours)'}")
+    if verb == "typing":
+        details.append(f"For     {args.seconds} second(s)")
+    if verb == "bookmark" and args.label:
+        details.append(f"Label   {args.label}")
+    if verb == "copy":
+        details.append("Copy    text only; an attachment becomes a link to the original")
+    topic_line = None if topic is None else f"{topic.id} {topic.display_title}"
+    preview = message_ops.format_preview(
+        op,
+        actor=actor,
+        chat_title=chat.title,
+        chat_id=resolved.id,
+        topic=topic_line,
+        messages=briefs,
+        destination=None if to_target is None else f"{to_target.display} ({to_resolved.id})",
+        text=text if verb in ("reply", "edit", "draft") else None,
+        details=details,
+        execute=execute if verb == "delete" else None,
+    )
+
+    # -- the gate -------------------------------------------------------
+    if verb == "delete" and not execute:
+        report.info(preview)
+        outcome = message_ops.Outcome(verb, resolved.id, tuple(ids), dry_run=True, done=False, extra={"deleted": 0})
+        report.printed_result(outcome.to_dict(), status="dry_run")
+        return 0
+
+    if verb == "delete":
+        confirm = partial(message_ops.confirm_typed_delete, preview, len(ids), **report.confirm_io())
+    elif yes:
+        landing = to_resolved if to_resolved is not None else resolved
+        landing_topic = getattr(args, "to_topic", None) if to_resolved is not None else topic_flag
+        require_send_allowed(
+            config.send_allowlist,
+            chat_id=landing.id,
+            username=getattr(landing.entity, "username", None),
+            topic_id=landing_topic,
+        )
+        confirm = None
+    else:
+        confirm = partial(message_ops.confirm_prompt_y, preview, **report.confirm_io())
+
+    if confirm is not None and not confirm():
+        outcome = message_ops.Outcome(verb, resolved.id, tuple(ids), done=False, cancelled=True)
+        report.printed_result(outcome.to_dict(), status="cancelled")
+        return 1
+
+    # -- re-derivation ---------------------------------------------------
+    async def rebuild():
+        again, fresh_chat, fresh_topic, fresh_target = await _resolve_destination(client, report, args.chat, topic_flag)
+        fresh_dest = None
+        if verb in message_ops.DESTINATION_VERBS:
+            _r, _c, _t, fresh_dest = await _resolve_destination(client, report, args.to_chat, getattr(args, "to_topic", None))
+        fresh_ids = ids
+        if ids:
+            fresh_ids = [brief.id for brief in await message_ops.fetch_briefs(client, again.input_entity, ids, me_id=me_id)]
+        return build(fresh_target, fresh_dest, fresh_ids)[0]
+
+    await recheck_for(plan, rebuild)()
+
+    # -- the call -------------------------------------------------------
+    username = getattr(resolved.entity, "username", None)
+    request = message_ops.Request(
+        verb=verb,
+        peer=peer,
+        chat_id=resolved.id,
+        messages=briefs,
+        text=text,
+        topic_id=topic_flag,
+        emoji=getattr(args, "emoji", None),
+        to_peer=None if to_resolved is None else to_resolved.input_entity,
+        to_chat_id=None if to_resolved is None else to_resolved.id,
+        to_topic_id=getattr(args, "to_topic", None),
+        question=getattr(args, "question", None),
+        options=list(getattr(args, "options", None) or []),
+        multiple=bool(getattr(args, "multiple", False)),
+        seconds=int(getattr(args, "seconds", 5) or 5),
+        label=getattr(args, "label", "") or "",
+        links={
+            brief.id: message_ops.message_link(resolved.id, brief.id, username=username, topic_id=brief.topic_id)
+            for brief in briefs
+        },
+    )
+
+    def bookmark_row(message_id: int) -> None:
+        scope_rid = scope_rid_for(resolved.id, briefs[0].topic_id) if briefs and briefs[0].topic_id else scope_rid_for(resolved.id)
+        with archive_store.open_archive() as archive:
+            archive.connection.execute(
+                "INSERT OR REPLACE INTO bookmarks (rid, message_id, identity_id, label, created, source) VALUES (?, ?, ?, ?, ?, 'manual')",
+                (scope_rid, str(message_id), identity.id, request.label, utc_now()),
+            )
+
+    outcome = await message_ops.perform(client, request, bookmark_row=bookmark_row if verb == "bookmark" else None)
+
+    evidence = await read_back(
+        f"the {verb}",
+        lambda: message_ops.read_back(
+            client, request, outcome, where=target.display, destination=None if to_target is None else to_target.display
+        ),
+    )
+    report.set_evidence(evidence)
+    report.audit(plan, status="ok", evidence=evidence)
+    report.printed_result(outcome.to_dict(), status="ok")
+    return 0
 
 
 async def _run_create(client, args, *, report: Reporter | None = None) -> int:
@@ -1451,13 +1771,19 @@ def require_bot_mode_supports(args, report: Reporter) -> None:
     """
     command = str(args.command or "")
     kind = getattr(args, "create_kind", None)
+    verb = getattr(args, "message_verb", None)
     supported = command in BOT_MODE_COMMANDS and (command != "create" or kind in BOT_MODE_CREATE_KINDS)
+    if command == "message" and verb not in message_ops.BOT_VERBS:
+        supported = False
     if supported:
         return
     what = command_name(args)
+    if command == "message":
+        why = "a bot has no dialog of its own to mark, no Saved Messages and no drafts"
+    else:
+        why = "a bot has no dialog list, no history and nothing of its own to delete or set up"
     raise CommandError(
-        f"`{what}` needs the account: a bot has no dialog list, no history and nothing of its own to "
-        "delete or set up, so --as-bot cannot run it. Run it without --as-bot.",
+        f"`{what}` needs the account: {why}, so --as-bot cannot run it. Run it without --as-bot.",
         code="IDENTITY_MODE_UNSUPPORTED",
         hint=report.account_command,
     )
@@ -1517,6 +1843,8 @@ async def run_as_bot(args, config, *, report: Reporter) -> int:
             return await _run_send(bot, args, config, report=report)
         if args.command == "create":
             return await _run_create(bot, args, report=report)
+        if args.command == "message":
+            return await _run_message(bot, args, config, report=report)
         raise ValueError(f"Unknown command: {args.command}")
 
 
@@ -1617,6 +1945,8 @@ async def run(args, *, client=None, config=None, report: Reporter | None = None)
             return await _run_bots(client, args, config, report=report)
         if args.command == "send":
             return await _run_send(client, args, config, report=report)
+        if args.command == "message":
+            return await _run_message(client, args, config, report=report)
         if args.command == "create":
             return await _run_create(client, args, report=report)
         if args.command == "delete":
@@ -1631,7 +1961,12 @@ async def run(args, *, client=None, config=None, report: Reporter | None = None)
 
 def command_name(args) -> str:
     """What the envelope calls this run: the subcommand, and its kind where it has one."""
-    kind = getattr(args, "create_kind", None) or getattr(args, "delete_kind", None) or getattr(args, "archive_kind", None)
+    kind = (
+        getattr(args, "create_kind", None)
+        or getattr(args, "delete_kind", None)
+        or getattr(args, "archive_kind", None)
+        or getattr(args, "message_verb", None)
+    )
     return f"{args.command} {kind}" if kind else str(args.command or "")
 
 
