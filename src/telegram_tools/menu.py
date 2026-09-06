@@ -26,6 +26,7 @@ from telegram_tools.prompts import BACK, CLEAR, EXIT, MENU, RULE, Extra, after_a
 from telegram_tools.resolver import resolve_chat
 from telegram_tools import review as review_ops
 from telegram_tools import structure as structure_ops
+from telegram_tools import manage as manage_ops
 from telegram_tools.topics import get_forum_topics
 from telegram_tools import ui
 from telegram_tools.ui import crumb
@@ -38,10 +39,10 @@ MENU_ERRORS = (ConfigError, SessionInUseError, ValueError, OSError, RPCError)
 ROOT_TITLE = "telegram-tools"
 MAIN = "Main"
 # The nine-row root of spec section 14, landed once so nobody learns new numbers
-# twice. Rows 6 and 7 name capabilities a later version brings; they keep their
-# numbers now so that every other row keeps its own when those arrive. A row's
-# hint names what is behind it *today* -- a hint that promises something the row
-# cannot do is worse than no hint.
+# twice. Row 7 still waits for rules and the runner; it keeps its number now so
+# that every other row keeps its own when those arrive. A row's hint names what
+# is behind it *today* -- a hint that promises something the row cannot do is
+# worse than no hint.
 ROOT_ITEMS = (
     "Find IDs (chats, topics)",
     "Read (search live, archive, export)",
@@ -53,11 +54,6 @@ ROOT_ITEMS = (
     "Identity (profiles, my bots)",
     "Check setup",
 )
-# What row 6 says when picked. One screen, one line, straight back. Row 7 holds
-# the review queue now; rules and the runner join it in a later version.
-LATER = {
-    5: ("Manage", "Admins, members, invites and chat settings arrive in a later version."),
-}
 
 
 class MenuSession:
@@ -2051,22 +2047,193 @@ async def _flow_watch(*, session, runner, read, write) -> bool:
             return outcome
 
 
-def _flow_later(index: int):
-    """Row 6: a number that is reserved rather than a number that lies.
+# -- row 6: Manage ------------------------------------------------------------
 
-    They are on the root now so that nothing above or below them ever moves
-    again. Picking one says what it will hold and comes straight back.
-    """
+# What each administration verb asks for, after the chat. The verb lands in
+# admin_kind, member_kind, join_kind, invite_kind or settings_kind, exactly as
+# the flags land it, and every flag of section 13 has its row here.
+_PERSON = ("user", "Person (id or @username)", "text")
+_UNTIL = ("until", "Until (30m, 2h, 7d, 1w, or a date)", "text")
+MANAGE_FORMS = {
+    ("admin", "list"): (),
+    ("admin", "promote"): (_PERSON, ("rights", "Rights (comma-separated)", "text"), ("rank", "Rank (custom title)", "text")),
+    ("admin", "rights"): (_PERSON, ("rights", "Rights (comma-separated)", "text"), ("rank", "Rank (custom title)", "text")),
+    ("admin", "demote"): (_PERSON,),
+    ("member", "list"): (("query", "Name or username contains", "text"), ("limit", "Limit", "int"), ("banned", "The banned and restricted instead", "toggle")),
+    ("member", "ban"): (_PERSON, ("reason", "Reason (kept in the local audit line only)", "text")),
+    ("member", "unban"): (_PERSON,),
+    ("member", "mute"): (_PERSON, _UNTIL),
+    ("member", "unmute"): (_PERSON,),
+    ("member", "restrict"): (_PERSON, ("rights", "Rights to take away (comma-separated)", "text"), _UNTIL),
+    ("join-requests", "list"): (),
+    ("join-requests", "approve"): (_PERSON,),
+    ("join-requests", "decline"): (_PERSON,),
+    ("invite", "list"): (("revoked", "The revoked ones instead", "toggle"),),
+    ("invite", "create"): (
+        ("title", "Title (admins see it)", "text"),
+        ("expires", "Expires (2h, 7d, or a date; blank = never)", "text"),
+        ("usage_limit", "How many may join through it", "int"),
+        ("request_needed", "Joining needs an admin's approval", "toggle"),
+    ),
+    ("invite", "revoke"): (("link", "Link, as invite list printed it", "text"),),
+    ("settings", "show"): (),
+    ("settings", "set"): (("slow_mode", "Slow mode seconds (0, 10, 30, 60, 300, 900, 3600)", "int"),),
+}
+MANAGE_REQUIRED = {
+    ("admin", "promote"): ("user", "rights"),
+    ("admin", "rights"): ("user", "rights"),
+    ("admin", "demote"): ("user",),
+    ("member", "ban"): ("user",),
+    ("member", "unban"): ("user",),
+    ("member", "mute"): ("user", "until"),
+    ("member", "unmute"): ("user",),
+    ("member", "restrict"): ("user", "rights", "until"),
+    ("join-requests", "approve"): ("user",),
+    ("join-requests", "decline"): ("user",),
+    ("invite", "revoke"): ("link",),
+    ("settings", "set"): ("slow_mode",),
+}
+# The two typed_name verbs: the dry-run runs first, and the exact label is typed
+# at the CLI's own prompt on the run that follows. The menu never sets execute
+# on the first run.
+MANAGE_TYPED = {("admin", "demote"), ("member", "ban")}
+MANAGE_ROWS = {
+    "admin": (
+        ("list", "List the creator and admins, with their rights"),
+        ("promote", "Promote a member to admin"),
+        ("rights", "Change an admin's rights"),
+        ("demote", "Demote an admin (dry-run first, then their exact label)"),
+    ),
+    "member": (
+        ("list", "List members (or the banned and restricted)"),
+        ("ban", "Ban a person (dry-run first, then their exact label)"),
+        ("unban", "Lift a ban"),
+        ("mute", "Mute a person until a moment"),
+        ("unmute", "Lift a mute or restriction"),
+        ("restrict", "Take named rights off a person until a moment"),
+    ),
+    "join-requests": (("list", "Who is waiting to join"), ("approve", "Let a person in"), ("decline", "Turn a request down")),
+    "invite": (("list", "List invite links (shown in full)"), ("create", "Make a new invite link"), ("revoke", "Revoke an invite link")),
+    "settings": (("show", "Show slow mode, join approval, default rights"), ("set", "Set slow mode")),
+}
+MANAGE_GROUPS = (
+    ("admin", "Admins", "Admins: list, promote, change rights, demote"),
+    ("member", "Members", "Members: list, ban, unban, mute, unmute, restrict"),
+    ("join-requests", "Join requests", "Join requests: list, approve, decline"),
+    ("invite", "Invite links", "Invite links: list, create, revoke"),
+    ("settings", "Chat settings", "Chat settings: show, set slow mode"),
+)
+_MANAGE_ANOTHER = (STAY, "Another chat")
+
+
+def _manage_namespace(group: str, verb: str, chat: str, **values) -> argparse.Namespace:
+    return _namespace(command=group, chat=chat, **{manage_ops.VERB_DESTS[group]: verb}, **values)
+
+
+def _flow_manage_verb(group: str, verb: str, title: str):
+    """One administration verb: pick the chat, stage its fields, run it behind its own gate."""
+    fields = MANAGE_FORMS[(group, verb)]
+    required = MANAGE_REQUIRED.get((group, verb), ())
+    typed = (group, verb) in MANAGE_TYPED
+    group_title = next(name for key, name, _label in MANAGE_GROUPS if key == group)
+
+    async def run_it(values: dict, *, picked, session, runner, read, write, form: str) -> Any:
+        if not typed:
+            args = _manage_namespace(group, verb, picked.reference, **values)
+            return await _act(args, session=session, runner=runner, read=read, write=write, trail=form, rows=(RUN_AGAIN, _MANAGE_ANOTHER))
+        dry_run = _manage_namespace(group, verb, picked.reference, execute=False, **values)
+        if await _call(dry_run, session=session, runner=runner, write=write) is None:
+            return _leave_action(after_action(read=read, write=write))
+        choice = choose(
+            ["Do it for real - the next screen asks for the person's exact label"],
+            title=crumb(form, "Dry-run done"),
+            read=read,
+            write=write,
+            back_label="Back to the form",
+        )
+        if choice is BACK:
+            return STAY
+        for_real = _namespace(**{**vars(dry_run), "execute": True})
+        return await _act(for_real, session=session, runner=runner, read=read, write=write, trail=form, rows=(_MANAGE_ANOTHER,))
 
     async def flow(*, session, runner, read, write) -> bool:
-        name, line = LATER[index]
-        # Built as one screen rather than four writes: a screen is a title, the
-        # rule and rows ending in 0, and only that shape carries the banner.
-        write("\n".join([crumb(MAIN, name), RULE, line, "0. Back"]))
-        read("Choose: ")
-        return True
+        trail = crumb(MAIN, "Manage", group_title, title)
+        while True:
+            picked = await _pick_chat(session=session, read=read, write=write, trail=trail)
+            if picked is BACK:
+                return True
+            form = crumb(trail, picked.title)
+            if not fields:
+                result = await run_it({}, picked=picked, session=session, runner=runner, read=read, write=write, form=form)
+                if result is not STAY:
+                    return _leave(result)
+                continue
+            staged: dict[str, Any] = {key: (False if kind == "toggle" else None) for key, _label, kind in fields}
+            if "limit" in staged:
+                staged["limit"] = manage_ops.LIST_LIMIT
+            while True:
+                rows = [(key, f"{label:<44} [{_staged_label(kind, staged[key])}]") for key, label, kind in fields]
+                rows.append(("run", "Run it (dry-run first)" if typed else "Do it (shows the preview, then asks)"))
+                choice = choose([label for _key, label in rows], title=form, read=read, write=write, back_label="Back (discards)")
+                if choice is BACK:
+                    break
+                key = rows[choice][0]
+                if key != "run":
+                    _key, label, kind = fields[choice]
+                    if kind == "toggle":
+                        staged[key] = not staged[key]
+                        continue
+                    if kind == "int":
+                        answer = ask_int(label, read=read, write=write, current=staged[key])
+                    else:
+                        answer = ask_text(label, read=read, write=write, current=staged[key] or None)
+                    if answer is BACK:
+                        continue
+                    staged[key] = None if answer is CLEAR else answer
+                    continue
+                missing = [label for key, label, _kind in fields if key in required and staged[key] in (None, "")]
+                if missing:
+                    write("Fill in first: " + ", ".join(missing) + ".")
+                    continue
+                result = await run_it(dict(staged), picked=picked, session=session, runner=runner, read=read, write=write, form=form)
+                if result is STAY:
+                    break
+                return _leave(result)
 
     return flow
+
+
+def _flow_manage_group(group: str):
+    """One of the five Manage screens: its verbs as rows."""
+    group_title = next(name for key, name, _label in MANAGE_GROUPS if key == group)
+    rows = tuple((label, _flow_manage_verb(group, verb, label)) for verb, label in MANAGE_ROWS[group])
+
+    async def flow(*, session, runner, read, write) -> bool:
+        trail = crumb(MAIN, "Manage", group_title)
+        while True:
+            choice = choose([label for label, _flow in rows], title=trail, read=read, write=write)
+            if choice is BACK:
+                return True
+            outcome = await _group(rows[choice][1], session=session, runner=runner, read=read, write=write)
+            if outcome is not True:
+                return outcome
+
+    return flow
+
+
+MANAGE_FLOWS = tuple((label, _flow_manage_group(key)) for key, _name, label in MANAGE_GROUPS)
+
+
+async def _flow_manage(*, session, runner, read, write) -> bool:
+    """Row 6. Admins, members, join requests, invite links and a chat's settings."""
+    trail = crumb(MAIN, "Manage")
+    while True:
+        choice = choose([label for label, _flow in MANAGE_FLOWS], title=trail, read=read, write=write)
+        if choice is BACK:
+            return True
+        outcome = await _group(MANAGE_FLOWS[choice][1], session=session, runner=runner, read=read, write=write)
+        if outcome is not True:
+            return outcome
 
 
 IDENTITY_ROWS = (
@@ -2180,7 +2347,7 @@ async def run_menu(*, read=None, write=None, session=None, runner=None, profile=
         _flow_write,
         _flow_build,
         _flow_clear,
-        _flow_later(5),
+        _flow_manage,
         _flow_watch,
         _flow_identity,
         _flow_doctor,

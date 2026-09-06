@@ -1,0 +1,14 @@
+usage: telegram-tools admin rights [-h] --chat CHAT --user USER
+                                   --rights RIGHTS [--rank RANK]
+
+options:
+  -h, --help       show this help message and exit
+  --chat CHAT      The chat: numeric ID, @username, or link
+  --user USER      The person: numeric ID or @username
+  --rights RIGHTS  Comma-separated admin rights, or none. Valid names:
+                   add_admins, anonymous, ban_users, change_info,
+                   delete_messages, delete_stories, edit_messages,
+                   edit_stories, invite_users, manage_call,
+                   manage_direct_messages, manage_ranks, manage_topics, other,
+                   pin_messages, post_messages, post_stories
+  --rank RANK      A custom title shown beside their name

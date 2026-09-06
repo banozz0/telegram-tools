@@ -88,6 +88,29 @@ COMMANDS = {
     "structure-diff": ("structure", "diff"),
     "structure-apply": ("structure", "apply"),
     "structure-remap": ("structure", "remap"),
+    "admin": ("admin",),
+    "admin-list": ("admin", "list"),
+    "admin-promote": ("admin", "promote"),
+    "admin-rights": ("admin", "rights"),
+    "admin-demote": ("admin", "demote"),
+    "member": ("member",),
+    "member-list": ("member", "list"),
+    "member-ban": ("member", "ban"),
+    "member-unban": ("member", "unban"),
+    "member-mute": ("member", "mute"),
+    "member-unmute": ("member", "unmute"),
+    "member-restrict": ("member", "restrict"),
+    "join-requests": ("join-requests",),
+    "join-requests-list": ("join-requests", "list"),
+    "join-requests-approve": ("join-requests", "approve"),
+    "join-requests-decline": ("join-requests", "decline"),
+    "invite": ("invite",),
+    "invite-list": ("invite", "list"),
+    "invite-create": ("invite", "create"),
+    "invite-revoke": ("invite", "revoke"),
+    "settings": ("settings",),
+    "settings-show": ("settings", "show"),
+    "settings-set": ("settings", "set"),
 }
 
 # The only text this card was allowed to add, spelled exactly as the help spells
@@ -139,6 +162,17 @@ ALLOWED_ADDITIONS = (
     # No existing command gained or lost a flag. Both spellings of the name.
     "structure,",
     "structure Export, diff and apply a chat's structure blueprint (topics and settings, never people or messages)",
+    # The admin-rights card (agent-bo-95421953): five new subcommand groups,
+    # admins, members, join requests, invite links and a chat's settings. No
+    # existing command gained or lost a flag. The five names are one string
+    # here because `admin,` on its own would also strip `add_admins,` out of
+    # the rights lists on the admin parsers' own help.
+    "admin,member,join-requests,invite,settings,",
+    "admin Admins and their rights: list, promote, rights, demote (demote asks for the person's exact label)",
+    "member Members and restrictions: list, ban, unban, mute, unmute, restrict (ban asks for the person's exact label)",
+    "join-requests People waiting to join a chat that needs approval: list, approve, decline",
+    "invite Invite links: list, create, revoke (links are shown by list and create only)",
+    "settings A chat's settings: show, set --slow-mode",
 )
 
 # A choice list that grew. The help line is the same words; the braces name

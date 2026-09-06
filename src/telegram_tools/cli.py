@@ -15,6 +15,8 @@ from telegram_tools._core.audit import AuditLog
 from telegram_tools._core.contract import CodedError, exit_code, utc_now
 from telegram_tools._core.identity import Identity, Target
 from telegram_tools._core.plan import Evidence, Mutation
+from telegram_tools._core.redaction import redact_text
+from telethon.tl.types import InputUserSelf
 from telegram_tools import archive as archive_store
 from telegram_tools import login
 from telegram_tools import profiles as profile_store
@@ -57,6 +59,8 @@ from telegram_tools import messages as message_ops
 from telegram_tools.prompts import BACK, pick_many
 from telegram_tools import review as review_ops
 from telegram_tools import structure as structure_ops
+from telegram_tools import manage as manage_ops
+from telegram_tools.adapters.manage import TelegramManagePort
 from telegram_tools._core import blueprint as _blueprint
 from telegram_tools.adapters.blueprint import TelegramBlueprintPort, chat_kind
 from telegram_tools.resolver import EntityResolutionError, resolve_chat
@@ -84,6 +88,8 @@ WRITES = ("send", "message", "create", "delete", "clear-messages", "bots", "auth
 # on the target and writes remap rows into the archive. `export` and `diff`
 # read a chat; `remap` reads the archive.
 STRUCTURE_WRITES = ("apply",)
+# The administration verbs that change something; `list` and `show` only read.
+MANAGE_WRITES = tuple(op for op, spec in manage_ops.OPS.items() if spec.writes)
 # The archive commands that write the local store. `status`, `search` and
 # `export` read it, and a read is left alone for the same reason `doctor` is.
 ARCHIVE_WRITES = ("sync", "retention", "forget")
@@ -100,7 +106,9 @@ REVIEW_WRITES = ("approve", "accept", "reject", "retry")
 # `message` runs the verbs a bot can perform (`messages.BOT_VERBS`): the four
 # that need a dialog of the account's own -- read, unread, bookmark, draft --
 # refuse here too.
-BOT_MODE_COMMANDS = ("send", "create", "message")
+# The administration groups (section 13) run as a bot too, where the bot is an
+# admin holding the right: `_run_manage` refuses a bot that is not an admin.
+BOT_MODE_COMMANDS = ("send", "create", "message", *manage_ops.GROUPS)
 BOT_MODE_CREATE_KINDS = ("topic",)
 
 
@@ -257,6 +265,94 @@ def build_parser() -> argparse.ArgumentParser:
 
     structure_remap = structure_kinds.add_parser("remap", help="Print the source-to-target id table one apply wrote (reads the local archive)")
     structure_remap.add_argument("--apply-id", required=True, metavar="ID", help="The apply id `structure apply` printed")
+
+    # -- administration (section 13): five groups, one shape ---------------------
+    chat_help = "The chat: numeric ID, @username, or link"
+    user_help = "The person: numeric ID or @username"
+    admin_rights_help = "Comma-separated admin rights, or none. Valid names: " + ", ".join(manage_ops.ADMIN_RIGHT_NAMES)
+    banned_rights_help = "Comma-separated rights to take away. Valid names: " + ", ".join(manage_ops.BANNED_RIGHT_NAMES)
+    until_help = "When it ends: a duration (30m, 2h, 7d, 1w) or an ISO date/time; at least a minute, at most a year"
+
+    admin_parser = subparsers.add_parser("admin", help="Admins and their rights: list, promote, rights, demote (demote asks for the person's exact label)")
+    admin_kinds = admin_parser.add_subparsers(dest="admin_kind")
+    admin_list = admin_kinds.add_parser("list", help="The creator and every admin, with their rights and ranks")
+    admin_list.add_argument("--chat", required=True, help=chat_help)
+    admin_promote = admin_kinds.add_parser("promote", help="Make a member an admin with the rights you name (y/N)")
+    admin_promote.add_argument("--chat", required=True, help=chat_help)
+    admin_promote.add_argument("--user", required=True, help=user_help)
+    admin_promote.add_argument("--rights", required=True, help=admin_rights_help)
+    admin_promote.add_argument("--rank", help="A custom title shown beside their name")
+    admin_rights = admin_kinds.add_parser("rights", help="Set an admin's rights to exactly the ones you name (y/N)")
+    admin_rights.add_argument("--chat", required=True, help=chat_help)
+    admin_rights.add_argument("--user", required=True, help=user_help)
+    admin_rights.add_argument("--rights", required=True, help=admin_rights_help)
+    admin_rights.add_argument("--rank", help="A custom title shown beside their name")
+    admin_demote = admin_kinds.add_parser("demote", help="Take every admin right off a person (dry-run by default)")
+    admin_demote.add_argument("--chat", required=True, help=chat_help)
+    admin_demote.add_argument("--user", required=True, help=user_help)
+    admin_demote.add_argument("--execute", action="store_true", help="Actually demote them after typing their exact label (no --yes exists)")
+
+    member_parser = subparsers.add_parser("member", help="Members and restrictions: list, ban, unban, mute, unmute, restrict (ban asks for the person's exact label)")
+    member_kinds = member_parser.add_subparsers(dest="member_kind")
+    member_list = member_kinds.add_parser("list", help="Members of a chat, newest first, or the banned and restricted ones")
+    member_list.add_argument("--chat", required=True, help=chat_help)
+    member_list.add_argument("--query", help="Only members whose name or username matches")
+    member_list.add_argument("--limit", type=positive_int, default=manage_ops.LIST_LIMIT, help=f"At most this many (default {manage_ops.LIST_LIMIT})")
+    member_list.add_argument("--banned", action="store_true", help="List the banned and restricted instead of the members")
+    member_ban = member_kinds.add_parser("ban", help="Ban a person from the chat (dry-run by default)")
+    member_ban.add_argument("--chat", required=True, help=chat_help)
+    member_ban.add_argument("--user", required=True, help=user_help)
+    member_ban.add_argument("--reason", help="Why, recorded in the local audit line only: Telegram stores no reason")
+    member_ban.add_argument("--execute", action="store_true", help="Actually ban them after typing their exact label (no --yes exists)")
+    member_unban = member_kinds.add_parser("unban", help="Lift a ban or a restriction (y/N)")
+    member_unban.add_argument("--chat", required=True, help=chat_help)
+    member_unban.add_argument("--user", required=True, help=user_help)
+    member_mute = member_kinds.add_parser("mute", help="Stop a person sending anything until a moment you name (y/N)")
+    member_mute.add_argument("--chat", required=True, help=chat_help)
+    member_mute.add_argument("--user", required=True, help=user_help)
+    member_mute.add_argument("--until", required=True, help=until_help)
+    member_unmute = member_kinds.add_parser("unmute", help="Lift a mute or a restriction (y/N)")
+    member_unmute.add_argument("--chat", required=True, help=chat_help)
+    member_unmute.add_argument("--user", required=True, help=user_help)
+    member_restrict = member_kinds.add_parser("restrict", help="Take named rights off a person until a moment you name (y/N)")
+    member_restrict.add_argument("--chat", required=True, help=chat_help)
+    member_restrict.add_argument("--user", required=True, help=user_help)
+    member_restrict.add_argument("--rights", required=True, help=banned_rights_help)
+    member_restrict.add_argument("--until", required=True, help=until_help)
+
+    join_parser = subparsers.add_parser("join-requests", help="People waiting to join a chat that needs approval: list, approve, decline")
+    join_kinds = join_parser.add_subparsers(dest="join_kind")
+    join_list = join_kinds.add_parser("list", help="Who is waiting, since when, and what they wrote")
+    join_list.add_argument("--chat", required=True, help=chat_help)
+    join_approve = join_kinds.add_parser("approve", help="Let a person in (y/N)")
+    join_approve.add_argument("--chat", required=True, help=chat_help)
+    join_approve.add_argument("--user", required=True, help=user_help)
+    join_decline = join_kinds.add_parser("decline", help="Turn a request down (y/N)")
+    join_decline.add_argument("--chat", required=True, help=chat_help)
+    join_decline.add_argument("--user", required=True, help=user_help)
+
+    invite_parser = subparsers.add_parser("invite", help="Invite links: list, create, revoke (links are shown by list and create only)")
+    invite_kinds = invite_parser.add_subparsers(dest="invite_kind")
+    invite_list = invite_kinds.add_parser("list", help="Your invite links to a chat, shown in full")
+    invite_list.add_argument("--chat", required=True, help=chat_help)
+    invite_list.add_argument("--revoked", action="store_true", help="The revoked ones instead of the live ones")
+    invite_create = invite_kinds.add_parser("create", help="Make a new invite link and show it once (y/N)")
+    invite_create.add_argument("--chat", required=True, help=chat_help)
+    invite_create.add_argument("--title", help="A name for the link, shown to admins only")
+    invite_create.add_argument("--expires", help="When the link stops working: a duration (2h, 7d) or an ISO date/time")
+    invite_create.add_argument("--usage-limit", dest="usage_limit", type=positive_int, metavar="N", help="How many people may join through it")
+    invite_create.add_argument("--request-needed", dest="request_needed", action="store_true", help="Joining through it needs an admin's approval")
+    invite_revoke = invite_kinds.add_parser("revoke", help="Revoke an invite link (y/N); the link is redacted everywhere but the flag")
+    invite_revoke.add_argument("--chat", required=True, help=chat_help)
+    invite_revoke.add_argument("--link", required=True, help="The link to revoke, as `invite list` printed it")
+
+    settings_parser = subparsers.add_parser("settings", help="A chat's settings: show, set --slow-mode")
+    settings_kinds = settings_parser.add_subparsers(dest="settings_kind")
+    settings_show = settings_kinds.add_parser("show", help="Slow mode, join approval, default member rights, counts")
+    settings_show.add_argument("--chat", required=True, help=chat_help)
+    settings_set = settings_kinds.add_parser("set", help="Change a setting (y/N)")
+    settings_set.add_argument("--chat", required=True, help=chat_help)
+    settings_set.add_argument("--slow-mode", dest="slow_mode", type=int, required=True, metavar="SECONDS", help="Seconds between one member's messages: 0 (off), 10, 30, 60, 300, 900 or 3600")
 
     bots_parser = subparsers.add_parser("bots", help="List the bots you own and edit their BotFather settings")
     bots_parser.add_argument("--bot", help="Bot nickname from TELEGRAM_BOT_TOKENS, @username, or numeric ID")
@@ -2270,6 +2366,291 @@ def _run_migrate(profile, *, report: Reporter, read, write, home: Path | None) -
     return 0
 
 
+# -- administration (section 13) --------------------------------------------
+
+
+def _manage_kind(entity, target: Target) -> str:
+    """`supergroup`, `forum` or `channel`; a basic group is refused, because every call here is a channel call."""
+    try:
+        return chat_kind(entity)
+    except CommandError as exc:
+        raise CommandError(
+            f"{target.title} is a {classify_entity(entity)}, and the admin, member, invite and settings calls are supergroup calls.",
+            code="PLATFORM_UNSUPPORTED",
+            hint="Telegram upgrades a basic group to a supergroup the moment you change a setting on it in the app; run this again after that.",
+        ) from exc
+
+
+def _refuse_missing(rights: Rights, required: Sequence[str], target: Target) -> None:
+    """A read that Telegram only answers for an admin refuses by name, like a write's preflight."""
+    missing = rights.missing(required)
+    if missing:
+        names = ", ".join(missing)
+        raise CommandError(
+            f"Your Telegram account lacks {names} in {target.title}.",
+            code="PERMISSION_DENIED",
+            hint=f"Ask an admin of {target.title} for {names}, or run this as an account that has it.",
+        )
+
+
+async def _run_manage(client, args, *, report: Reporter) -> int:
+    """One administration verb, behind the steps every write here takes.
+
+    Plan, preflight, the hierarchy rule, the gate section 7 assigns, the
+    re-derivation, the call, the readback, the audit line. A `typed_name` verb
+    (`member ban`, `admin demote`) dry-runs by default, takes `--execute`, asks
+    for the person's exact label, has no `--yes`, and needs a terminal in either
+    mode. Under `--as-bot` the bot has to be an admin of the chat, and then the
+    same preflight names any right it lacks.
+    """
+    op = manage_ops.op_for(args)
+    resolved = await _resolve(client, report, args.chat)
+    peer = resolved.input_entity
+    target = ChatTargets.chat_target(resolved, args.chat)
+    report.set_target(target)
+    report.show_banner()
+    kind = _manage_kind(resolved.entity, target)
+    port = TelegramManagePort(client)
+    rights = await _rights(client, report, peer)
+    if _in_bot_mode(report) and "is_admin" in rights.answered and "is_admin" not in rights.held:
+        raise CommandError(
+            f"{report.acting.label} is not an admin of {target.title}, so `{op.command}` cannot run as it.",
+            code="IDENTITY_MODE_UNSUPPORTED",
+            hint=report.account_command,
+        )
+
+    if not op.writes:
+        return await _run_manage_read(port, op, args, resolved, target, kind, report=report, rights=rights)
+
+    identity = await _acting(client, report)
+    me = report.me or await client.get_me()
+    execute = bool(getattr(args, "execute", False))
+
+    # -- who, and what changes --------------------------------------------------
+    member = user = input_user = None
+    if op.person:
+        user, input_user = await port.resolve_user(args.user)
+        member = await port.participant(peer, user, input_user)
+    params: dict = {}
+    details: list[str] = []
+    names: tuple[str, ...] = ()
+    until = None
+    made: dict | None = None
+
+    if op.verb in ("promote", "rights"):
+        names = manage_ops.parse_rights(args.rights, universe=manage_ops.ADMIN_RIGHT_NAMES, what="admin")
+        if op.verb == "promote" and member.is_admin:
+            raise CommandError(f"{member.label} is already an admin of {target.title}.", code="TARGET_KIND_MISMATCH", hint=f"telegram-tools admin rights --chat {args.chat} --user {args.user} --rights …")
+        if op.verb == "rights" and not member.is_admin:
+            raise CommandError(f"{member.label} is not an admin of {target.title}.", code="TARGET_KIND_MISMATCH", hint=f"telegram-tools admin promote --chat {args.chat} --user {args.user} --rights …")
+        actor = await port.participant(peer, me, InputUserSelf())
+        manage_ops.require_hierarchy(actor, target=member if member.is_admin else None, granting=names, chat_title=target.title)
+        params = {"status": member.status, "rights": list(names), "rank": args.rank or ""}
+        details.append(f"Rights  {', '.join(names) or 'none'}")
+        if args.rank:
+            details.append(f"Rank    {args.rank}")
+    elif op.verb == "demote":
+        if not member.is_admin:
+            raise CommandError(f"{member.label} is not an admin of {target.title}; there is nothing to demote.", code="TARGET_KIND_MISMATCH")
+        actor = await port.participant(peer, me, InputUserSelf())
+        manage_ops.require_hierarchy(actor, target=member, granting=(), chat_title=target.title)
+        params = {"status": member.status, "rights": []}
+        details.append("Rights  none (every admin right taken away)")
+    elif op.verb in ("ban", "mute", "restrict"):
+        if member.is_admin:
+            raise CommandError(
+                f"{member.label} is an admin of {target.title}; an admin cannot be {op.verb}ned until demoted." if op.verb == "ban" else f"{member.label} is an admin of {target.title}; an admin cannot be restricted until demoted.",
+                code="HIERARCHY_DENIED",
+                hint=f"telegram-tools admin demote --chat {args.chat} --user {args.user} --execute",
+            )
+        if op.verb == "ban":
+            names = manage_ops.BAN_RIGHTS
+            params = {"status": member.status, "rights": list(names), "reason": args.reason or ""}
+            if args.reason:
+                details.append(f"Reason  {args.reason}")
+            details.append("Note    Telegram stores no reason for a ban; the local audit line is the only record.")
+        else:
+            until = manage_ops.parse_until(args.until)
+            names = manage_ops.MUTE_RIGHTS if op.verb == "mute" else manage_ops.parse_rights(args.rights, universe=manage_ops.BANNED_RIGHT_NAMES, what="banned")
+            if "view_messages" in names:
+                raise ValueError("Taking view_messages away is a ban: use `member ban`.")
+            params = {"status": member.status, "rights": list(names), "until": manage_ops.until_text(until)}
+            details.append(f"Takes   {', '.join(names)}")
+            details.append(f"Until   {manage_ops.until_text(until)}")
+    elif op.verb in ("unban", "unmute"):
+        if member.status not in ("banned", "restricted"):
+            raise CommandError(f"{member.label} is not banned or restricted in {target.title} (they are {member.status}).", code="TARGET_KIND_MISMATCH")
+        params = {"status": member.status, "rights": []}
+        details.append("Lifts   every restriction")
+    elif op.verb in ("approve", "decline"):
+        params = {"status": member.status, "approved": op.verb == "approve"}
+    elif op.verb == "create":
+        expires = manage_ops.parse_until(args.expires) if args.expires else None
+        params = {"title": args.title or "", "expires": manage_ops.until_text(expires), "usage_limit": args.usage_limit, "request_needed": bool(args.request_needed)}
+        details.append(f"Title   {args.title or '(none)'}")
+        details.append(f"Expires {manage_ops.until_text(expires) or 'never'}")
+        details.append(f"Uses    {args.usage_limit or 'unlimited'}")
+        if args.request_needed:
+            details.append("Joining needs an admin's approval")
+    elif op.verb == "revoke":
+        params = {"link": redact_text(args.link)}
+        details.append(f"Link    {redact_text(args.link)}")
+    elif op.verb == "set":
+        seconds = manage_ops.parse_slow_mode(args.slow_mode)
+        if kind == "channel":
+            raise CommandError(f"{target.title} is a broadcast channel, which has no slow mode.", code="PLATFORM_UNSUPPORTED")
+        params = {"slow_mode_seconds": seconds}
+        details.append(f"Slow mode  {'off' if not seconds else f'{seconds}s'}")
+
+    def build(chat_target: Target, person):
+        rid = person.rid if person is not None else chat_target.rid
+        fresh = dict(params)
+        if person is not None and "status" in fresh:
+            fresh["status"] = person.status
+        return build_plan(
+            identity=identity,
+            command=op.command,
+            targets=[chat_target],
+            mutations=[Mutation(op.mutation, rid, fresh)],
+            approval=op.approval,
+            rights=rights,
+            required=op.required,
+        )
+
+    plan, warnings = build(target, member)
+    report.set_plan(plan)
+    for warning in warnings:
+        report.warn(warning)
+    require_rights(plan, rights, op.required)
+
+    actor_label = f"{report.acting.label} (via {report.via_label})" if _in_bot_mode(report) else _entity_title(me, "you")
+    preview = manage_ops.format_preview(
+        op, actor=actor_label, chat_title=target.title, chat_id=resolved.id, member=member, details=details, execute=execute if op.typed else None
+    )
+
+    # -- the gate ---------------------------------------------------------------
+    if op.typed and not execute:
+        report.info(preview)
+        outcome = manage_ops.Outcome(op.command, resolved.id, member, dry_run=True)
+        report.printed_result(outcome.to_dict(), status="dry_run")
+        return 0
+    if op.typed:
+        # A person's membership or rights: a terminal in either mode, as `delete` has.
+        if not manage_ops.terminal_present():
+            raise ApprovalRequired(report.human_command)
+        answered = manage_ops.confirm_typed_label(preview, member, **report.confirm_io())
+        if not answered:
+            report.info("That is not the label; nothing was changed.")
+    else:
+        answered = message_ops.confirm_prompt_y(preview, **report.confirm_io())
+    if not answered:
+        outcome = manage_ops.Outcome(op.command, resolved.id, member, cancelled=True)
+        report.printed_result(outcome.to_dict(), status="cancelled")
+        return 1
+
+    # -- re-derivation: the chat and the person are still what was shown --------
+    async def rebuild():
+        again = await _resolve(client, report, args.chat)
+        fresh_target = ChatTargets.chat_target(again, args.chat)
+        fresh_member = member if member is None else await port.participant(again.input_entity, user, input_user)
+        return build(fresh_target, fresh_member)[0]
+
+    await recheck_for(plan, rebuild)()
+
+    # -- the call ---------------------------------------------------------------
+    if op.verb in ("promote", "rights"):
+        await port.set_admin(peer, input_user, names, rank=args.rank)
+    elif op.verb == "demote":
+        await port.set_admin(peer, input_user, ())
+    elif op.verb in ("ban", "mute", "restrict"):
+        await port.set_banned(peer, input_user, names, until=until)
+    elif op.verb in ("unban", "unmute"):
+        await port.set_banned(peer, input_user, ())
+    elif op.verb in ("approve", "decline"):
+        await port.answer_join_request(peer, input_user, approved=op.verb == "approve")
+    elif op.verb == "create":
+        made = await port.create_invite(peer, title=args.title, expires=expires, usage_limit=args.usage_limit, request_needed=bool(args.request_needed))
+    elif op.verb == "revoke":
+        made = await port.revoke_invite(peer, args.link)
+    elif op.verb == "set":
+        await port.set_slow_mode(peer, seconds)
+
+    # -- readback ---------------------------------------------------------------
+    extra: dict = {}
+    after = None
+    if member is not None:
+        async def person_now() -> str:
+            nonlocal after
+            after = await port.participant(peer, user, input_user)
+            line = f"{after.label} is now {after.status} in {target.title}"
+            if after.rights and after.status in ("admin", "restricted"):
+                line += f" with {', '.join(after.rights)}"
+            if after.until:
+                line += f" until {after.until}"
+            if op.verb == "ban" and args.reason:
+                line += f" (reason: {args.reason})"
+            return line
+
+        evidence = await read_back("the person", person_now)
+    elif op.verb == "create":
+        evidence = Evidence.verified(f"an invite link to {target.title} now exists" + (f", titled {made['title']}" if made.get("title") else "") + (f", expiring {made['expires']}" if made.get("expires") else ""))
+        extra["invite"] = made
+    elif op.verb == "revoke":
+        evidence = Evidence.verified(f"the link is revoked: {made.get('revoked')}") if made.get("revoked") else Evidence.unverified("Telegram did not report the link as revoked")
+        extra["invite"] = made
+    else:
+        async def settings_now() -> str:
+            now = await port.settings(resolved)
+            seconds_now = now.get("slow_mode_seconds", 0)
+            return f"slow mode in {target.title} is now {'off' if not seconds_now else f'{seconds_now}s'}"
+
+        evidence = await read_back("the settings", settings_now)
+    if op.verb == "ban":
+        extra["reason"] = args.reason or ""
+    report.set_evidence(evidence)
+    report.audit(plan, status="ok", evidence=evidence)
+    outcome = manage_ops.Outcome(op.command, resolved.id, after or member, done=True, extra=extra)
+    report.printed_result(outcome.to_dict(), status="ok", show_invites=op.verb == "create")
+    return 0
+
+
+async def _run_manage_read(port, op, args, resolved, target: Target, kind: str, *, report: Reporter, rights: Rights) -> int:
+    """`admin list`, `member list`, `join-requests list`, `invite list`, `settings show`: reads, no plan."""
+    peer = resolved.input_entity
+    _refuse_missing(rights, op.required, target)
+    if op.group == "admin":
+        rows = await port.admins(peer)
+        report.info(manage_ops.format_members(rows, chat_title=target.title, what="admin(s)"))
+        payload = [row.to_dict() for row in rows]
+        for row in payload:
+            report.record(row)
+        report.result({"admins": payload}, status="ok" if payload else "empty")
+    elif op.group == "member":
+        rows = await port.members(peer, query=args.query, limit=int(args.limit), banned=bool(args.banned))
+        what = "banned or restricted" if args.banned else "member(s)"
+        report.info(manage_ops.format_members(rows, chat_title=target.title, what=what))
+        payload = [row.to_dict() for row in rows]
+        for row in payload:
+            report.record(row)
+        report.result({"members": payload, "banned": bool(args.banned)}, status="ok" if payload else "empty")
+    elif op.group == "join-requests":
+        rows = await port.join_requests(peer)
+        report.info(manage_ops.format_requests(rows, chat_title=target.title))
+        for row in rows:
+            report.record(row)
+        report.result({"requests": rows}, status="ok" if rows else "empty")
+    elif op.group == "invite":
+        rows = await port.invites(peer, revoked=bool(args.revoked))
+        report.info(manage_ops.format_invites(rows, chat_title=target.title))
+        # The one envelope that carries links: this command asked for them.
+        report.result({"invites": rows, "revoked": bool(args.revoked)}, status="ok" if rows else "empty", show_invites=True)
+    else:
+        settings = await port.settings(resolved)
+        report.info(manage_ops.format_settings(settings, chat_title=target.title))
+        report.result({"settings": settings}, status="ok")
+    return 0
+
+
 # -- bot mode --------------------------------------------------------------
 
 
@@ -2359,6 +2740,8 @@ async def run_as_bot(args, config, *, report: Reporter) -> int:
             return await _run_create(bot, args, report=report)
         if args.command == "message":
             return await _run_message(bot, args, config, report=report)
+        if args.command in manage_ops.GROUPS:
+            return await _run_manage(bot, args, report=report)
         raise ValueError(f"Unknown command: {args.command}")
 
 
@@ -2415,6 +2798,7 @@ async def run(args, *, client=None, config=None, report: Reporter | None = None)
         or (args.command == "archive" and getattr(args, "archive_kind", None) in ARCHIVE_WRITES)
         or (args.command == "review" and getattr(args, "review_kind", None) in REVIEW_WRITES)
         or (args.command == "structure" and getattr(args, "structure_kind", None) in STRUCTURE_WRITES)
+        or (args.command in manage_ops.GROUPS and (args.command, getattr(args, manage_ops.VERB_DESTS[args.command], None)) in MANAGE_WRITES)
     ):
         require_tight_modes()
 
@@ -2481,6 +2865,8 @@ async def run(args, *, client=None, config=None, report: Reporter | None = None)
             return await _run_archive_sync(client, args, report=report)
         if args.command == "structure":
             return await _run_structure(client, args, config, report=report)
+        if args.command in manage_ops.GROUPS:
+            return await _run_manage(client, args, report=report)
         raise ValueError(f"Unknown command: {args.command}")
     finally:
         if owns_client:
@@ -2496,6 +2882,11 @@ def command_name(args) -> str:
         or getattr(args, "message_verb", None)
         or getattr(args, "review_kind", None)
         or getattr(args, "structure_kind", None)
+        or getattr(args, "admin_kind", None)
+        or getattr(args, "member_kind", None)
+        or getattr(args, "join_kind", None)
+        or getattr(args, "invite_kind", None)
+        or getattr(args, "settings_kind", None)
     )
     return f"{args.command} {kind}" if kind else str(args.command or "")
 

@@ -1,0 +1,6 @@
+usage: telegram-tools invite revoke [-h] --chat CHAT --link LINK
+
+options:
+  -h, --help   show this help message and exit
+  --chat CHAT  The chat: numeric ID, @username, or link
+  --link LINK  The link to revoke, as `invite list` printed it

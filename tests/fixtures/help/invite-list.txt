@@ -1,0 +1,6 @@
+usage: telegram-tools invite list [-h] --chat CHAT [--revoked]
+
+options:
+  -h, --help   show this help message and exit
+  --chat CHAT  The chat: numeric ID, @username, or link
+  --revoked    The revoked ones instead of the live ones

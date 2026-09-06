@@ -1,0 +1,11 @@
+usage: telegram-tools invite [-h] {list,create,revoke} ...
+
+positional arguments:
+  {list,create,revoke}
+    list                Your invite links to a chat, shown in full
+    create              Make a new invite link and show it once (y/N)
+    revoke              Revoke an invite link (y/N); the link is redacted
+                        everywhere but the flag
+
+options:
+  -h, --help            show this help message and exit

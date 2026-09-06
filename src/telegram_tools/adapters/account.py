@@ -43,6 +43,7 @@ RIGHT_NAMES = (
     "pin_messages",
     "change_info",
     "manage_topics",
+    "add_admins",
 )
 
 

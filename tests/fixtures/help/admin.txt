@@ -1,0 +1,14 @@
+usage: telegram-tools admin [-h] {list,promote,rights,demote} ...
+
+positional arguments:
+  {list,promote,rights,demote}
+    list                The creator and every admin, with their rights and
+                        ranks
+    promote             Make a member an admin with the rights you name (y/N)
+    rights              Set an admin's rights to exactly the ones you name
+                        (y/N)
+    demote              Take every admin right off a person (dry-run by
+                        default)
+
+options:
+  -h, --help            show this help message and exit

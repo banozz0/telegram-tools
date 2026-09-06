@@ -1,0 +1,12 @@
+usage: telegram-tools invite create [-h] --chat CHAT [--title TITLE]
+                                    [--expires EXPIRES] [--usage-limit N]
+                                    [--request-needed]
+
+options:
+  -h, --help         show this help message and exit
+  --chat CHAT        The chat: numeric ID, @username, or link
+  --title TITLE      A name for the link, shown to admins only
+  --expires EXPIRES  When the link stops working: a duration (2h, 7d) or an
+                     ISO date/time
+  --usage-limit N    How many people may join through it
+  --request-needed   Joining through it needs an admin's approval

@@ -30,6 +30,7 @@ from telegram_tools._core.contract import (
 )
 from telegram_tools._core.identity import Identity, Target, banner
 from telegram_tools._core.plan import Evidence, Plan
+from telegram_tools._core.redaction import redact
 
 TOOL = "telegram-tools"
 PLATFORM = "telegram"
@@ -213,6 +214,7 @@ class Reporter:
         self._plan: Plan | None = None
         self._evidence: Evidence | None = None
         self._result: dict[str, Any] = {}
+        self._show_invites = False
         self._status = "ok"
         self._warnings: list[str] = []
         self._banner_shown = False
@@ -270,14 +272,20 @@ class Reporter:
 
     # -- what a machine reads -----------------------------------------------
 
-    def result(self, payload: dict[str, Any], *, status: str = "ok") -> None:
-        """The command's own payload and how its run went. Prints nothing."""
+    def result(self, payload: dict[str, Any], *, status: str = "ok", show_invites: bool = False) -> None:
+        """The command's own payload and how its run went. Prints nothing.
+
+        `show_invites` is for the two commands that asked for invite links
+        (`invite list`, `invite create`): their `result` keeps the links the
+        shared redaction would blank. Nothing else in the envelope is exempt.
+        """
         self._result = dict(payload)
         self._status = status
+        self._show_invites = show_invites
 
-    def printed_result(self, payload: dict[str, Any], *, status: str = "ok") -> None:
+    def printed_result(self, payload: dict[str, Any], *, status: str = "ok", show_invites: bool = False) -> None:
         """The same, for the commands whose human output has always been this JSON."""
-        self.result(payload, status=status)
+        self.result(payload, status=status, show_invites=show_invites)
         if not self.machine:
             from telegram_tools.exporters import json_text
 
@@ -346,7 +354,7 @@ class Reporter:
         # A first write on a fresh machine can land before anything has made
         # ~/.telegram-tools/, and the shared writer opens the file rather than
         # creating a tree. Make room for the line, tighten nothing that exists.
-        self.audit_log.path.parent.mkdir(parents=True, exist_ok=True)
+        self.audit_log.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.audit_log.append(
             tool=TOOL,
             version=__version__,
@@ -372,7 +380,7 @@ class Reporter:
         )
 
     def envelope(self, *, status: str | None = None, error: Error | None = None) -> dict[str, Any]:
-        return build_envelope(
+        envelope = build_envelope(
             tool=TOOL,
             version=__version__,
             command=self.command,
@@ -387,6 +395,9 @@ class Reporter:
             error=error,
             meta=self._meta(),
         )
+        if self._show_invites and error is None:
+            envelope["result"] = redact(self._result, show_invites=True)
+        return envelope
 
     def finish(self, code: int) -> int:
         """Close the run: human mode keeps the command's own exit code, machine mode emits."""

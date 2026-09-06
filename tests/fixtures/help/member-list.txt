@@ -1,0 +1,9 @@
+usage: telegram-tools member list [-h] --chat CHAT [--query QUERY]
+                                  [--limit LIMIT] [--banned]
+
+options:
+  -h, --help     show this help message and exit
+  --chat CHAT    The chat: numeric ID, @username, or link
+  --query QUERY  Only members whose name or username matches
+  --limit LIMIT  At most this many (default 200)
+  --banned       List the banned and restricted instead of the members

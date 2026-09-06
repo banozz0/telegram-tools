@@ -1,0 +1,8 @@
+usage: telegram-tools member mute [-h] --chat CHAT --user USER --until UNTIL
+
+options:
+  -h, --help     show this help message and exit
+  --chat CHAT    The chat: numeric ID, @username, or link
+  --user USER    The person: numeric ID or @username
+  --until UNTIL  When it ends: a duration (30m, 2h, 7d, 1w) or an ISO
+                 date/time; at least a minute, at most a year

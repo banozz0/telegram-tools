@@ -1,0 +1,5 @@
+usage: telegram-tools settings show [-h] --chat CHAT
+
+options:
+  -h, --help   show this help message and exit
+  --chat CHAT  The chat: numeric ID, @username, or link

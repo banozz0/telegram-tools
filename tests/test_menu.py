@@ -1463,13 +1463,91 @@ def test_the_root_shows_all_nine_rows_including_the_two_a_later_version_fills():
     assert "7. Watch (rules, runner, review queue)" in text
 
 
-def test_manage_says_it_arrives_later_and_comes_straight_back():
-    _code, calls, output = run_menu([MANAGE, "", "0"])
+def test_manage_holds_the_five_administration_groups():
+    _code, calls, output = run_menu([MANAGE, "0", "0"])
 
     text = screens(output)
-    assert calls == [], "a row with nothing behind it runs nothing"
-    assert "arrive in a later version" in text
-    assert text.count(ROOT_ROWS[0]) == 2, "and lands back on the root"
+    assert calls == []
+    assert "1. Admins: list, promote, change rights, demote" in text
+    assert "2. Members: list, ban, unban, mute, unmute, restrict" in text
+    assert "3. Join requests: list, approve, decline" in text
+    assert "4. Invite links: list, create, revoke" in text
+    assert "5. Chat settings: show, set slow mode" in text
+
+
+MANAGE_ADMINS = ("6", "1")
+MANAGE_MEMBERS = ("6", "2")
+MANAGE_JOIN = ("6", "3")
+MANAGE_INVITES = ("6", "4")
+MANAGE_SETTINGS = ("6", "5")
+
+
+def test_admin_list_picks_a_chat_and_runs_with_no_form():
+    # Admins (1) -> list (1) -> Forum groups (1) -> Hermes (1); Enter, 0.
+    code, calls, _output = run_menu([MANAGE_ADMINS, "1", "1", "1", "", "0"])
+    assert code == 0
+    (args,) = calls
+    assert (args.command, args.admin_kind, args.chat) == ("admin", "list", "-100111")
+
+
+def test_admin_promote_stages_the_person_and_the_rights_and_never_sets_yes():
+    # promote (2), Hermes, person (1), rights (2), rank (3), run (4).
+    _code, calls, output = run_menu([MANAGE_ADMINS, "2", "1", "1", "1", "@harry", "2", "pin_messages", "3", "ops", "4", "", "0"])
+    (args,) = calls
+    assert (args.command, args.admin_kind, args.chat, args.user, args.rights, args.rank) == ("admin", "promote", "-100111", "@harry", "pin_messages", "ops")
+    assert not hasattr(args, "yes")
+    assert "Do it (shows the preview, then asks)" in screens(output)
+
+
+def test_admin_promote_refuses_to_run_with_the_person_missing():
+    _code, calls, output = run_menu([MANAGE_ADMINS, "2", "1", "1", "4", "0", "0", "0", "0", "0"])
+    assert calls == []
+    assert "Fill in first: Person (id or @username), Rights (comma-separated)." in screens(output)
+
+
+def test_member_ban_dry_runs_first_and_the_label_is_typed_in_the_cli():
+    # ban (2), Hermes, person (1), reason (2), run (3): the dry-run; then the one row for real; Enter, 0.
+    code, calls, output = run_menu([MANAGE_MEMBERS, "2", "1", "1", "1", "@troll", "2", "spam", "3", "1", "", "0"])
+    assert code == 0
+    dry, real = calls
+    assert (dry.command, dry.member_kind, dry.user, dry.reason, dry.execute) == ("member", "ban", "@troll", "spam", False)
+    assert (real.user, real.reason, real.execute) == ("@troll", "spam", True)
+    assert "Do it for real - the next screen asks for the person's exact label" in screens(output)
+
+
+def test_member_ban_backing_out_after_the_dry_run_bans_nobody():
+    _code, calls, _output = run_menu([MANAGE_MEMBERS, "2", "1", "1", "1", "@troll", "3", "0", "0", "0", "0", "0", "0"])
+    assert [args.execute for args in calls] == [False]
+
+
+def test_member_mute_needs_an_until_and_restrict_needs_rights_too():
+    _code, calls, output = run_menu([MANAGE_MEMBERS, "4", "1", "1", "1", "@harry", "3", "0", "0", "0", "0", "0"])
+    assert calls == []
+    assert "Fill in first: Until (30m, 2h, 7d, 1w, or a date)." in screens(output)
+    _code, calls, _output = run_menu([MANAGE_MEMBERS, "6", "1", "1", "1", "@harry", "2", "send_media", "3", "2h", "4", "", "0"])
+    (args,) = calls
+    assert (args.member_kind, args.rights, args.until) == ("restrict", "send_media", "2h")
+
+
+def test_member_list_toggles_banned_and_keeps_the_default_limit():
+    _code, calls, _output = run_menu([MANAGE_MEMBERS, "1", "1", "1", "3", "4", "", "0"])
+    (args,) = calls
+    assert (args.member_kind, args.banned, args.limit, args.query) == ("list", True, 200, None)
+
+
+def test_join_requests_and_invites_and_settings_build_their_flags():
+    _code, calls, _output = run_menu([MANAGE_JOIN, "2", "1", "1", "1", "@newbie", "2", "", "0"])
+    (args,) = calls
+    assert (args.command, args.join_kind, args.user) == ("join-requests", "approve", "@newbie")
+    _code, calls, _output = run_menu([MANAGE_INVITES, "2", "1", "1", "1", "night", "2", "7d", "3", "5", "4", "5", "", "0"])
+    (args,) = calls
+    assert (args.command, args.invite_kind, args.title, args.expires, args.usage_limit, args.request_needed) == ("invite", "create", "night", "7d", 5, True)
+    _code, calls, _output = run_menu([MANAGE_INVITES, "3", "1", "1", "1", "https://t.me/+abc", "2", "", "0"])
+    (args,) = calls
+    assert (args.invite_kind, args.link) == ("revoke", "https://t.me/+abc")
+    _code, calls, _output = run_menu([MANAGE_SETTINGS, "2", "1", "1", "1", "60", "2", "", "0"])
+    (args,) = calls
+    assert (args.command, args.settings_kind, args.slow_mode) == ("settings", "set", 60)
 
 
 WATCH_ROWS = (

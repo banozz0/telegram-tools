@@ -1,0 +1,6 @@
+usage: telegram-tools member unban [-h] --chat CHAT --user USER
+
+options:
+  -h, --help   show this help message and exit
+  --chat CHAT  The chat: numeric ID, @username, or link
+  --user USER  The person: numeric ID or @username

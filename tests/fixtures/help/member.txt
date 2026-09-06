@@ -1,0 +1,16 @@
+usage: telegram-tools member [-h] {list,ban,unban,mute,unmute,restrict} ...
+
+positional arguments:
+  {list,ban,unban,mute,unmute,restrict}
+    list                Members of a chat, newest first, or the banned and
+                        restricted ones
+    ban                 Ban a person from the chat (dry-run by default)
+    unban               Lift a ban or a restriction (y/N)
+    mute                Stop a person sending anything until a moment you name
+                        (y/N)
+    unmute              Lift a mute or a restriction (y/N)
+    restrict            Take named rights off a person until a moment you name
+                        (y/N)
+
+options:
+  -h, --help            show this help message and exit

@@ -1,0 +1,9 @@
+usage: telegram-tools settings [-h] {show,set} ...
+
+positional arguments:
+  {show,set}
+    show      Slow mode, join approval, default member rights, counts
+    set       Change a setting (y/N)
+
+options:
+  -h, --help  show this help message and exit

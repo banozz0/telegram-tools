@@ -1,0 +1,10 @@
+usage: telegram-tools join-requests [-h] {list,approve,decline} ...
+
+positional arguments:
+  {list,approve,decline}
+    list                Who is waiting, since when, and what they wrote
+    approve             Let a person in (y/N)
+    decline             Turn a request down (y/N)
+
+options:
+  -h, --help            show this help message and exit
