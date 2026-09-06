@@ -25,6 +25,7 @@ from telegram_tools import messages as message_ops
 from telegram_tools.prompts import BACK, CLEAR, EXIT, MENU, RULE, Extra, after_action, after_run, ask_int, ask_lines, ask_text, choose, edit_field, pick, pick_many
 from telegram_tools.resolver import resolve_chat
 from telegram_tools import review as review_ops
+from telegram_tools import structure as structure_ops
 from telegram_tools.topics import get_forum_topics
 from telegram_tools import ui
 from telegram_tools.ui import crumb
@@ -45,7 +46,7 @@ ROOT_ITEMS = (
     "Find IDs (chats, topics)",
     "Read (search live, archive, export)",
     "Write (send, reply, message tools)",
-    "Build (create, delete)",
+    "Build (create, delete, structure)",
     "Clear messages",
     "Manage (admins, members, invites, settings)",
     "Watch (rules, runner, review queue)",
@@ -128,6 +129,15 @@ class MenuSession:
         with archive_store.open_archive() as archive:
             rows = review_ops.queue_for(archive).list()
         return [(row.manifest_id, _candidate_label(row)) for row in rows if row.state in states]
+
+    def structure_applies(self) -> list[tuple[str, str]]:
+        """Every apply the archive holds remap rows for, newest first, as `(apply id, label)`.
+        Reads the file; opens no connection."""
+        if not archive_store.archive_exists():
+            return []
+        with archive_store.open_archive() as archive:
+            rows = structure_ops.latest_apply_ids(archive)
+        return [(apply_id, f"{apply_id}  {created}  blueprint {blueprint_hash}") for apply_id, created, blueprint_hash in rows]
 
     async def close(self) -> None:
         if self._client is not None:
@@ -1822,20 +1832,120 @@ async def _flow_read(*, session, runner, read, write) -> bool:
             return outcome
 
 
-async def _flow_build(*, session, runner, read, write) -> bool:
-    """Row 4. Two things that make and unmake the same objects, under one roof."""
-    trail = crumb(MAIN, "Build")
+# -- structure blueprints ------------------------------------------------------
+
+_APPLY_ANOTHER = (STAY, "Apply to another chat")
+
+
+def _ask_blueprint(read, write) -> Any:
+    return ask_text("Blueprint file (written by structure export)", read=read, write=write)
+
+
+async def _flow_structure_export(*, session, runner, read, write) -> bool:
+    trail = crumb(MAIN, "Build", "Export blueprint")
     while True:
+        picked = await _pick_chat(session=session, read=read, write=write, trail=trail)
+        if picked is BACK:
+            return True
+        # Blank cancels out of ask_text, which for an optional path is "print it".
+        output = ask_text("Write it to (blank prints it here)", read=read, write=write)
+        args = _namespace(command="structure", structure_kind="export", chat=picked.reference, output=None if output is BACK else output)
+        result = await _act(args, session=session, runner=runner, read=read, write=write, trail=crumb(trail, picked.title), rows=(RUN_AGAIN, (STAY, "Export another chat")))
+        if result is not STAY:
+            return _leave(result)
+
+
+async def _flow_structure_diff(*, session, runner, read, write) -> bool:
+    trail = crumb(MAIN, "Build", "Diff blueprint")
+    while True:
+        blueprint = _ask_blueprint(read, write)
+        if blueprint is BACK:
+            return True
+        picked = await _pick_chat(session=session, read=read, write=write, trail=trail)
+        if picked is BACK:
+            continue
+        args = _namespace(command="structure", structure_kind="diff", blueprint=blueprint, chat=picked.reference)
+        result = await _act(args, session=session, runner=runner, read=read, write=write, trail=crumb(trail, picked.title), rows=(RUN_AGAIN, (STAY, "Diff another")))
+        if result is not STAY:
+            return _leave(result)
+
+
+async def _flow_structure_apply(*, session, runner, read, write) -> bool:
+    """Apply a blueprint. The dry-run always runs first, and the exact title is typed
+    at the CLI's own prompt: the menu is never a shorter path past that gate."""
+    trail = crumb(MAIN, "Build", "Apply blueprint")
+    while True:
+        blueprint = _ask_blueprint(read, write)
+        if blueprint is BACK:
+            return True
+        where = choose(["An existing chat of the blueprint's kind", "A new chat made from the blueprint"], title=trail, read=read, write=write)
+        if where is BACK:
+            continue
+        if where == 0:
+            picked = await _pick_chat(session=session, read=read, write=write, trail=trail)
+            if picked is BACK:
+                continue
+            dry_run = _namespace(command="structure", structure_kind="apply", blueprint=blueprint, chat=picked.reference, create=False, execute=False)
+            label = picked.title
+        else:
+            dry_run = _namespace(command="structure", structure_kind="apply", blueprint=blueprint, chat=None, create=True, execute=False)
+            label = "New chat"
+
+        if await _call(dry_run, session=session, runner=runner, write=write) is None:
+            return _leave_action(after_action(read=read, write=write))
+
         choice = choose(
-            ["Create a group, channel, or topic", "Delete a group, channel, or topic"],
-            title=trail,
+            ["Apply it for real - the next screen asks for the chat's exact title"],
+            title=crumb(trail, label, "Dry-run done"),
             read=read,
             write=write,
+            back_label="Back to what to apply",
         )
         if choice is BACK:
+            continue
+        for_real = _namespace(**{**vars(dry_run), "execute": True})
+        result = await _act(for_real, session=session, runner=runner, read=read, write=write, trail=crumb(trail, label), rows=(_APPLY_ANOTHER,))
+        if result is not STAY:
+            return _leave(result)
+
+
+async def _flow_structure_remap(*, session, runner, read, write) -> bool:
+    trail = crumb(MAIN, "Build", "Remap table")
+    while True:
+        applies = session.structure_applies()
+        if applies:
+            chosen = pick(applies, title=trail, label=lambda row: row[1], read=read, write=write, extras=(Extra("manual", "Type an apply id"),))
+            if chosen is BACK:
+                return True
+            apply_id = ask_text("Apply id", read=read, write=write) if isinstance(chosen, str) else chosen[0]
+        else:
+            apply_id = ask_text("Apply id (the archive holds no remap rows yet)", read=read, write=write)
+        if apply_id is BACK:
             return True
-        flow = _flow_create if choice == 0 else _flow_delete
-        outcome = await _group(flow, session=session, runner=runner, read=read, write=write)
+        args = _namespace(command="structure", structure_kind="remap", apply_id=apply_id)
+        result = await _act(args, session=session, runner=runner, read=read, write=write, trail=crumb(trail, apply_id), rows=(RUN_AGAIN, (STAY, "Another apply")), connect=False)
+        if result is not STAY:
+            return _leave(result)
+
+
+BUILD_ROWS = (
+    ("Create a group, channel, or topic", _flow_create),
+    ("Delete a group, channel, or topic", _flow_delete),
+    ("Export a chat's blueprint (topics and settings)", _flow_structure_export),
+    ("Diff a blueprint against a chat", _flow_structure_diff),
+    ("Apply a blueprint (dry-run first, then its exact title)", _flow_structure_apply),
+    ("Show the remap table of an apply", _flow_structure_remap),
+)
+
+
+async def _flow_build(*, session, runner, read, write) -> bool:
+    """Row 4. What makes, unmakes and copies the shape of a chat, under one roof."""
+    trail = crumb(MAIN, "Build")
+    while True:
+        choice = choose([label for label, _flow in BUILD_ROWS], title=trail, read=read, write=write)
+        if choice is BACK:
+            return True
+        outcome = await _group(BUILD_ROWS[choice][1], session=session, runner=runner, read=read, write=write)
         if outcome is not True:
             return outcome
 

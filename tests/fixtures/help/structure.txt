@@ -1,0 +1,15 @@
+usage: telegram-tools structure [-h] {export,diff,apply,remap} ...
+
+positional arguments:
+  {export,diff,apply,remap}
+    export              Write a chat's blueprint: kind, title, description,
+                        topics, default rights, slow mode, join approval
+    diff                What a chat would need to match a blueprint (reads the
+                        chat, changes nothing)
+    apply               Make a chat match a blueprint: dry-run by default;
+                        --execute asks for the chat's exact title
+    remap               Print the source-to-target id table one apply wrote
+                        (reads the local archive)
+
+options:
+  -h, --help            show this help message and exit

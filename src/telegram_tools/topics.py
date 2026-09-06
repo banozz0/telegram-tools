@@ -20,6 +20,7 @@ def topic_from_telethon(raw_topic, icons: dict[int, str] | None = None) -> Topic
         title=str(getattr(raw_topic, "title", topic_id)),
         top_message=getattr(raw_topic, "top_message", topic_id),
         icon_emoji=(icons or {}).get(int(emoji_id)) if emoji_id else None,
+        icon_emoji_id=int(emoji_id) if emoji_id else None,
     )
 
 

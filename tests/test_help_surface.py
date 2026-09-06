@@ -83,6 +83,11 @@ COMMANDS = {
     "review-reject": ("review", "reject"),
     "review-retry": ("review", "retry"),
     "review-status": ("review", "status"),
+    "structure": ("structure",),
+    "structure-export": ("structure", "export"),
+    "structure-diff": ("structure", "diff"),
+    "structure-apply": ("structure", "apply"),
+    "structure-remap": ("structure", "remap"),
 }
 
 # The only text this card was allowed to add, spelled exactly as the help spells
@@ -129,6 +134,11 @@ ALLOWED_ADDITIONS = (
     # existing command gained or lost a flag. Both spellings of the name.
     "review,",
     "review The review queue: links and files the archive saw, fetched only after you approve",
+    # The chat-blueprints card (agent-bo-95421949): one new subcommand group,
+    # a chat's structure exported, diffed and applied behind the typed title.
+    # No existing command gained or lost a flag. Both spellings of the name.
+    "structure,",
+    "structure Export, diff and apply a chat's structure blueprint (topics and settings, never people or messages)",
 )
 
 # A choice list that grew. The help line is the same words; the braces name

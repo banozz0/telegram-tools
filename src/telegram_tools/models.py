@@ -10,6 +10,9 @@ class TopicInfo:
     title: str
     top_message: int | None = None
     icon_emoji: str | None = None
+    # The custom-emoji document behind `icon_emoji`, as Telegram keys it. A
+    # blueprint carries this id, because the character is only its rendering.
+    icon_emoji_id: int | None = None
 
     @property
     def display_title(self) -> str:

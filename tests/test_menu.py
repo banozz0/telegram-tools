@@ -93,6 +93,9 @@ class FakeSession:
         self.review_states.append(tuple(states))
         return [row for row in getattr(self, "_review", REVIEW) if row[1].split("  ")[2] in states]
 
+    def structure_applies(self):
+        return list(getattr(self, "_applies", APPLIES))
+
     async def close(self):
         self.closed = True
 
@@ -101,6 +104,9 @@ class FakeSession:
         self.closed = True
         self.banner = None
 
+
+# What the remap picker sees: `(apply id, label)`.
+APPLIES = [("a1b2c3d4e5f60718", "a1b2c3d4e5f60718  2026-09-06T10:00:00Z  blueprint 0123456789abcdef")]
 
 # What the review pickers see: `(manifest id, label)`, the label's third field the state.
 REVIEW = [
@@ -171,7 +177,7 @@ ROOT_ROWS = (
     "1. Find IDs (chats, topics)",
     "2. Read (search live, archive, export)",
     "3. Write (send, reply, message tools)",
-    "4. Build (create, delete)",
+    "4. Build (create, delete, structure)",
     "5. Clear messages",
     "6. Manage (admins, members, invites, settings)",
     "7. Watch (rules, runner, review queue)",
@@ -1556,12 +1562,87 @@ def test_review_status_runs_offline_and_comes_straight_back():
     assert (args.command, args.review_kind) == ("review", "status")
 
 
-def test_build_holds_create_and_delete():
+def test_build_holds_create_delete_and_the_structure_rows():
     _code, _calls, output = run_menu([BUILD, "0", "0"])
 
     text = screens(output)
     assert "1. Create a group, channel, or topic" in text
     assert "2. Delete a group, channel, or topic" in text
+    assert "3. Export a chat's blueprint (topics and settings)" in text
+    assert "4. Diff a blueprint against a chat" in text
+    assert "5. Apply a blueprint (dry-run first, then its exact title)" in text
+    assert "6. Show the remap table of an apply" in text
+
+
+STRUCTURE_EXPORT = ("4", "3")
+STRUCTURE_DIFF = ("4", "4")
+STRUCTURE_APPLY = ("4", "5")
+STRUCTURE_REMAP = ("4", "6")
+
+
+def test_structure_export_picks_a_chat_and_takes_an_output_path():
+    # Forum groups (1) -> Hermes (1), then a path, then Enter (main menu), 0 (exit).
+    code, calls, _output = run_menu([STRUCTURE_EXPORT, "1", "1", "/tmp/hermes.json", "", "0"])
+    assert code == 0
+    (args,) = calls
+    assert (args.command, args.structure_kind, args.chat, args.output) == ("structure", "export", "-100111", "/tmp/hermes.json")
+
+
+def test_structure_export_with_a_blank_path_prints_the_blueprint():
+    _code, calls, _output = run_menu([STRUCTURE_EXPORT, "1", "1", "", "", "0"])
+    (args,) = calls
+    assert args.output is None
+
+
+def test_structure_diff_asks_for_the_file_then_the_chat():
+    _code, calls, _output = run_menu([STRUCTURE_DIFF, "/tmp/hermes.json", "2", "1", "", "0"])
+    (args,) = calls
+    assert (args.command, args.structure_kind, args.blueprint, args.chat) == ("structure", "diff", "/tmp/hermes.json", "-100222")
+
+
+def test_structure_apply_dry_runs_first_and_the_title_is_typed_in_the_cli():
+    # File, existing chat (1), Forum groups (1) -> Hermes (1): the dry-run runs;
+    # then the one row applies for real, Enter, 0.
+    code, calls, output = run_menu([STRUCTURE_APPLY, "/tmp/hermes.json", "1", "1", "1", "1", "", "0"])
+    assert code == 0
+    dry, real = calls
+    assert (dry.structure_kind, dry.chat, dry.create, dry.execute) == ("apply", "-100111", False, False)
+    assert (real.chat, real.create, real.execute) == ("-100111", False, True)
+    assert "Apply it for real - the next screen asks for the chat's exact title" in screens(output)
+
+
+def test_structure_apply_to_a_new_chat_sets_create():
+    _code, calls, _output = run_menu([STRUCTURE_APPLY, "/tmp/hermes.json", "2", "1", "", "0"])
+    dry, real = calls
+    assert (dry.create, dry.chat, dry.execute) == (True, None, False)
+    assert (real.create, real.execute) == (True, True)
+
+
+def test_structure_apply_backing_out_after_the_dry_run_applies_nothing():
+    _code, calls, _output = run_menu([STRUCTURE_APPLY, "/tmp/hermes.json", "2", "0", "", "0", "0"])
+    assert [args.execute for args in calls] == [False]
+
+
+def test_structure_remap_picks_an_apply_from_the_archive_and_runs_offline():
+    code, calls, output = run_menu([STRUCTURE_REMAP, "1", "", "0"])
+    assert code == 0
+    (args,) = calls
+    assert (args.command, args.structure_kind, args.apply_id) == ("structure", "remap", "a1b2c3d4e5f60718")
+    assert "a1b2c3d4e5f60718  2026-09-06T10:00:00Z  blueprint 0123456789abcdef" in screens(output)
+
+
+def test_structure_remap_can_take_a_typed_apply_id():
+    _code, calls, _output = run_menu([STRUCTURE_REMAP, "2", "feedfacefeedface", "", "0"])
+    (args,) = calls
+    assert args.apply_id == "feedfacefeedface"
+
+
+def test_structure_remap_with_no_applies_asks_for_an_id():
+    session = FakeSession()
+    session._applies = []
+    _code, calls, _output = run_menu([STRUCTURE_REMAP, "feedfacefeedface", "", "0"], session=session)
+    (args,) = calls
+    assert args.apply_id == "feedfacefeedface"
 
 
 def test_identity_lists_the_profile_rows_and_my_bots():

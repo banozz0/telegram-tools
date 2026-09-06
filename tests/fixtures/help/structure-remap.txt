@@ -1,0 +1,5 @@
+usage: telegram-tools structure remap [-h] --apply-id ID
+
+options:
+  -h, --help     show this help message and exit
+  --apply-id ID  The apply id `structure apply` printed

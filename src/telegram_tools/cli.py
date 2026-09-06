@@ -56,6 +56,9 @@ from telegram_tools.exporters import SEARCH_FORMATS, json_text, write_records
 from telegram_tools import messages as message_ops
 from telegram_tools.prompts import BACK, pick_many
 from telegram_tools import review as review_ops
+from telegram_tools import structure as structure_ops
+from telegram_tools._core import blueprint as _blueprint
+from telegram_tools.adapters.blueprint import TelegramBlueprintPort, chat_kind
 from telegram_tools.resolver import EntityResolutionError, resolve_chat
 from telegram_tools.search import format_message_records, search_messages
 from telegram_tools.send import SendTarget, confirm_send, format_send_preview, require_send_allowed, send_message
@@ -77,6 +80,10 @@ DELETE_TOPIC_RIGHTS = ("delete_messages",)
 # `auth` is here because it writes a session, which is the one local file worth
 # being strict about.
 WRITES = ("send", "message", "create", "delete", "clear-messages", "bots", "auth")
+# The one structure command that writes: `apply` makes topics and sets settings
+# on the target and writes remap rows into the archive. `export` and `diff`
+# read a chat; `remap` reads the archive.
+STRUCTURE_WRITES = ("apply",)
 # The archive commands that write the local store. `status`, `search` and
 # `export` read it, and a read is left alone for the same reason `doctor` is.
 ARCHIVE_WRITES = ("sync", "retention", "forget")
@@ -229,6 +236,27 @@ def build_parser() -> argparse.ArgumentParser:
     review_retry.add_argument("--ids", action="append", required=True, metavar="ID[,ID…]", help="Candidate ids; repeatable, comma-separated")
 
     review_kinds.add_parser("status", help="Counts, quarantine and media against their budgets, the scanner, and every fetched candidate")
+
+    structure_parser = subparsers.add_parser("structure", help="Export, diff and apply a chat's structure blueprint (topics and settings, never people or messages)")
+    structure_kinds = structure_parser.add_subparsers(dest="structure_kind")
+
+    structure_export = structure_kinds.add_parser("export", help="Write a chat's blueprint: kind, title, description, topics, default rights, slow mode, join approval")
+    structure_export.add_argument("--chat", required=True, help="The chat: numeric ID, @username, link, or its tg:chat: rid")
+    structure_export.add_argument("--output", help="Where to write the blueprint JSON; without it, printed")
+
+    structure_diff = structure_kinds.add_parser("diff", help="What a chat would need to match a blueprint (reads the chat, changes nothing)")
+    structure_diff.add_argument("--blueprint", required=True, metavar="FILE", help="A blueprint written by `structure export`")
+    structure_diff.add_argument("--chat", required=True, help="The chat to compare: numeric ID, @username, link, or its tg:chat: rid")
+
+    structure_apply = structure_kinds.add_parser("apply", help="Make a chat match a blueprint: dry-run by default; --execute asks for the chat's exact title")
+    structure_apply.add_argument("--blueprint", required=True, metavar="FILE", help="A blueprint written by `structure export`")
+    structure_target = structure_apply.add_mutually_exclusive_group(required=True)
+    structure_target.add_argument("--chat", help="An existing chat of the blueprint's kind: numeric ID, @username, link, or its tg:chat: rid")
+    structure_target.add_argument("--create", action="store_true", help="Make a new chat of the blueprint's kind and title first, then apply the rest to it")
+    structure_apply.add_argument("--execute", action="store_true", help="Actually apply it; the chat's exact title is asked for at a prompt (no --yes exists)")
+
+    structure_remap = structure_kinds.add_parser("remap", help="Print the source-to-target id table one apply wrote (reads the local archive)")
+    structure_remap.add_argument("--apply-id", required=True, metavar="ID", help="The apply id `structure apply` printed")
 
     bots_parser = subparsers.add_parser("bots", help="List the bots you own and edit their BotFather settings")
     bots_parser.add_argument("--bot", help="Bot nickname from TELEGRAM_BOT_TOKENS, @username, or numeric ID")
@@ -1708,6 +1736,219 @@ async def _gone(client, peer, result) -> str:
     raise LookupError("Telegram still lists the chat; it may be answering from a cache")
 
 
+
+# -- structure blueprints (section 12) --------------------------------------
+
+
+def _structure_reference(reference: str) -> str | int:
+    """`--chat` as every other command takes it, plus a `tg:chat:` rid, which is what a
+    blueprint and a remap table spell."""
+    text = str(reference).strip()
+    if text.startswith(f"{PREFIX}:"):
+        parsed = _rid.parse(text)
+        if parsed.kind != "chat":
+            raise CommandError(f"{text} is not a chat rid.", code="TARGET_KIND_MISMATCH", hint="structure works on chats: tg:chat:<id>")
+        return int(parsed.ids[0])
+    return text
+
+
+async def _structure_target(client, report: Reporter, reference: str) -> tuple[Target, str, object]:
+    """The chat `--chat` names as a Target, its blueprint kind, and the resolved peer."""
+    resolved = await _resolve(client, report, _structure_reference(reference))
+    target = ChatTargets.chat_target(resolved, reference)
+    kind = chat_kind(resolved.entity)
+    return target, kind, resolved
+
+
+async def _run_structure(client, args, config, *, report: Reporter) -> int:
+    kind = getattr(args, "structure_kind", None)
+    if kind is None:
+        raise ValueError("structure needs one of: export, diff, apply, remap.")
+    if kind == "export":
+        return await _run_structure_export(client, args, report=report)
+    if kind == "diff":
+        return await _run_structure_diff(client, args, report=report)
+    if kind == "apply":
+        return await _run_structure_apply(client, args, config, report=report)
+    raise ValueError(f"Unknown structure command: {kind}")
+
+
+async def _run_structure_export(client, args, *, report: Reporter) -> int:
+    """Read one chat and write its blueprint. Reads only; the banner says what it is not."""
+    target, _kind, _resolved = await _structure_target(client, report, args.chat)
+    report.set_target(target)
+    report.show_banner()
+    port = TelegramBlueprintPort(client, resolver=_port_resolver(report))
+    exported = await _blueprint.export(port, target, structure_ops.ALLOWLIST)
+    path = None
+    if args.output:
+        path = str(structure_ops.write_blueprint(args.output, exported.blueprint))
+    report.info(structure_ops.format_export(exported.blueprint, hash=exported.hash, dropped=exported.dropped, path=path))
+    if not args.output and not report.machine:
+        print(exported.text, end="")
+    report.result({"blueprint": exported.blueprint, "hash": exported.hash, "dropped": list(exported.dropped), "output": path})
+    return 0
+
+
+async def _run_structure_diff(client, args, *, report: Reporter) -> int:
+    """What the chat would need to match the blueprint. Reads the chat, changes nothing."""
+    blueprint = structure_ops.read_blueprint(args.blueprint)
+    target, kind, _resolved = await _structure_target(client, report, args.chat)
+    report.set_target(target)
+    report.show_banner()
+    structure_ops.require_same_kind(blueprint, kind, target)
+    port = TelegramBlueprintPort(client, resolver=_port_resolver(report))
+    current = (await _blueprint.export(port, target, structure_ops.ALLOWLIST)).blueprint
+    diff = _blueprint.diff(blueprint, current)
+    report.info(structure_ops.format_diff(diff, target=target))
+    report.result({**diff.to_dict(), "blueprint_hash": _blueprint.blueprint_hash(blueprint), "matches": diff.empty}, status="ok")
+    return 0
+
+
+def _port_resolver(report: Reporter):
+    """The port resolves a container rid through whatever `--chat` would use: the
+    account's dialog walk, so the peer it reads is the one the preview named."""
+
+    async def resolve(client, reference):
+        return await _resolve(client, report, reference)
+
+    return resolve
+
+
+async def _run_structure_apply(client, args, config, *, report: Reporter) -> int:
+    """Make a chat match a blueprint: a dry-run listing every step, then the exact title.
+
+    The gate is `delete`'s, for `delete`'s reason: the mistake worth catching is
+    the wrong chat, not the absent intent, and there is no `--yes`. With
+    `--create` the chat is made first from the blueprint's kind and title, through
+    the same create path `create group` and `create channel` use, and the title
+    typed is the one it will have. Every step the platform accepts leaves its own
+    audit line; the apply id names the remap rows the archive keeps.
+    """
+    blueprint = structure_ops.read_blueprint(args.blueprint)
+    identity = await _acting(client, report)
+    wanted_kind = structure_ops.kind_of(blueprint)
+    title = structure_ops.title_of(blueprint)
+
+    if args.create:
+        # No chat yet: the preview describes the one that will be made. The
+        # plan's target is the account itself, as `create group`'s is.
+        target = Target(rid=identity.id, kind=_rid.parse(identity.id).kind, title=title, path=(f"new {wanted_kind}: {title}",), platform=PLATFORM)
+        rights = Rights(frozenset(), frozenset())
+        current = None
+        resolved = None
+    else:
+        target, kind, resolved = await _structure_target(client, report, args.chat)
+        structure_ops.require_same_kind(blueprint, kind, target)
+        rights = await _rights(client, report, resolved.input_entity)
+    report.set_target(target)
+    report.show_banner()
+
+    steps_plan: list = []
+    extras: list[str] = []
+    if not args.create:
+        port = TelegramBlueprintPort(client, resolver=_port_resolver(report))
+        current = (await _blueprint.export(port, target, structure_ops.ALLOWLIST)).blueprint
+        preview_diff = _blueprint.diff(blueprint, current)
+        steps_plan = _blueprint.plan_steps(blueprint, current)
+        extras = [change.line for change in preview_diff.of("remove")]
+    else:
+        # Every object and setting is a step on an empty chat; the container's
+        # own title and kind come from the create call and are not re-set.
+        empty = {
+            "schema": blueprint["schema"],
+            "container": {**blueprint["container"], "settings": {"name": title, "kind": wanted_kind}},
+            "objects": [],
+            "never_transferred": blueprint["never_transferred"],
+        }
+        steps_plan = _blueprint.plan_steps(blueprint, empty)
+
+    required = structure_ops.rights_for(steps_plan) if not args.create else ()
+    blueprint_hash = _blueprint.blueprint_hash(blueprint)
+    plan = structure_ops.plan_for(identity, target, steps_plan, required=required, held=rights.held, blueprint_hash=blueprint_hash)
+    report.set_plan(plan)
+    if not args.create:
+        _plan, warnings = build_plan(identity=identity, command="structure apply", targets=[target], mutations=plan.mutations, approval=structure_ops.GATE, rights=rights, required=required)
+        for warning in warnings:
+            report.warn(warning)
+        require_rights(plan, rights, required)
+
+    preview = structure_ops.format_steps(steps_plan, target=target, extras=extras, execute=args.execute)
+    described = {**plan.describe(), "blueprint_hash": blueprint_hash, "steps": [step.to_dict() for step in steps_plan], "extras": extras, "create": bool(args.create)}
+    if not args.execute:
+        report.info(preview)
+        report.result({**described, "dry_run": True, "executed": False}, status="dry_run")
+        return 0
+
+    # The gate. Both modes need a terminal: the engine refuses an Approval whose
+    # interactive flag is false, and that flag is the tty check, not the answer.
+    if not structure_ops.terminal_present():
+        raise ApprovalRequired(report.human_command)
+    if not archive_store.confirm_typed_name(preview, title if args.create else target.title, **report.confirm_io()):
+        report.info("That is not the title; nothing was changed.")
+        report.result({**described, "dry_run": False, "executed": False, "cancelled": True}, status="cancelled")
+        return 1
+
+    if args.create:
+        # The same calls `create group --forum` and `create channel` make; the
+        # typed title above was this create's gate.
+        about = blueprint["container"]["settings"].get("about") or None
+        if wanted_kind == "channel":
+            made = await create_channel(client, title, about=about)
+        else:
+            made = await create_group(client, title, about=about, forum=wanted_kind == "forum")
+        target, kind, resolved = await _structure_target(client, report, str(made.id))
+        report.set_target(target)
+        report.audit(plan, status="ok", evidence=Evidence.verified(f"created {wanted_kind} {title} as {target.rid}"))
+    else:
+        # Re-derive after the gate: the chat the title was typed for is the chat
+        # still under that title.
+        fresh, _fresh_kind, resolved = await _structure_target(client, report, args.chat)
+        if fresh.rid != target.rid or fresh.title != target.title:
+            raise CommandError(
+                f"The chat changed between the preview and the execution: {target.title!r} ({target.rid}) "
+                f"is now {fresh.title!r} ({fresh.rid}).",
+                code="PLAN_DRIFT",
+                hint="Run it again: the preview will show what it is now.",
+            )
+
+    def audit_step(step, target_rid: str) -> None:
+        report.audit(plan, status="ok", evidence=Evidence.verified(f"{step['op']} {step['handle']} -> {target_rid}"))
+
+    port = TelegramBlueprintPort(client, resolver=_port_resolver(report), on_step=audit_step)
+    with archive_store.open_archive() as archive:
+        outcome = await _blueprint.apply(
+            port,
+            blueprint,
+            target,
+            structure_ops.ALLOWLIST,
+            approval=structure_ops.approval_for(True),
+            identity=identity,
+            archive=archive,
+        )
+    report.info(structure_ops.format_apply(outcome))
+    if outcome.readback is not None:
+        evidence = Evidence.verified(
+            f"readback: {len(outcome.readback.pending)} pending, {len(outcome.extras)} extra left alone"
+        )
+    else:
+        evidence = Evidence.unverified(outcome.error or "the target could not be read back")
+    report.set_evidence(evidence)
+    status = "ok" if outcome.status == "ok" else "partial"
+    report.result({**outcome.to_dict(), "dry_run": False, "executed": True, "blueprint_hash": blueprint_hash}, status=status)
+    return 0 if status == "ok" else 1
+
+
+async def _run_structure_remap(args, config, *, report: Reporter) -> int:
+    """The remap rows one apply wrote. Reads the archive; no connection."""
+    identity = await _offline_identity(config, report)
+    report.show_banner()
+    with archive_store.open_archive() as archive:
+        rows = structure_ops.remap_rows(archive, args.apply_id)
+    report.info(structure_ops.format_remap(rows, apply_id=args.apply_id))
+    report.result({"apply_id": args.apply_id, "identity": identity.to_dict(), "rows": rows}, status="ok" if rows else "empty")
+    return 0
+
 EDIT_FLAGS = ("name", "bio", "description", "commands", "clear_commands", "photo", "remove_photo", "group_rights", "channel_rights")
 
 
@@ -2051,6 +2292,8 @@ def require_bot_mode_supports(args, report: Reporter) -> None:
         why = "a bot has no dialog of its own to mark, no Saved Messages and no drafts"
     elif command == "review":
         why = "the review queue is the account's archive, and a bot reads no history"
+    elif command == "structure":
+        why = "a blueprint is read and applied through the account that administers the chat, and a bot creates no chat"
     else:
         why = "a bot has no dialog list, no history and nothing of its own to delete or set up"
     raise CommandError(
@@ -2171,6 +2414,7 @@ async def run(args, *, client=None, config=None, report: Reporter | None = None)
         args.command in WRITES
         or (args.command == "archive" and getattr(args, "archive_kind", None) in ARCHIVE_WRITES)
         or (args.command == "review" and getattr(args, "review_kind", None) in REVIEW_WRITES)
+        or (args.command == "structure" and getattr(args, "structure_kind", None) in STRUCTURE_WRITES)
     ):
         require_tight_modes()
 
@@ -2201,6 +2445,9 @@ async def run(args, *, client=None, config=None, report: Reporter | None = None)
     # account's client themselves, and only when a file (not a link) is fetched.
     if args.command == "review":
         return await _run_review(args, config, client=client, report=report)
+    # `structure remap` reads the archive's remap rows and opens no connection.
+    if args.command == "structure" and getattr(args, "structure_kind", None) == "remap":
+        return await _run_structure_remap(args, config, report=report)
 
     owns_client = client is None
     if owns_client:
@@ -2232,6 +2479,8 @@ async def run(args, *, client=None, config=None, report: Reporter | None = None)
             return await _run_delete(client, args, report=report)
         if args.command == "archive":
             return await _run_archive_sync(client, args, report=report)
+        if args.command == "structure":
+            return await _run_structure(client, args, config, report=report)
         raise ValueError(f"Unknown command: {args.command}")
     finally:
         if owns_client:
@@ -2246,6 +2495,7 @@ def command_name(args) -> str:
         or getattr(args, "archive_kind", None)
         or getattr(args, "message_verb", None)
         or getattr(args, "review_kind", None)
+        or getattr(args, "structure_kind", None)
     )
     return f"{args.command} {kind}" if kind else str(args.command or "")
 

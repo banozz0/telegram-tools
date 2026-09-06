@@ -1,0 +1,12 @@
+usage: telegram-tools structure apply [-h] --blueprint FILE (--chat CHAT |
+                                      --create) [--execute]
+
+options:
+  -h, --help        show this help message and exit
+  --blueprint FILE  A blueprint written by `structure export`
+  --chat CHAT       An existing chat of the blueprint's kind: numeric ID,
+                    @username, link, or its tg:chat: rid
+  --create          Make a new chat of the blueprint's kind and title first,
+                    then apply the rest to it
+  --execute         Actually apply it; the chat's exact title is asked for at
+                    a prompt (no --yes exists)

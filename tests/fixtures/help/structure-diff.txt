@@ -1,0 +1,7 @@
+usage: telegram-tools structure diff [-h] --blueprint FILE --chat CHAT
+
+options:
+  -h, --help        show this help message and exit
+  --blueprint FILE  A blueprint written by `structure export`
+  --chat CHAT       The chat to compare: numeric ID, @username, link, or its
+                    tg:chat: rid
