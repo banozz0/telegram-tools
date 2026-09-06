@@ -721,3 +721,64 @@ def _resolved():
         )
 
     return call
+
+
+# -- the label has to tell two accounts apart (section 5.1) ------------------
+
+
+def _user(first=None, last=None, username=None, phone=None, id=4242):
+    return SimpleNamespace(id=id, first_name=first, last_name=last, username=username, phone=phone)
+
+
+def test_a_username_is_the_label_whenever_there_is_one():
+    from telegram_tools.adapters.account import account_label
+
+    assert account_label(_user("Sven", username="sven", phone=PHONE)) == "Sven (@sven)"
+    assert account_label(_user(username="sven")) == "@sven"
+
+
+def test_an_account_with_no_username_is_told_apart_by_two_digits():
+    """Sven's own account, 2026-09-06: first name `--`, no username.
+
+    The banner read `Acting as: -- · account` and named nothing, which is the
+    case section 5.1 puts the digits there for -- a display name is chosen by
+    its owner and is not required to distinguish anything.
+    """
+    from telegram_tools.adapters.account import account_label
+
+    assert account_label(_user("--", phone=PHONE)) == "-- (…78)"
+    assert account_label(_user("Sven", "Medina", phone="+35679000012")) == "Sven Medina (…12)"
+
+
+def test_the_label_carries_two_digits_and_never_the_number():
+    from telegram_tools.adapters.account import account_label
+
+    label = account_label(_user("--", phone=PHONE))
+
+    assert PHONE not in label
+    assert PHONE.lstrip("+")[:-2] not in label
+    assert sum(character.isdigit() for character in label) == 2
+    assert redaction.find(label) == []
+
+
+def test_a_name_with_no_number_to_add_stays_the_name():
+    from telegram_tools.adapters.account import account_label
+
+    assert account_label(_user("Sven")) == "Sven"
+    assert account_label(_user("Sven", phone="7")) == "Sven", "one digit is not two"
+
+
+def test_an_account_with_nothing_of_its_own_falls_back_to_its_id():
+    from telegram_tools.adapters.account import account_label
+
+    assert account_label(_user(phone=PHONE, id=99)) == "user 99"
+
+
+def test_the_banner_names_an_account_that_has_only_a_number(run_cli, capsys, monkeypatch):
+    monkeypatch.setattr(cli, "discover_chats", _returns([]))
+    bare = FakeClient(authorized=True, me=_user("--", phone=PHONE))
+
+    _code, out, _err, _fake = run_cli(["discover"], client=bare, capsys=capsys)
+
+    assert out.splitlines()[0] == "Acting as: -- (…78) · account"
+    assert PHONE not in out

@@ -132,8 +132,12 @@ The terms this codebase uses, and the boundaries they imply.
   lives inside a container. Everything machine-readable names a target by rid.
 - **Identity** — who a run acts as: platform, mode (`account` today), a label
   screens print, a rid and the profile it came from. Never a credential; the
-  label is redacted on the way out, not checked and refused. An account with no
-  username prints its first name, so a number never becomes a label.
+  label is redacted on the way out, not checked and refused. A `@username` is
+  the label whenever there is one; with none, section 5.1 asks for the name plus
+  the **last two digits** of the account's number, because a display name is
+  chosen by its owner and need not distinguish anything — Sven's own reads `--`,
+  which named nothing until the digits were added. Two digits, never more, and
+  the full number does not leave `phone_tail`.
 - **Plan** — what a write is about to do, built before anything is asked: the
   identity, the resolved targets, the mutations, the approval kind and the
   preflight, hashed into a `plan_id`. A dry-run prints it and the real run

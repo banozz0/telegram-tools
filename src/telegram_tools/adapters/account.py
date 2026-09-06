@@ -45,8 +45,26 @@ RIGHT_NAMES = (
 )
 
 
+def phone_tail(user: Any) -> str | None:
+    """The last two digits of this account's number, or None when there are none.
+
+    Two digits and never more. Section 5.1 puts them in the label of an account
+    with no username precisely because a display name is not required to be
+    distinguishing -- a name of `--`, or the same name on two accounts, leaves
+    nothing else to tell them apart. The full number is read here and does not
+    leave this function.
+    """
+    digits = "".join(character for character in str(getattr(user, "phone", "") or "") if character.isdigit())
+    return digits[-2:] if len(digits) >= 2 else None
+
+
 def account_label(user: Any) -> str:
-    """What screens call this account: a name, its @username when there is one.
+    """What screens call this account: a name, and something to tell it apart.
+
+    A `@username` is the best answer and is used whenever there is one. With no
+    username, section 5.1 asks for the name plus the last two digits of the
+    number, because a display name is chosen by its owner and can be anything --
+    blank, punctuation, the same as another account's.
 
     Redacted on the way out, not checked afterwards: a display name is text
     someone else chose, and a name that happens to read as a phone number
@@ -55,10 +73,16 @@ def account_label(user: Any) -> str:
     parts = [getattr(user, "first_name", None), getattr(user, "last_name", None)]
     name = " ".join(part for part in parts if part).strip()
     username = getattr(user, "username", None)
-    if name and username:
-        label = f"{name} (@{username})"
+    tail = phone_tail(user)
+
+    if username:
+        label = f"{name} (@{username})" if name else f"@{username}"
+    elif name:
+        label = f"{name} (…{tail})" if tail else name
     else:
-        label = name or (f"@{username}" if username else f"user {getattr(user, 'id', '?')}")
+        # Nothing the account chose; the id is what is left, and two digits
+        # would add nothing to a number that is already on screen.
+        label = f"user {getattr(user, 'id', '?')}"
     return redact_text(label)
 
 

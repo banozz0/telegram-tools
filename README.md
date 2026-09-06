@@ -122,8 +122,11 @@ use, and the thing it is about to use it on:
 Acting as: Sven (@sven) · account · Target: Agency › 💻 Deploys (-1001234567890)
 ```
 
-The same identity and target are fields in the `--json` envelope. A phone number is never
-part of a label, and a session path is never printed anywhere.
+The same identity and target are fields in the `--json` envelope. An account with no
+username is named by its first name and the last two digits of its number — `-- (…23)` —
+because a display name is whatever its owner typed and need not tell two accounts apart.
+Two digits, never more: the number itself is never part of a label, and a session path is
+never printed anywhere.
 
 ### Optional: a proxy
 
