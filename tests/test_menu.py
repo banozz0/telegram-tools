@@ -407,7 +407,7 @@ def test_pick_chat_lines_the_id_column_up_after_an_emoji_title():
 
 def test_search_runs_with_no_filters():
     # 2 1 = read > search live, 1 = forum groups, 1 = Hermes, 7 = run it, Enter = menu, 0 = exit
-    code, calls, _output = run_menu([SEARCH, "1", "1", "7", "", "0", "0"])
+    code, calls, _output = run_menu([SEARCH, "1", "1", "7", "", "0"])
 
     assert code == 0
     args = calls[0]
@@ -541,7 +541,7 @@ def test_search_zero_at_staging_returns_to_the_chat_picker_not_root():
     # 2 1 = read > search live, 1 = forum groups, 1 = Hermes, 0 = staging back -> chat picker,
     # 4 = type an ID/username this time, a new chat, 7 = run it (topic row is
     # shown since the typed chat's forum-ness is unknown), Enter, 0 = exit
-    answers = [SEARCH, "1", "1", "0", "4", "@newchat", "7", "", "0", "0"]
+    answers = [SEARCH, "1", "1", "0", "4", "@newchat", "7", "", "0"]
     code, calls, _output = run_menu(answers)
 
     assert code == 0
@@ -1082,7 +1082,7 @@ def test_send_cancelling_the_file_path_stages_nothing():
 
 def test_after_run_runs_the_same_search_again():
     # 2 1 = read > search live, 1 = forum groups, 1 = Hermes, 7 = run, 1 = run it again, Enter, 0
-    code, calls, output = run_menu([SEARCH, "1", "1", "7", "1", "", "0", "0"])
+    code, calls, output = run_menu([SEARCH, "1", "1", "7", "1", "", "0"])
 
     assert code == 0
     assert [call.chat for call in calls] == ["-100111", "-100111"]
@@ -1094,7 +1094,7 @@ def test_after_run_runs_the_same_search_again():
 def test_search_tweak_returns_to_the_form_with_the_filters_kept():
     # ... 2 = contains (unset, so straight to the prompt), "hello", 7 = run,
     # 2 = tweak, 6 = limit, 5, 7 = run again, Enter, 0
-    answers = [SEARCH, "1", "1", "2", "hello", "7", "2", "6", "5", "7", "", "0", "0"]
+    answers = [SEARCH, "1", "1", "2", "hello", "7", "2", "6", "5", "7", "", "0"]
     _code, calls, output = run_menu(answers)
 
     assert len(calls) == 2
@@ -1107,11 +1107,11 @@ def test_search_tweak_returns_to_the_form_with_the_filters_kept():
 
 def test_after_run_says_not_done_when_the_action_was_declined_and_failed_on_an_error():
     _calls, declined = recorder(result=1)
-    _code, _unused, output = run_menu([SEARCH, "1", "1", "7", "", "0", "0"], runner=declined)
+    _code, _unused, output = run_menu([SEARCH, "1", "1", "7", "", "0"], runner=declined)
     assert "Not done" in screens(output)
 
     _calls, broken = recorder(error=ValueError("no"))
-    _code, _unused, output = run_menu([SEARCH, "1", "1", "7", "", "0", "0"], runner=broken)
+    _code, _unused, output = run_menu([SEARCH, "1", "1", "7", "", "0"], runner=broken)
     assert "Failed" in screens(output)
 
 
@@ -1680,7 +1680,7 @@ def test_read_lists_the_live_search_and_every_archive_row():
 def test_archive_sync_stages_a_scope_a_floor_and_start_over_then_runs():
     # 2 2 = read > sync, 1 = scope, 1 = forum groups, 1 = Hermes, 1 = Deploys, 2 = since,
     # a date, 3 = start over (toggles), 4 = sync now, Enter = menu, 0 = read back, 0 = exit
-    answers = [ARCHIVE_SYNC, "1", "1", "1", "1", "2", "2026-09-01", "3", "4", "", "0", "0"]
+    answers = [ARCHIVE_SYNC, "1", "1", "1", "1", "2", "2026-09-01", "3", "4", "", "0"]
     code, calls, output = run_menu(answers)
     assert code == 0
     args = calls[0]
@@ -1697,18 +1697,18 @@ def test_archive_sync_stages_a_scope_a_floor_and_start_over_then_runs():
 
 def test_archive_sync_scope_takes_a_whole_forum_a_channel_or_is_cleared_again():
     # A forum, every topic: 1 = scope, 1 = forum groups, 1 = Hermes, 3 = every topic (two topics, then the extra)
-    code, calls, _output = run_menu([ARCHIVE_SYNC, "1", "1", "1", "3", "4", "", "0", "0"])
+    code, calls, _output = run_menu([ARCHIVE_SYNC, "1", "1", "1", "3", "4", "", "0"])
     assert code == 0 and calls[0].scope == ["tg:chat:-100111"]
     # A channel has no topic step: 2 = channels, 1 = Alerts
-    code, calls, _output = run_menu([ARCHIVE_SYNC, "1", "2", "1", "4", "", "0", "0"])
+    code, calls, _output = run_menu([ARCHIVE_SYNC, "1", "2", "1", "4", "", "0"])
     assert code == 0 and calls[0].scope == ["tg:chat:-100222"]
     # Set, then cleared back to every chat: 1 = scope again, 2 = clear
-    code, calls, _output = run_menu([ARCHIVE_SYNC, "1", "2", "1", "1", "2", "4", "", "0", "0"])
+    code, calls, _output = run_menu([ARCHIVE_SYNC, "1", "2", "1", "1", "2", "4", "", "0"])
     assert code == 0 and calls[0].scope is None
 
 
 def test_archive_sync_with_nothing_staged_syncs_everything():
-    code, calls, _output = run_menu([ARCHIVE_SYNC, "4", "", "0", "0"])
+    code, calls, _output = run_menu([ARCHIVE_SYNC, "4", "", "0"])
     assert code == 0
     assert calls[0].scope is None and calls[0].since is None and calls[0].full is False
 
@@ -1732,7 +1732,7 @@ def test_archive_status_runs_without_the_menus_connection():
         return 0
 
     # 2 3 = read > status, blank = every identity, Enter = back, 0 = read back, 0 = exit
-    code, _unused, _output = run_menu([ARCHIVE_STATUS, "", "", "0", "0"], session=session, runner=runner)
+    code, _unused, _output = run_menu([ARCHIVE_STATUS, "", "", "0"], session=session, runner=runner)
     assert code == 0
     args, client = calls[0]
     assert args.command == "archive" and args.archive_kind == "status" and args.identity is None
@@ -1754,8 +1754,8 @@ def test_archive_search_stages_every_field_then_searches_and_exports():
         "10",                     # search (print here)
         "2",                      # tweak it
         "11", "deploys", "5",     # export: file name, then HTML
-        "",                       # Enter = menu
-        "0", "0",                 # read back, exit
+        "",                       # Enter = main menu
+        "0",                      # exit
     ]
     code, calls, output = run_menu(answers)
     assert code == 0
@@ -1778,7 +1778,7 @@ def test_archive_search_refuses_to_run_without_a_query():
 
 def test_archive_retention_dry_runs_first_then_asks_before_the_real_pass():
     # 2 5 = read > prune, 1 = Deploys, keep, then 1 = for real, Enter, 0, 0
-    code, calls, output = run_menu([ARCHIVE_RETENTION, "1", "90d", "1", "", "0", "0"])
+    code, calls, output = run_menu([ARCHIVE_RETENTION, "1", "90d", "1", "", "0"])
     assert code == 0
     dry_run, for_real = calls
     assert dry_run.archive_kind == "retention" and dry_run.scope == "tg:topic:-100111:141" and dry_run.keep == "90d"
@@ -1791,13 +1791,13 @@ def test_archive_retention_dry_runs_first_then_asks_before_the_real_pass():
 
 
 def test_archive_forget_a_scope_or_an_identity_dry_runs_first():
-    code, calls, _output = run_menu([ARCHIVE_FORGET, "1", "2", "1", "", "0", "0"])
+    code, calls, _output = run_menu([ARCHIVE_FORGET, "1", "2", "1", "", "0"])
     assert code == 0
     dry_run, for_real = calls
     assert dry_run.archive_kind == "forget" and dry_run.scope == "tg:chat:-100222" and dry_run.identity is None
     assert dry_run.execute is False and for_real.execute is True
 
-    code, calls, _output = run_menu([ARCHIVE_FORGET, "2", "tg:user:4242", "1", "", "0", "0"])
+    code, calls, _output = run_menu([ARCHIVE_FORGET, "2", "tg:user:4242", "1", "", "0"])
     assert code == 0
     assert calls[0].scope is None and calls[0].identity == "tg:user:4242"
     assert [args.execute for args in calls] == [False, True]
@@ -1805,7 +1805,7 @@ def test_archive_forget_a_scope_or_an_identity_dry_runs_first():
 
 def test_archive_prunes_stop_at_a_failed_dry_run():
     calls, runner = recorder(error=ValueError("not a scope in this archive"))
-    code, _unused, output = run_menu([ARCHIVE_FORGET, "1", "1", "", "0", "0"], runner=runner)
+    code, _unused, output = run_menu([ARCHIVE_FORGET, "1", "1", "", "0"], runner=runner)
     assert code == 0
     assert len(calls) == 1 and calls[0].execute is False
     assert "error: not a scope in this archive" in screens(output)
@@ -1813,8 +1813,36 @@ def test_archive_prunes_stop_at_a_failed_dry_run():
 
 def test_the_live_search_export_offers_all_five_formats():
     # 2 1 = search live, 1, 1 = Hermes, 8 = export, path, 4 = Markdown, Enter, 0, 0
-    code, calls, output = run_menu([SEARCH, "1", "1", "8", "out.md", "4", "", "0", "0"])
+    code, calls, output = run_menu([SEARCH, "1", "1", "8", "out.md", "4", "", "0"])
     assert code == 0 and calls[0].format == "markdown" and calls[0].output == "out.md"
     text = screens(output)
     for row in ("1. JSON", "2. CSV", "3. JSON lines (one record per line)", "4. Markdown", "5. HTML (one self-contained page)"):
         assert row in text, row
+
+
+def test_main_menu_after_an_action_is_the_root_not_the_group_screen():
+    """Sven's try-it on 2026-09-06: Main menu from a search under Read landed on Read."""
+    reader_ran_out = object()
+
+    def journey(answers):
+        output = []
+        code, calls, out = run_menu(answers, output=output)
+        return code, out
+
+    # Read: search, Enter = main menu, 0 = exit. A group screen in between would need one more 0.
+    _code, output = journey([SEARCH, "1", "1", "7", "", "0"])
+    text = screens(output)
+    assert text.count("Main › Read\n") == 1, "the Read screen is drawn once, on the way in, never on the way out"
+    assert text.rstrip().endswith("0. Exit\nChoose: ") or "telegram-tools\n" in output[-1], "the last screen is the root"
+
+    # Build: create a topic, Enter, 0.
+    _code, output = journey([CREATE, "4", "1", "1", "Deploys", "", "0"])
+    assert screens(output).count("Main › Build\n") == 1
+
+    # Identity: profiles, Enter, 0.
+    _code, output = journey([PROFILES, "", "0"])
+    assert screens(output).count("Main › Identity\n") == 1
+
+    # And 0 on the after-run screen still exits outright.
+    code, output = journey([SEARCH, "1", "1", "7", "0"])
+    assert code == 0 and "Main › Read › Search › Hermes › Done" in screens(output)

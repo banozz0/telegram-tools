@@ -20,6 +20,8 @@ This project follows a practical changelog style: user-visible changes, safety c
 
 - **The menu's Read row** now opens a screen of six: the live search, sync, status, search or export, prune and forget. Sync's scope is picked from your live chats and topics (a whole forum group, or one topic in it); the other archive rows pick from what the archive holds. The root's nine rows and their numbers do not move. `--as-bot` refuses every archive command with `IDENTITY_MODE_UNSUPPORTED`: a bot cannot read history.
 
+- **"Main menu" after a job now means the main menu.** From a row under Read, Build or Identity it used to land on that group's screen, one step short; it goes to the root now, and `0` still exits outright.
+
 - **A sync or prune refuses while the tool's own files are readable by others**, like every other write here; the archive and its config are created 0600 and the exports directory 0700.
 
 ## 3.10.0 - 2026-09-06

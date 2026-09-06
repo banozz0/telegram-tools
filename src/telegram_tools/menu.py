@@ -19,7 +19,7 @@ from telegram_tools import profiles as profile_store
 from telegram_tools.config import ConfigError, load_config, lookup_bot_token, resolve_bot_token
 from telegram_tools.delete import kind_for_type
 from telegram_tools.discovery import list_dialog_choices
-from telegram_tools.prompts import BACK, CLEAR, EXIT, RULE, Extra, after_action, after_run, ask_int, ask_lines, ask_text, choose, edit_field, pick, pick_many
+from telegram_tools.prompts import BACK, CLEAR, EXIT, MENU, RULE, Extra, after_action, after_run, ask_int, ask_lines, ask_text, choose, edit_field, pick, pick_many
 from telegram_tools.resolver import resolve_chat
 from telegram_tools.topics import get_forum_topics
 from telegram_tools import ui
@@ -178,6 +178,32 @@ async def _act(args, *, session, runner, read, write, trail: str = MAIN, rows=(R
         result = after_run(read=read, write=write, title=crumb(trail, outcome), rows=rows)
         if result is not AGAIN:
             return result
+
+
+def _leave(result: Any) -> Any:
+    """What a flow hands its group screen after an after-run answer.
+
+    False ends the session, MENU means the person asked for the main menu and
+    the group screen must not catch them on the way, and anything else --
+    BACK, a row key -- returns to the group screen. Truthy either way, which is
+    what the root loop reads.
+    """
+    if result is EXIT:
+        return False
+    return MENU if result is MENU else True
+
+
+def _leave_action(keep_going: bool) -> Any:
+    """`after_action`'s answer as a flow hands it on: Enter is the main menu, 0 is exit."""
+    return MENU if keep_going else False
+
+
+async def _group(flow, *, session, runner, read, write) -> Any:
+    """Run one row of a group screen; True to redraw the group, MENU to go to the root, False to exit."""
+    outcome = await flow(session=session, runner=runner, read=read, write=write)
+    if outcome is False:
+        return False
+    return MENU if outcome is MENU else True
 
 
 def _confirm_discard(trail: str, *, title: str, said: str, read, write) -> bool:
@@ -342,7 +368,7 @@ async def _flow_discover(*, session, runner, read, write) -> bool:
             # No Tweak row: with two questions there is no form to go back to,
             # and Main menu then 1 is the same two keystrokes.
             result = await _act(args, session=session, runner=runner, read=read, write=write, trail=trail, rows=(RUN_AGAIN,))
-            return result is not EXIT
+            return _leave(result)
 
 
 async def _flow_doctor(*, session, runner, read, write) -> bool:
@@ -350,7 +376,7 @@ async def _flow_doctor(*, session, runner, read, write) -> bool:
     # no after-run screen: running doctor again tells you nothing new.
     profile = getattr(session.config, "profile", None) if session is not None else None
     await _call(_namespace(command="doctor", profile=profile), session=None, runner=runner, write=write)
-    return after_action(read=read, write=write)
+    return _leave_action(after_action(read=read, write=write))
 
 
 _ALL_TOPICS = "All topics"
@@ -471,7 +497,7 @@ async def _flow_search(*, session, runner, read, write) -> bool:
                 )
                 result = await _act(args, session=session, runner=runner, read=read, write=write, trail=form)
                 if result is not STAY:
-                    return result is not EXIT
+                    return _leave(result)
                 continue
 
             if key == "topic":
@@ -650,7 +676,7 @@ async def _flow_send(*, session, runner, read, write) -> bool:
             )
             result = await _act(args, session=session, runner=runner, read=read, write=write, trail=form)
             if result is not STAY:
-                return result is not EXIT
+                return _leave(result)
             continue
 
 
@@ -684,7 +710,7 @@ async def _flow_create(*, session, runner, read, write) -> bool:
             args = _namespace(command="create", create_kind="topic", chat=picked.reference, title=title, yes=False)
             result = await _act(args, session=session, runner=runner, read=read, write=write, trail=crumb(trail, "Topic"), rows=(CREATE_ANOTHER,))
             if result is not STAY:
-                return result is not EXIT
+                return _leave(result)
             continue
 
         title = ask_text(f"{label} name", read=read, write=write)
@@ -703,7 +729,7 @@ async def _flow_create(*, session, runner, read, write) -> bool:
         )
         result = await _act(args, session=session, runner=runner, read=read, write=write, trail=crumb(trail, label), rows=(CREATE_ANOTHER,))
         if result is not STAY:
-            return result is not EXIT
+            return _leave(result)
 
 
 # Deleting twice is never what anyone means -- the thing is gone -- so the row
@@ -782,7 +808,7 @@ async def _flow_delete(*, session, runner, read, write) -> bool:
         # The dry-run always runs first: the menu must never be a shorter path
         # to a deletion than the flags are.
         if await _call(dry_run, session=session, runner=runner, write=write) is None:
-            return after_action(read=read, write=write)
+            return _leave_action(after_action(read=read, write=write))
 
         choice = choose(
             ["Delete it for real - the next screen asks for its exact title"],
@@ -805,7 +831,7 @@ async def _flow_delete(*, session, runner, read, write) -> bool:
             rows=(DELETE_ANOTHER,),
         )
         if result is not STAY:
-            return result is not EXIT
+            return _leave(result)
 
 
 _ALL_TOPICS_ROW = Extra("every", "All topics (no need to tick)")
@@ -869,7 +895,7 @@ async def _flow_clear(*, session, runner, read, write) -> bool:
                 write("Same topics as the last dry-run; its count still stands.")
             else:
                 if await _call(dry_run, session=session, runner=runner, write=write) is None:
-                    return after_action(read=read, write=write)
+                    return _leave_action(after_action(read=read, write=write))
                 scanned = key
 
             while True:
@@ -899,7 +925,7 @@ async def _flow_clear(*, session, runner, read, write) -> bool:
                 )
                 result = await _act(for_real, session=session, runner=runner, read=read, write=write, trail=chat, rows=((STAY, "Clear more topics"),))
                 if result is not STAY:
-                    return result is not EXIT
+                    return _leave(result)
                 # Those topics are empty now: the ticks and the scan are stale.
                 ticks.pop(picked.reference, None)
                 scanned = None
@@ -1128,7 +1154,7 @@ async def _flow_bots(*, session, runner, read, write) -> bool:
             args = _bots_namespace(json_output=path)
             result = await _act(args, session=session, runner=runner, read=read, write=write, trail=trail, rows=((STAY, "Back to the bot list"),))
             if result is not STAY:
-                return result is not EXIT
+                return _leave(result)
             continue
 
         if chosen == _TYPE_A_BOT.key:
@@ -1153,7 +1179,7 @@ async def _flow_bots(*, session, runner, read, write) -> bool:
         result = await _flow_bot_screen(profile, session=session, runner=runner, read=read, write=write, trail=trail)
         if result is BACK:
             continue
-        return result is not EXIT
+        return _leave(result)
 
 
 async def _flow_bot_screen(profile, *, session, runner, read, write, trail: str) -> Any:
@@ -1289,7 +1315,7 @@ async def _flow_archive_sync(*, session, runner, read, write) -> bool:
             )
             result = await _act(args, session=session, runner=runner, read=read, write=write, trail=trail)
             if result is not STAY:
-                return result is not EXIT
+                return _leave(result)
             continue
 
         if key == "full":
@@ -1325,7 +1351,7 @@ async def _flow_archive_status(*, session, runner, read, write) -> bool:
     identity = ask_text("Only this identity (tg:user:ID; blank for all)", read=read, write=write)
     args = _namespace(command="archive", archive_kind="status", identity=None if identity is BACK else identity)
     await _call(args, session=session, runner=runner, write=write, connect=False)
-    return after_action(read=read, write=write)
+    return _leave_action(after_action(read=read, write=write))
 
 
 _QUERY_FIELDS = (
@@ -1383,7 +1409,7 @@ async def _flow_archive_query(*, session, runner, read, write) -> bool:
                 args = _namespace(command="archive", archive_kind="search", **fields)
             result = await _act(args, session=session, runner=runner, read=read, write=write, trail=trail, connect=False)
             if result is not STAY:
-                return result is not EXIT
+                return _leave(result)
             continue
 
         title, empty = next((title, empty) for field, title, empty in _QUERY_FIELDS if field == key)
@@ -1424,7 +1450,7 @@ async def _flow_archive_retention(*, session, runner, read, write) -> bool:
         # The dry-run always runs first: the menu must never be a shorter path
         # past a gate than the flags are.
         if await _call(dry_run, session=session, runner=runner, write=write, connect=False) is None:
-            return after_action(read=read, write=write)
+            return _leave_action(after_action(read=read, write=write))
         choice = choose(
             ["Prune it for real - the next screen asks for the scope's exact title"],
             title=crumb(trail, "Dry-run done"),
@@ -1437,7 +1463,7 @@ async def _flow_archive_retention(*, session, runner, read, write) -> bool:
         for_real = _namespace(**{**vars(dry_run), "execute": True})
         result = await _act(for_real, session=session, runner=runner, read=read, write=write, trail=trail, rows=(PRUNE_ANOTHER,), connect=False)
         if result is not STAY:
-            return result is not EXIT
+            return _leave(result)
 
 
 async def _flow_archive_forget(*, session, runner, read, write) -> bool:
@@ -1458,7 +1484,7 @@ async def _flow_archive_forget(*, session, runner, read, write) -> bool:
                 continue
             dry_run = _namespace(command="archive", archive_kind="forget", scope=None, identity=identity, execute=False)
         if await _call(dry_run, session=session, runner=runner, write=write, connect=False) is None:
-            return after_action(read=read, write=write)
+            return _leave_action(after_action(read=read, write=write))
         choice = choose(
             ["Forget it for real - the next screen asks for its exact title"],
             title=crumb(trail, "Dry-run done"),
@@ -1471,7 +1497,7 @@ async def _flow_archive_forget(*, session, runner, read, write) -> bool:
         for_real = _namespace(**{**vars(dry_run), "execute": True})
         result = await _act(for_real, session=session, runner=runner, read=read, write=write, trail=trail, rows=((STAY, "Forget something else"),), connect=False)
         if result is not STAY:
-            return result is not EXIT
+            return _leave(result)
 
 
 # -- the grouped rows ------------------------------------------------------
@@ -1494,8 +1520,9 @@ async def _flow_read(*, session, runner, read, write) -> bool:
         choice = choose([label for label, _flow in READ_ROWS], title=trail, read=read, write=write)
         if choice is BACK:
             return True
-        if not await READ_ROWS[choice][1](session=session, runner=runner, read=read, write=write):
-            return False
+        outcome = await _group(READ_ROWS[choice][1], session=session, runner=runner, read=read, write=write)
+        if outcome is not True:
+            return outcome
 
 
 async def _flow_build(*, session, runner, read, write) -> bool:
@@ -1511,8 +1538,9 @@ async def _flow_build(*, session, runner, read, write) -> bool:
         if choice is BACK:
             return True
         flow = _flow_create if choice == 0 else _flow_delete
-        if not await flow(session=session, runner=runner, read=read, write=write):
-            return False
+        outcome = await _group(flow, session=session, runner=runner, read=read, write=write)
+        if outcome is not True:
+            return outcome
 
 
 def _flow_later(index: int):
@@ -1557,8 +1585,9 @@ async def _flow_identity(*, session, runner, read, write) -> bool:
         if choice is BACK:
             return True
         if choice == 5:
-            if not await _flow_bots(session=session, runner=runner, read=read, write=write):
-                return False
+            outcome = await _group(_flow_bots, session=session, runner=runner, read=read, write=write)
+            if outcome is not True:
+                return outcome
             continue
 
         profile = getattr(session.config, "profile", profile_store.DEFAULT_PROFILE)
@@ -1594,7 +1623,7 @@ async def _flow_identity(*, session, runner, read, write) -> bool:
         if choice != 0:
             await session.release()
         if result is not STAY:
-            return result is not EXIT
+            return _leave(result)
 
 
 # -- the loop --------------------------------------------------------------

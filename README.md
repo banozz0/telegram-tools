@@ -355,7 +355,7 @@ and offer keep / change / clear.
 After a job the menu offers its own next step — *Tweak it* back to the filled-in search
 or send form, *Create another*, *Clear more topics*, *Edit more* — plus *Main menu*, and
 *Run it again* where a re-run makes sense (chats & topics, search, send). Enter is still
-the menu, `0` still exits, and `doctor` keeps the plain Enter/`0` prompt. Backing out of
+the main menu (the root, not the group screen you came through), `0` still exits, and `doctor` keeps the plain Enter/`0` prompt. Backing out of
 a form with something typed in it — a message, search filters, bot edits — asks first.
 Every flag has a row:
 the clear screen offers *All topics* and a batch size, the bots screen can save the
