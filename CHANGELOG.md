@@ -4,6 +4,26 @@ All notable changes to this project will be documented here.
 
 This project follows a practical changelog style: user-visible changes, safety changes, and release notes belong here; active task tracking belongs outside the repo.
 
+## 3.9.0 - 2026-09-06
+
+- **Named logins.** `telegram-tools auth` walks you into a login instead of leaving it to whatever the first command happened to trigger: a phone number and the code Telegram sends, or `auth --qr` showing a QR block you scan from a phone that is already signed in (Settings → Devices → Link Desktop Device). Two-step verification is asked for at the terminal and stored nowhere. `auth --logout` ends a session once you type the profile's name back; `telegram-tools profiles` lists what this machine has.
+
+- **More than one account, kept apart.** `--profile NAME` goes before the subcommand — `telegram-tools --profile work discover` — and `TELEGRAM_TOOLS_PROFILE` sets the default. Each profile keeps its own session under `~/.telegram-tools/profiles/<name>/`, 0600 in a 0700 directory, beside a `profile.json` holding a label, the account id, when it was made and last used, and the name of the proxy it goes through. Nothing secret goes in that file, and it never records a phone number.
+
+- **Your existing login keeps working, untouched.** `~/.telegram-tools/telegram-tools.session` is now the `default` profile *by reference*: nothing is moved, renamed or re-created, and `TELEGRAM_TOOLS_SESSION` still wins over every profile. `doctor` mentions that it could move into the profile directory; `auth --migrate` does it, after a y/N, and is the only thing here that moves a session file.
+
+- **Every screen says which account it is about to act as.** `Acting as: Sven (@sven) · account · Target: Agency › 💻 Deploys (-1001234567890)` is the first line of every command and every menu screen below the root, and the same identity and target are fields in the `--json` envelope. An account with no username prints its first name; a phone number never appears in a label. A run whose output goes to a file — `discover --json out.json`, `search --output`— prints no banner, so its stdout is what it always was.
+
+- **The root menu is regrouped, once.** Nine rows: Find IDs, Read, Write, Build, Clear messages, Manage, Watch, Identity, Check setup. Create and Delete now live under Build, My bots under Identity beside the new profile rows. Rows 6 and 7 name what a later version brings and say so when picked — they hold their numbers now so nothing above or below them has to move again. Every flag still has a row, and the menu is still never a shorter path past a gate.
+
+- **Proxy support.** `TELEGRAM_PROXY=socks5://host:port` (also `socks4://`, `http://`, with optional credentials) is passed to Telethon, per profile through its own `~/.telegram-tools/profiles/<name>/.env` or machine-wide. It needs `pip install 'telegram-tools[proxy]'`; without that library **the command refuses** rather than quietly connecting from your own address, which is what would otherwise happen. `doctor` says so before you run anything.
+
+- **`auth --qr` needs `pip install 'telegram-tools[qr]'`** to draw the block. Without it the command refuses and names the install. Both extras are optional: a plain `pip install telegram-tools` is still Telethon and python-dotenv.
+
+- **The tool is stricter about its own files.** Sessions are written 0600 inside 0700 directories, and every command that writes something refuses while anything under `~/.telegram-tools` is readable by group or others — `doctor` names the files and the `chmod` that fixes them. Reads still work, so you can always run `doctor` and read why.
+
+- **An agent that is not logged in gets an answer, not a hang.** Under `--json`, an unauthorised session refuses with `LOGIN_REQUIRED` and the exact `auth` command in the hint, instead of blocking on a phone-number prompt nobody can answer. Human mode still offers that prompt exactly as before.
+
 ## 3.8.0 - 2026-09-04
 
 - **Machine-readable output, on every command.** `telegram-tools --json <command>` prints exactly one object on stdout — an *envelope* — and nothing else. It carries the command, the flags it was given, who the run acted as, what it acted on, a status, the command's own payload under `result`, any warnings, an error when there is one, and how long it took. Every key the old `--json PATH` files wrote is still there, inside `result`, under the same name. `--jsonl` streams one line per record first — a chat from `discover`, a message from `search` — and closes with the same envelope marked `"kind": "envelope"`. The flags go before the subcommand, where a global flag belongs: `telegram-tools --json discover`, not `discover --json`.

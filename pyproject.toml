@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "telegram-tools"
-version = "3.8.0"
+version = "3.9.0"
 description = "Local CLI for your own Telegram chats and forum topics: chat/topic ID discovery, message search/export, topic message clearing, and bot settings editing — signed in as you, built on Telethon."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -29,8 +29,19 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Two capabilities that need a library, and refuse rather than degrade without
+# it: a proxy Telethon would otherwise ignore while connecting directly, and a
+# QR block `auth --qr` cannot draw. The base install stays Telethon and dotenv.
+proxy = [
+  "python-socks[asyncio]>=2.4,<3",
+]
+qr = [
+  "segno>=1.6,<2",
+]
 dev = [
   "pytest>=8.0",
+  "python-socks[asyncio]>=2.4,<3",
+  "segno>=1.6,<2",
 ]
 
 [project.scripts]

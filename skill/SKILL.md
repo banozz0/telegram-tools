@@ -1,7 +1,7 @@
 ---
 name: telegram-tools
 description: "Use when you need the real numeric ID of a Telegram chat, channel, group or forum topic — 'what's the ID of that topic?', 'which chat is -100…?', 'where do I send this?' — when the user wants their own Telegram messages searched or exported to JSON/CSV, or when a message must be posted to a chat or topic the user has allowlisted."
-version: 1.4.0
+version: 1.5.0
 author: banozz0
 license: MIT
 platforms: [macos]
@@ -23,6 +23,10 @@ telegram-tools <command>
 Credentials and the login session live in `~/.telegram-tools/` and never leave the
 machine. The installed build can lag PyPI — its own `--help` is the only reliable
 statement of what it can do today.
+
+The user may have more than one account logged in. `--profile NAME` goes **before**
+the subcommand and picks which one a run acts as; `telegram-tools profiles` lists
+them. With no flag it is `TELEGRAM_TOOLS_PROFILE`, or `default`.
 
 ## This machine
 
@@ -76,12 +80,19 @@ needs both `--execute` and a typed confirmation, so you will not trip it by acci
 — but do not run it at all, in any form, even to preview. If the answer is "those
 messages should go", say so and let the user run it.
 
-**6. Never print the credentials.** `TELEGRAM_API_ID`, `TELEGRAM_API_HASH` and the
+**6. Never run `auth`.** It is the login: a phone number, a code Telegram sends to
+the user's device, sometimes a two-step-verification password. None of those are
+yours to ask for, type or hold, and `--logout` and `--migrate` have gates no agent
+can answer. There is no `--yes`. If a command refuses with `LOGIN_REQUIRED`, relay
+the `auth` command in `error.hint` and let the user run it at their own terminal.
+Do not drive it through the menu, a pty, or a piped answer.
+
+**7. Never print the credentials.** `TELEGRAM_API_ID`, `TELEGRAM_API_HASH` and the
 `.session` file are secrets. Point at where they live; never read them out, copy
 them, or paste them into a reply. `doctor` exists precisely so setup can be checked
 without any of that reaching the screen.
 
-**7. If the CLI errors, say so.** A login prompt, a flood-wait, an expired session —
+**8. If the CLI errors, say so.** A login prompt, a flood-wait, an expired session —
 that *is* the answer. Never guess a chat ID. A made-up `-100…` sends the user's next
 alert into the void, and they will not find out until something they needed never
 arrived.
@@ -111,6 +122,10 @@ The object always has the same keys. The ones worth reading:
 - **`evidence.readback`** — what the tool read back after a write. A value that
   starts with `unverified:` means the write went out but could not be confirmed;
   say so rather than reporting success.
+- **`identity`** — which account the run acted as: `label` (`Sven (@sven)`),
+  `mode`, and `profile`. Worth naming in your answer when the user has more than
+  one profile, so they can see it was the right one. It never carries a phone
+  number, a token or a session path, and neither should your reply.
 
 `--jsonl` streams one line per record (a chat, a message) and closes with the
 same object marked `"kind": "envelope"` — use it when the answer could be long.
@@ -126,7 +141,12 @@ territory: hand it over), `TARGET_NOT_FOUND` and `TARGET_KIND_MISMATCH` (the
 chat reference is wrong — run `discover`, never guess), `PERMISSION_DENIED` (the
 account lacks the right, named), `SESSION_IN_USE` (the user has the menu open —
 say so, do not retry), `RATE_LIMITED` (Telegram asked for a wait; ask a narrower
-question), `PLAN_DRIFT` (the chat changed mid-run — re-run and re-read).
+question), `PLAN_DRIFT` (the chat changed mid-run — re-run and re-read),
+`LOGIN_REQUIRED` (that profile has no session — rule 6, hand over the `auth`
+command in the hint), `CONFIG_INVALID` (often the file-mode refusal: something
+under `~/.telegram-tools` is readable by others and every write refuses until it
+is not; the hint carries the `chmod`, and `telegram-tools doctor`
+names the files).
 
 ## Commands
 
@@ -145,6 +165,9 @@ question), `PLAN_DRIFT` (the chat changed mid-run — re-run and re-read).
 | "make me a group with topics" (they asked) | `telegram-tools create group --title "..." --forum --yes` |
 | "add a topic to that group" (they asked) | `telegram-tools create topic --chat <id> --title "..." --yes` |
 | "delete that topic/group" | hand them `telegram-tools delete topic --chat <id> --topic <id> --execute` — rule 4, they run it |
+| "which account is this acting as?" | `telegram-tools profiles`, or read `identity` off any `--json` run |
+| "use my other account" | `telegram-tools --profile work <command>` |
+| "log me in" / "log me out" | hand them `telegram-tools auth` or `telegram-tools auth --logout` — rule 6, they run it |
 | "is telegram-tools set up?" | `telegram-tools doctor` |
 
 - **`discover` defaults to admin/managed chats only** — the ones the user runs. Add
@@ -182,6 +205,13 @@ question), `PLAN_DRIFT` (the chat changed mid-run — re-run and re-read).
   suggest deleting it either.
 - **Check the tool's own help before using a flag** that is not in this table. The
   CLI's `--help` is current; this file is a snapshot.
+- **Every run names the account it used.** Human output opens with
+  `Acting as: <label> · account · Target: <path> (<ids>)`, and `--json` carries the
+  same two as fields. When the user has several profiles, say which one answered.
+- **`doctor` is the setup answer, and it needs no login.** It reports the profiles,
+  whether the current one has a session, whether the local files are private
+  enough to write, and whether a configured proxy is usable — all without printing
+  a path, a number or a token.
 - **The menu is for the human at the keyboard.** `telegram-tools` with no arguments
   opens a looping menu with pick-lists. Every action it offers is a flag combination
   this CLI already has — nothing in the menu is a capability the flags lack.
@@ -195,6 +225,8 @@ question), `PLAN_DRIFT` (the chat changed mid-run — re-run and re-read).
 - **`create` on your own initiative** — rule 3. If a new group or topic looks like
   the right answer, propose it and let the user say yes; do not create it and report
   back.
+- **`auth`** — the login itself, in every form. Rule 6 above. `profiles` is the
+  read-only half and is fine to run.
 - **`bots`** — it edits a live bot's name, bio, description, commands, profile photo
   and default admin rights. Those are the user's public-facing bots; the edits are
   theirs to make. Check `--help` for whether the installed build has it at all.

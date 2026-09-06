@@ -6,12 +6,47 @@ The terms this codebase uses, and the boundaries they imply.
   modules make: the one boundary the SDK is touched at. Everything above it
   works with the plain dataclasses in `models.py`. Tests mock exactly the
   client object those calls are made on, never Telethon's internals.
-- **Session** — the Telethon login at `~/.telegram-tools/telegram-tools.session`
-  (`TELEGRAM_TOOLS_SESSION` overrides it). One session file is one connection:
+- **Session** — the Telethon login a profile owns. One session file is one connection:
   a second client opening it raises SQLite's "database is locked", which
   `start_client` turns into a `SessionInUseError` that says a menu is open
   somewhere. That is why the menu passes its own started client into
-  `cli.run`.
+  `cli.run`, and why the menu hands the file back (`MenuSession.release`)
+  before `auth` opens its own client on it. Telethon appends `.session` to
+  whatever path it is handed, so the store keeps `<dir>/session` and the file
+  is `<dir>/session.session`; it also creates that file at the process umask
+  in its constructor, which is why `create_client` tightens it afterwards
+  rather than before.
+- **Profile** — a named login: `~/.telegram-tools/profiles/<name>/`, holding
+  the session (0600, in a 0700 directory) and a non-secret `profile.json`
+  (label, account id, created, last login, proxy name). `--profile` before the
+  subcommand picks one, `TELEGRAM_TOOLS_PROFILE` is the default, and the
+  default is `default`. A profile may keep its own `.env`, read between the
+  working directory's and the tool's.
+- **Legacy session** — `~/.telegram-tools/telegram-tools.session`, the file
+  every version before profiles wrote. It is the `default` profile *by
+  reference*: `profiles.load` resolves to it when `default` has no session of
+  its own, nothing moves it, and `TELEGRAM_TOOLS_SESSION` still wins over every
+  profile. `auth --migrate` is the only path that moves it, behind a y/N.
+- **Acting mode** — what an identity is doing: `account` today, signed in as
+  the person. The mode is a field of the identity, printed in the banner and
+  carried in every envelope.
+- **Banner** — the `Acting as: <label> · <mode> · Target: <path> (<ids>)` line
+  every screen opens with (`_core.identity.banner`). A command prints it once,
+  through the reporter, so `--json` puts it on stderr and the envelope carries
+  the same two as fields; a run whose output is a file prints none, because it
+  has no screen. In the menu it is injected between a screen's title and its
+  rule, and only once something has connected — the root of a fresh run has
+  none, which is what keeps a bare `telegram-tools` from needing credentials.
+- **Loose mode** — anything under `~/.telegram-tools` readable by group or
+  others (`_core.paths.loose_modes`). `doctor` reports it and every command
+  that writes refuses until it is fixed; reads are left alone, so `doctor` can
+  always say why. Directories are made 0700 from the root down, because
+  `mkdir(parents=True)` applies its mode to the leaf only.
+- **Refuse, never skip** — the rule a proxy follows. Telethon warns and
+  connects directly when `python-socks` is missing, so `proxy.py` checks the
+  import itself and refuses: someone who asked to go through a proxy must never
+  silently connect from their own address. The same shape governs `auth --qr`
+  without the `qr` extra.
 - **Gate** — the confirmation pattern on every path that writes. `send` =
   full-message preview + `y/N` (`--yes` instead requires the allowlist);
   `create` = preview + `y/N`; `clear-messages` = dry-run default + `--execute`
@@ -53,8 +88,10 @@ The terms this codebase uses, and the boundaries they imply.
   profile.
 - **Screen** — what `prompts._screen` renders: a title over a rule, numbered
   rows, an optional `n`/`p` paging line, then `0`. Items are numbered across
-  the whole list, so a row never changes number when the page does. `ui.paint`
-  recognises exactly that shape and is the menu's only colour boundary — every
+  the whole list, so a row never changes number when the page does. That
+  closing `0` is also how a screen is told apart from a command's own output
+  when the banner is injected. `ui.paint` recognises exactly that shape — the
+  banner line included — and is the menu's only colour boundary: every
   prompt still returns plain strings, and an injected read/write (every test)
   never sees an escape code.
 - **Column** — a name padded to a fixed width so the ID beside it lines up
@@ -64,6 +101,10 @@ The terms this codebase uses, and the boundaries they imply.
   terminal; `tests/test_columns.py` carries the fourteen measured shapes.
   `cell` cuts to fit (a picker row must stay one line), `pad` never cuts (a
   tree's reader came for the name).
+- **Reserved row** — a root-menu number that names a capability a later
+  version brings (`Manage`, `Watch`). It is on the menu now so that every row
+  above and below it keeps its number when that version lands; picking one says
+  which version fills it and comes straight back.
 - **Trail** — the breadcrumb a screen's title carries (`Main › Clear › Ops`),
   built by `ui.crumb`. A flow passes its own trail down; a screen never invents
   one.
@@ -91,7 +132,8 @@ The terms this codebase uses, and the boundaries they imply.
   lives inside a container. Everything machine-readable names a target by rid.
 - **Identity** — who a run acts as: platform, mode (`account` today), a label
   screens print, a rid and the profile it came from. Never a credential; the
-  label is redacted on the way out, not checked and refused.
+  label is redacted on the way out, not checked and refused. An account with no
+  username prints its first name, so a number never becomes a label.
 - **Plan** — what a write is about to do, built before anything is asked: the
   identity, the resolved targets, the mutations, the approval kind and the
   preflight, hashed into a `plan_id`. A dry-run prints it and the real run

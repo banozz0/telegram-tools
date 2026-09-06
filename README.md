@@ -38,6 +38,14 @@ uv tool install telegram-tools
 
 Or from source: `pipx install git+https://github.com/banozz0/telegram-tools.git`
 
+Two optional extras, each for one capability that needs a library and refuses rather
+than degrade without it — a proxy (`telegram-tools[proxy]`) and the QR block that
+`auth --qr` draws (`telegram-tools[qr]`):
+
+```bash
+pipx install 'telegram-tools[proxy,qr]'
+```
+
 Requires Python 3.11+.
 
 ## Setup: your Telegram API credentials
@@ -59,7 +67,76 @@ EOF
 
 Shell environment variables and a `.env` in the current directory also work, and win over `~/.telegram-tools/.env`.
 
-Treat the api_hash like a password. The first command you run starts Telethon's interactive login (phone number + code from Telegram); the resulting session file is stored in `~/.telegram-tools/` and reused afterwards. Log out anytime by deleting the session file in that directory (your `.env` can stay) — the session also shows under Telegram's *Settings → Devices*.
+Treat the api_hash like a password.
+
+### Logging in
+
+```bash
+telegram-tools auth          # phone number, then the code Telegram sends
+telegram-tools auth --qr     # or scan a code from a phone that is already signed in
+```
+
+`auth` asks at the terminal and cannot be run unattended — it has no `--yes`, and there
+is nothing here for a script to drive. If the account has two-step verification, the
+password is asked for at the prompt and stored nowhere. `auth --qr` needs
+`pip install 'telegram-tools[qr]'` to draw the block; open Telegram on the signed-in
+phone, *Settings → Devices → Link Desktop Device*, and scan it.
+
+You can also just run a command: without a session, Telethon's own login prompt still
+appears exactly as it always has.
+
+```bash
+telegram-tools profiles              # what this machine is logged in as
+telegram-tools auth --logout         # end a session, after typing the profile's name
+```
+
+Logging out also removes the local session; the session shows under Telegram's
+*Settings → Devices* either way.
+
+### More than one account
+
+```bash
+telegram-tools auth --profile work           # log a second account in
+telegram-tools --profile work discover       # act as it (the flag goes before the command)
+export TELEGRAM_TOOLS_PROFILE=work           # or make it this shell's default
+```
+
+Each profile keeps its own session in `~/.telegram-tools/profiles/<name>/`, written
+`0600` inside a `0700` directory, beside a `profile.json` that holds a label, the account
+id, when it was created and last used, and the name of any proxy — never a phone number,
+never a token, never a password. A profile may keep its own `.env` beside it when it
+needs a second application id or its own proxy.
+
+If you were using telegram-tools before profiles existed, nothing moved: your
+`~/.telegram-tools/telegram-tools.session` *is* the `default` profile, read where it has
+always been, and `TELEGRAM_TOOLS_SESSION` still wins over everything. `doctor` mentions
+that it could move into the profile directory, and `auth --migrate` does it after a y/N —
+the only thing in this tool that moves a session file.
+
+### Who am I acting as?
+
+Every command and every menu screen below the root opens with the account it is about to
+use, and the thing it is about to use it on:
+
+```
+Acting as: Sven (@sven) · account · Target: Agency › 💻 Deploys (-1001234567890)
+```
+
+The same identity and target are fields in the `--json` envelope. A phone number is never
+part of a label, and a session path is never printed anywhere.
+
+### Optional: a proxy
+
+```bash
+# in ~/.telegram-tools/.env, or a profile's own .env
+TELEGRAM_PROXY=socks5://127.0.0.1:1080
+```
+
+`socks5://`, `socks4://` and `http://` are understood, with optional `user:password@`.
+This needs `pip install 'telegram-tools[proxy]'`. Without that library the command
+**refuses** — Telethon's own behaviour there is a warning and a direct connection from
+your own address, which is exactly the outcome someone asking for a proxy must not get.
+`doctor` tells you before you run anything.
 
 ### Optional: bot tokens
 
@@ -90,9 +167,16 @@ and still asks. `doctor` reports how many destinations are listed, never which.
 ## 30 seconds of usage
 
 ```bash
+# Log in, and see which accounts this machine knows
+telegram-tools auth
+telegram-tools profiles
+
 # What are my chats and their IDs?
 telegram-tools discover            # admin/managed chats only
 telegram-tools discover --all      # everything
+
+# Act as a second account
+telegram-tools --profile work discover
 
 # Search a group
 telegram-tools search --chat @mygroup --contains deploy
@@ -158,16 +242,24 @@ Run `telegram-tools` with no arguments and you get a menu instead of flags:
 
 ```text
 telegram-tools
+Acting as: Sven (@sven) · account
 --------------------------------------------
-1. Chats & topics (find IDs)
-2. Search / export messages
-3. Send a message
-4. Create a group, channel, or topic
-5. Clear topic messages
-6. My bots
-7. Check setup
+1. Find IDs (chats, topics)
+2. Read (search, export)
+3. Write (send)
+4. Build (create, delete)
+5. Clear messages
+6. Manage (admins, members, invites, settings)
+7. Watch (rules, runner, review queue)
+8. Identity (profiles, my bots)
+9. Check setup
 0. Exit
 ```
+
+Rows 6 and 7 name what a later version brings and say so when you pick them; they hold
+their numbers now so nothing above or below them has to move again. The `Acting as:`
+line appears once something has connected — a bare `telegram-tools` opens without
+needing credentials, and `Check setup` never needs any.
 
 `0` always steps back one screen — inside a picker or on a flow's own screen alike —
 and exits once you're back at the root; on a text prompt a blank line does the same.
@@ -234,8 +326,12 @@ telegram-tools --json send --chat -1001234567890 --topic 141 --text "deploy is g
   previews, progress, prompts — so stdout stays parseable.
 - **`error.code` is stable.** `NOT_ALLOWLISTED`, `TARGET_NOT_FOUND`,
   `TARGET_KIND_MISMATCH`, `PERMISSION_DENIED`, `PLAN_DRIFT`, `APPROVAL_REQUIRED`,
-  `SESSION_IN_USE`, `CONFIG_MISSING`, `RATE_LIMITED` and others. `error.hint` is
-  the exact command or edit that would fix it — worth relaying verbatim.
+  `SESSION_IN_USE`, `CONFIG_MISSING`, `CONFIG_INVALID`, `LOGIN_REQUIRED`,
+  `RATE_LIMITED` and others. `error.hint` is the exact command or edit that
+  would fix it — worth relaying verbatim.
+- **`identity` names the account every run acted as**, with the profile it came
+  from, and `target` what it acted on. Neither ever carries a phone number, a
+  token or a session path.
 - **`meta.api_calls` and `meta.waited_ms` are not measured yet** and report 0.
   They are in the schema because both tools share it; a later release fills them.
 
@@ -250,13 +346,22 @@ Exit codes, unchanged apart from one addition:
 | 130 | interrupted |
 
 `discover --json out.json` and `bots --json out.json` still write those files
-exactly as before; a bare `--json` on either means the envelope.
+exactly as before; a bare `--json` on either means the envelope. A run whose
+output goes to a file prints no `Acting as:` banner, so its stdout stays what it
+has always been: empty.
+
+`--profile NAME` goes before the subcommand and picks the login;
+`TELEGRAM_TOOLS_PROFILE` is the default. Under `--json` a profile with no session
+refuses with `LOGIN_REQUIRED` and the `auth` command that fixes it, rather than
+blocking on a prompt. **`auth` is not for an agent to drive** — it asks a human
+for a code or a password. Relay the refusal and let the person run it.
 
 ## Safety model
 
 | Command | Destructive? |
 | --- | --- |
-| `discover`, `search`, `doctor` | No — read-only |
+| `discover`, `search`, `doctor`, `profiles` | No — read-only |
+| `auth` | Local only — writes or removes this machine's login. `--logout` needs the profile's name typed back, `--migrate` a `y/N`; there is no `--yes`, and it cannot run unattended. Nothing it asks for is stored: a two-step-verification password goes straight into the sign-in call |
 | `create` | No — makes new things, changes nothing existing, after a `y/N` unless you pass `--yes` |
 | `send` | Outward-facing — posts publicly as you (text, files, or both), after showing the whole message and asking `y/N`. `--yes` skips the prompt only for destinations in `TELEGRAM_SEND_ALLOWLIST` |
 | `bots` | No — changes settings on bots you own, after a diff and a `y/N` unless you pass `--yes`; reversible if you still have the old values, but `--remove-photo` and `--clear-commands` discard data Telegram will not hand back |
@@ -277,6 +382,11 @@ and reported, and one redacted line per executed write is appended to
 `~/.telegram-tools/audit.jsonl` (from the menu exactly as from a flag). No
 token, phone number, API hash or session path can reach that file — the same
 redaction pass covers it, every envelope and every error message.
+
+Sessions are written `0600` inside `0700` directories, and every command that
+writes something refuses while anything under `~/.telegram-tools` is readable by
+group or others — `doctor` names the files and the `chmod` that fixes them.
+Reads still work, so `doctor` can always tell you why.
 
 ## Status
 
