@@ -285,10 +285,12 @@ def bound_selection(count: int, *, limit: int | None, i_know: bool = False) -> N
             hint=f"Narrow the selection, or add --i-know --limit {count} and type {count} at the prompt.",
         )
     if count > limit:
+        # The hint names a limit that would actually let this selection
+        # through: the count itself, never a cap below it.
         raise CommandError(
             f"{count} messages match, and --limit is {limit}.",
             code="BULK_LIMIT",
-            hint=f"Narrow the selection, or pass --limit {min(count, BULK_HARD_LIMIT)}"
+            hint=f"Narrow the selection, or pass --limit {count}"
             + ("" if count <= BULK_HARD_LIMIT else " --i-know")
             + " to act on all of them.",
         )

@@ -135,7 +135,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--as-bot",
         dest="as_bot",
         metavar="NICK",
-        help="Act as this bot (a TELEGRAM_BOT_TOKENS nickname) instead of the account; send and create topic only",
+        help="Act as this bot (a TELEGRAM_BOT_TOKENS nickname) instead of the account: send, create topic and the message verbs except read, unread, bookmark and draft",
     )
     subparsers = parser.add_subparsers(dest="command")
 

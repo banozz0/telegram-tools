@@ -322,6 +322,11 @@ def test_the_bound_refuses_above_limit_and_names_i_know_above_the_hard_limit():
         ops.bound_selection(1001, limit=2000)
     assert hard.value.code == "BULK_LIMIT" and "--i-know" in hard.value.hint
     ops.bound_selection(1001, limit=2000, i_know=True)
+    # With --i-know but a limit below the count, the hint names a limit that
+    # would actually pass, never the 1000 cap that would refuse again.
+    with pytest.raises(CommandError) as still:
+        ops.bound_selection(1200, limit=200, i_know=True)
+    assert "--limit 1200 --i-know" in still.value.hint and "--limit 1000" not in still.value.hint
 
 
 def test_from_search_with_1001_hits_exits_2_with_bulk_limit(run_cli, capsys, home):

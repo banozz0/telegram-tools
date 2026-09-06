@@ -99,7 +99,10 @@ ALLOWED_ADDITIONS = (
     # The bot-mode card (agent-bo-95421937): one global flag, the explicit
     # switch into acting as an owned bot. No subcommand gained or lost a flag.
     "[--as-bot NICK]",
-    "--as-bot NICK Act as this bot (a TELEGRAM_BOT_TOKENS nickname) instead of the account; send and create topic only",
+    # Reworded on the message-ops card (agent-bo-95421945): the flag's help
+    # names what a bot may run now that eleven message verbs join send and
+    # create topic, and the four account-only verbs it refuses.
+    "--as-bot NICK Act as this bot (a TELEGRAM_BOT_TOKENS nickname) instead of the account: send, create topic and the message verbs except read, unread, bookmark and draft",
     # The archive card (agent-bo-95421940): one new subcommand group, and on
     # the live `search` a switch that is the documented alias of `archive
     # search`. The subcommand name appears twice, as `auth,profiles,` does.
