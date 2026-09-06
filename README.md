@@ -13,6 +13,7 @@ Built on [Telethon](https://github.com/LonamiWebs/Telethon). Everything runs on 
 - **`discover`** — lists your chats, channels, and forum groups with their exact numeric IDs and every forum topic ID. The fastest way to answer "what is this chat's `-100…` ID and what are its topic IDs?"
 - **`search`** — searches messages by text, sender, date range, or topic, and prints a table or exports JSON, CSV, JSON lines, Markdown or HTML. Messages carrying a photo or file are marked `[media]`. `search --archive` answers the same flags from the local archive, offline.
 - **`archive`** — a local, searchable copy of everything your account can read: `archive sync` fills it and resumes where it stopped, `archive search` is full-text search over it with no connection, `archive export` writes one search in five formats, `archive status` says what it holds, and `archive retention` / `archive forget` prune it behind the same typed-title gate `delete` has. See [The local archive](#the-local-archive).
+- **`review`** — the links and files the archive has seen, in one queue, and the only way anything is ever downloaded: `review list` shows them (asking nothing of any host), `review approve` fetches the ones you pick into quarantine after a `y/N`, the built-in checks and an optional local ClamAV give each a verdict, and `review accept` moves a file into `~/.telegram-tools/media/` after showing that verdict, behind a second `y/N`. Neither gate has a `--yes`. See [The review queue](#the-review-queue).
 - **`clear-messages`** — deletes all messages inside selected forum topic(s) while preserving the topics and their IDs. Dry-run by default; deleting requires both `--execute` *and* typing `DELETE` at a prompt.
 - **`send`** — posts a message, a file, or both to a chat or into one forum topic, optionally as a reply (`--reply-to`). Shows you the whole message, its destination and every `@mention` in it, then asks `y/N`.
 - **`message`** — what you do to a message once it exists: `reply`, `edit`, `delete`, `forward`, `copy`, `react`, `unreact`, `pin`, `unpin`, `poll`, `typing`, `read`, `unread`, `bookmark`, `draft`. Each shows the chat and the message it is about to act on, then asks. Deleting is dry-run by default, bounded, and needs `--execute` plus a typed `DELETE`. See [Message tools](#message-tools).
@@ -26,7 +27,8 @@ Built on [Telethon](https://github.com/LonamiWebs/Telethon). Everything runs on 
 ## What it doesn't do (on purpose)
 
 - No renaming forum topics — `clear-messages` leaves topic IDs untouched, and `delete topic` is the only way a topic goes.
-- No media downloads. `send` can attach files; nothing downloads them back — the archive keeps text and a `has_media` mark, never the files, and `message copy` links to an attachment rather than fetching it.
+- No unattended downloads, and no download at all outside the review queue. `archive sync` notes every link and file it walks past and fetches none of them; `message copy` links to an attachment rather than fetching it. A byte reaches your disk only after you approved that candidate at a terminal, it sat in quarantine through every check, and you accepted it with the verdict in front of you. No rule, schedule or sync can approve, and no `--yes` exists for either step.
+- No cloud scanning. The one scanner is a local ClamAV, if you have one; without it every verdict is `UNSCANNED`, said plainly, never "clean".
 - No automation loops. The `bots` command edits bot *settings*; it never runs a bot.
 - No changing a bot's `@username`, creating or deleting bots, or reading/revoking bot tokens — those stay with @BotFather.
 - No cloud anything — credentials and session files stay in `~/.telegram-tools/`.
@@ -371,6 +373,62 @@ written with the defaults on first use); a sync that would cross it stops before
 writing with `DISK_BUDGET` and names the retention command that frees space. The
 archive needs a Python whose SQLite has FTS5 — `doctor` says whether yours does.
 
+## The review queue
+
+Every `archive sync` notes the links and files it walks past — a link as the message
+wrote it, a file by Telegram's own key with the type, size and name Telegram claimed —
+as candidates in one queue. Nothing is fetched by the sync, or by anything else that
+runs on its own: a candidate waits until a person approves it, at a terminal.
+
+```bash
+telegram-tools review list                      # what is waiting; asks nothing of any host
+telegram-tools review list --kind link --state queued
+telegram-tools review approve                   # pick at the terminal, y/N, then the fetch runs
+telegram-tools review approve --ids 883cabdff25821d2,1f0e2d3c4b5a6978
+telegram-tools review status                    # counts, quarantine, media, the scanner, every fetched row
+telegram-tools review accept --ids 883cabdff25821d2   # shows the verdict, asks y/N, moves it into media/
+telegram-tools review reject --ids 1f0e2d3c4b5a6978   # asks y/N, deletes the quarantined bytes
+telegram-tools review retry --ids 1f0e2d3c4b5a6978    # a failed download, from where it stopped
+```
+
+`review approve` shows every candidate the answer covers — the URL exactly as written,
+the claimed type and size, which message it came from — asks `y/N`, and then fetches:
+a link through a fetcher that walks its redirects one `HEAD` at a time (at most five,
+each hop checked before it is followed, and none of them touched before you said yes),
+a file through your own login from the message it came from. Bytes land in
+`~/.telegram-tools/quarantine/<download-id>/` (0700, the payload 0600) beside a
+`manifest.json` saying what the fetch learned. A download killed halfway is `failed`
+with its bytes kept; `review retry` continues from that byte, needs no new approval,
+and the sha256 is taken over the whole file, so the result is the same file an
+uninterrupted run would have made.
+
+Every fetch runs the same eleven checks in the same order, and the first failure is
+the verdict `BLOCKED` with the check named: scheme (`https` and `http` only; a file
+never goes through a URL a message supplied), redirects, private network (a hostname
+that resolves to loopback, link-local, a private range or a cloud metadata address is
+refused, and the connection is pinned to the address that was checked so a second DNS
+answer cannot move it), path (the filename comes from the manifest id, never from the
+URL or the sender), size (`download_max_bytes`, 256 MiB, and the quarantine budget),
+time (ten minutes, or sixty seconds without a byte), archive expansion (zip, tar,
+gzip, bzip2 and xz are inspected without extraction and refused when their entries,
+declared size or ratio cross the caps; 7z, rar and anything the tool cannot look
+inside are refused by name), MIME versus extension versus magic bytes, a checksum the
+source supplied, a duplicate already in `media/`, and the scanner. The scanner is
+ClamAV if `clamdscan` or `clamscan` is on your PATH — `doctor` says which was found
+or that neither was — and its word is `CLEAN` or `INFECTED`. **No scanner means
+`UNSCANNED`**, printed as such; nothing here calls a file clean because nobody looked.
+
+`review accept` shows that verdict and asks again. A `BLOCKED` or `INFECTED` file
+cannot be accepted (`UNSAFE_BLOCKED`, with the reject command as the hint); an
+`UNSCANNED` one can, with the word in front of you. Accepted files are renamed into
+`~/.telegram-tools/media/<sha2>/<sha256>` under the `media_max_bytes` budget (5 GiB);
+`review reject` deletes the quarantine bytes, and a rejected candidate stays rejected —
+the same link in the same message is the same row on every later sync. Both gates
+refuse without a terminal, in either mode, with `APPROVAL_REQUIRED` and exit 3: a `y`
+piped into stdin is not a person. Every approve, accept, reject and retry leaves its
+line in the audit log. Nothing is uploaded anywhere, ever: there is no reputation
+lookup, no sandbox, no cloud scan in any code path.
+
 ## The menu
 
 Run `telegram-tools` with no arguments and you get a menu instead of flags:
@@ -483,7 +541,13 @@ telegram-tools --json send --chat -1001234567890 --topic 141 --text "deploy is g
   open no connection, so they never wait on Telegram and never see a flood-wait.
   `archive search` is the cheap way to answer a history question; `search --archive`
   is the same answer behind the live command's flags. A `--json archive sync` carries
-  the coverage table in `result.scopes` and `result.skipped`, one entry per scope.
+  the coverage table in `result.scopes` and `result.skipped`, one entry per scope,
+  and `result.manifests` counts the links and files it noted for review.
+- **`review list` and `review status` are offline too**, and the answer is safe to
+  read: `result.candidates[].url` is the link exactly as the message wrote it, never
+  resolved. `review approve` and `review accept` are not for an agent to drive: each
+  asks a person at a terminal, refuses without one (`APPROVAL_REQUIRED`, exit 3, in
+  either mode), and has no `--yes`. Relay the candidate ids and let the person decide.
 
 Exit codes, unchanged apart from one addition:
 
@@ -492,7 +556,7 @@ Exit codes, unchanged apart from one addition:
 | 0 | done — `ok`, `empty`, `dry_run` |
 | 1 | not done — cancelled at a gate, a declined confirm, `partial` (`doctor` with a failed check) |
 | 2 | refused — usage, config, permission, a platform error |
-| 3 | **new:** the command asks for confirmation and there is no terminal to ask on. Only under `--json`; `error.hint` is the same command for a human to run |
+| 3 | **new:** the command asks for confirmation and there is no terminal to ask on. Under `--json`, and for `review approve` and `review accept` in either mode; `error.hint` is the same command for a human to run |
 | 130 | interrupted |
 
 `discover --json out.json` and `bots --json out.json` still write those files
@@ -517,7 +581,10 @@ for a code or a password. Relay the refusal and let the person run it.
 | Command | Destructive? |
 | --- | --- |
 | `discover`, `search`, `doctor`, `profiles`, `archive status`, `archive search`, `archive export` | No — read-only |
-| `archive sync` | Read-only against Telegram — writes only the local archive, resuming without duplicating; refuses under `--as-bot` |
+| `archive sync` | Read-only against Telegram — writes only the local archive, resuming without duplicating; refuses under `--as-bot`. Notes every link and file it sees as a review candidate and fetches none |
+| `review list`, `review status` | No — read the archive and two local directories; no host is contacted and no redirect is resolved |
+| `review approve`, `review retry` | Outward-facing — after a `y/N` at a terminal, contacts the link's host (redirects walked one `HEAD` at a time) or reads the file through your login, into quarantine, through eleven checks and the scanner. No `--yes`; refuses without a terminal (`APPROVAL_REQUIRED`, exit 3) |
+| `review accept`, `review reject` | Local only — move a quarantined file into `media/` after showing its verdict, or delete the quarantined bytes; each after a `y/N`, no `--yes`. `BLOCKED` and `INFECTED` can never be accepted |
 | `archive retention`, `archive forget` | Local only — prune or remove rows of the local archive, never anything on Telegram. Dry-run by default; executing needs `--execute` **and** the scope's exact title typed back; there is no `--yes` |
 | `auth` | Local only — writes or removes this machine's login. `--logout` needs the profile's name typed back, `--migrate` a `y/N`; there is no `--yes`, and it cannot run unattended. Nothing it asks for is stored: a two-step-verification password goes straight into the sign-in call |
 | `create` | No — makes new things, changes nothing existing, after a `y/N` unless you pass `--yes` |

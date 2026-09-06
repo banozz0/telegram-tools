@@ -1,13 +1,13 @@
 ---
 name: telegram-tools
 description: "Use when you need the real numeric ID of a Telegram chat, channel, group or forum topic — 'what's the ID of that topic?', 'which chat is -100…?', 'where do I send this?' — when the user wants their own Telegram messages searched or exported (JSON, CSV, JSONL, Markdown, HTML), when a history question can be answered from the local archive instead of a fresh fetch, when a message must be posted to a chat or topic the user has allowlisted, or when a message the user named should get a reply, a reaction, a pin, or be forwarded, copied or bookmarked."
-version: 1.8.0
+version: 1.9.0
 author: banozz0
 license: MIT
 platforms: [macos]
 metadata:
   hermes:
-    tags: [telegram, chat-ids, topic-ids, forum, search, archive, export, send, reply, react, message, cli]
+    tags: [telegram, chat-ids, topic-ids, forum, search, archive, export, send, reply, react, message, review, cli]
 ---
 
 # telegram-tools
@@ -58,8 +58,12 @@ since the last sync, or a chat the archive does not hold yet.
 It can also **send** a message, act on one that exists (**`message`**: reply, react,
 pin, forward, copy, bookmark and more), and **create** — or **delete** — a group,
 channel or topic. Those write to Telegram as the user, so rules 2, 3 and 10 below
-govern them — read those before running any. It still does not run bots or download
-media.
+govern them — read those before running any. It still does not run bots.
+
+Downloads exist, and only one way: the **review queue**. A sync notes every link and
+file it sees; `review list` shows them; a person approves, and later accepts, each one
+at a terminal. Rule 11 below is the whole of your part in that: read the queue, never
+answer its gates.
 
 ## Hard rules
 
@@ -135,6 +139,18 @@ name: `--from-search` selects every archived match, and a wide query moves a wid
 selection. A refusal of `BULK_LIMIT` means the selection was bigger than the tool
 acts on at once; narrow it, never add `--i-know` yourself.
 
+**11. Never run `review approve`, `review accept`, `review reject` or `review retry`.**
+The review queue is the only path by which a byte from a link or an attachment reaches
+the user's disk, and it is built around two decisions a person makes at a terminal:
+approve (which starts the fetch) and accept (which keeps the file, with the safety
+verdict in front of them). Each refuses without a terminal in either mode
+(`APPROVAL_REQUIRED`, exit 3) and has no `--yes` — do not drive one through the menu,
+a pty, or a piped answer, and do not retry after the refusal. `review list` and
+`review status` are yours to run: they read the archive, contact no host, and show
+the URL exactly as the message wrote it. When the user wants a file, hand them the
+candidate id and `telegram-tools review approve --ids <id>`; when a verdict says
+`UNSCANNED`, tell them no scanner was found rather than calling the file clean.
+
 ## Machine-readable output
 
 Put `--json` **before** the subcommand and the command prints exactly one object
@@ -208,6 +224,8 @@ names the files).
 | "give me everything about X as a file" | `telegram-tools --json archive export --query "X" --format markdown --output /path/out.md` |
 | the live `search` flags, but from the archive | `telegram-tools --json search --archive --chat <id> --keyword "X"` |
 | "prune / forget the archive" | hand them `telegram-tools archive retention --scope <rid> --keep 90d --execute` or `archive forget --scope <rid> --execute` — they type the title, you do not |
+| "what links / files are waiting?" / "did anything get downloaded?" | `telegram-tools --json review list` (`--kind link\|media`, `--state queued\|quarantined\|…`), `telegram-tools --json review status` — offline, nothing fetched |
+| "download that file" / "fetch that link" | hand them `telegram-tools review approve --ids <id>` (the id from `review list`), then `review accept --ids <id>` once it is quarantined — rule 11, they answer both |
 | "post this to that topic" (allowlisted) | `telegram-tools send --chat <id> --topic <topic-id> --text "..." --yes` |
 | a long or multi-line message | pipe it: `... \| telegram-tools send --chat <id> --text - --yes` |
 | "send them that file" (allowlisted) | `telegram-tools send --chat <id> --file /path/to/file --text "caption" --yes` |
@@ -247,7 +265,8 @@ names the files).
 - **`archive sync` is the one archive command that connects.** It reads history and
   writes only the local file; it never posts, edits or deletes anything on Telegram,
   so it is fine to run when the user asked for the archive or a history question
-  needs it. It can take minutes on a large account and honours flood-waits by
+  needs it. It also notes every link and file it sees as a review candidate and
+  fetches none of them — `result.manifests` counts them. It can take minutes on a large account and honours flood-waits by
   sleeping — `meta.waited_ms` says how long. `status` is `partial` and the exit code
   1 when a scope failed; the rest still landed. Under `--as-bot` every archive
   command refuses with `IDENTITY_MODE_UNSUPPORTED`: a bot cannot read history.
@@ -312,6 +331,10 @@ names the files).
   back.
 - **`auth`** — the login itself, in every form. Rule 6 above. `profiles` is the
   read-only half and is fine to run.
+- **`review approve`, `review accept`, `review reject`, `review retry`** — the two
+  human decisions that download and keep a file, and the two that undo or redo one.
+  Rule 11. Each refuses without a terminal; `review list` and `review status` are the
+  read-only half and are fine to run.
 - **`archive retention` and `archive forget`** — they remove rows from the user's
   local archive. Dry-run is the default and executing needs `--execute` plus the
   scope's exact title typed at a prompt, with no `--yes`; hand the user the command.

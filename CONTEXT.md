@@ -182,9 +182,45 @@ The terms this codebase uses, and the boundaries they imply.
   `cell` cuts to fit (a picker row must stay one line), `pad` never cuts (a
   tree's reader came for the name).
 - **Reserved row** — a root-menu number that names a capability a later
-  version brings (`Manage`, `Watch`). It is on the menu now so that every row
-  above and below it keeps its number when that version lands; picking one says
-  which version fills it and comes straight back.
+  version brings (`Manage`). It is on the menu now so that every row above and
+  below it keeps its number when that version lands; picking it says which
+  version fills it and comes straight back. `Watch` held its number the same
+  way until the review queue filled it; rules and the runner join it there.
+- **Candidate** — one link or one file a sync saw, as the review queue holds
+  it: a `manifests` row of kind `link` (the URL exactly as the message wrote
+  it) or `media` (Telegram's own file key, `document:ID` or `photo:ID`, as the
+  locator, with the type, size and filename Telegram claimed as display
+  metadata). Noted by `adapters/media.candidates_of` while the archive source
+  walks, enqueued by `archive sync` after the store commits, never fetched by
+  either. The same link in the same message is the same row on every sync.
+- **Review queue** — `review <verb>` over the shared queue (`_core/review.py`):
+  the seven states and the two human moves, `queued → approved` and
+  `quarantined → accepted`, each behind a `prompt_y` answered at a terminal.
+  `review.py` is this tool's side: the pipeline with this tool's fetchers, the
+  screens, the plans. `list` and `status` are queries; `approve` and `retry`
+  are the only commands here that contact a host, and only after the answer.
+- **Terminal gate** — the review queue's stricter `prompt_y`: both human moves
+  refuse without a tty in *either* mode (`cli._review_io`, `APPROVAL_REQUIRED`,
+  exit 3), where every other gate checks the tty only under `--json`. A `y`
+  piped into stdin is not a person, and `Approval.interactive` carries the
+  tty check rather than the answer.
+- **Media fetcher** — `adapters/media.TelegramMediaFetcher`, this tool's
+  `MediaFetcher`: re-reads the source message through the login, refuses one
+  that no longer carries the manifest's file key, and streams `iter_download`
+  from the byte offset the pipeline hands it. The pipeline writes the chunks,
+  counts them, runs the checks and takes the sha256 over the whole file; the
+  fetcher never touches the disk and never decides a verdict. A file never
+  goes through a URL a message supplied.
+- **Quarantine** — `~/.telegram-tools/quarantine/<download-id>/` (0700):
+  `payload` (0600) and `manifest.json`, held until a person accepts (renamed
+  into `media/<sha2>/<sha256>`) or rejects (deleted). Both directories are
+  tightened before a fetch, because `mkdir(parents=True)` makes the parent at
+  the umask.
+- **Verdict** — what a quarantined file carries: `BLOCKED` (a built-in check
+  failed, named), `CLEAN` or `INFECTED` (the scanner said so), or `UNSCANNED`
+  (no scanner gave a word, and the reason says which binaries were looked for).
+  `accept` shows it before asking and refuses `BLOCKED` and `INFECTED` with
+  `UNSAFE_BLOCKED`; `doctor` names the scanner it found or looked for.
 - **Trail** — the breadcrumb a screen's title carries (`Main › Clear › Ops`),
   built by `ui.crumb`. A flow passes its own trail down; a screen never invents
   one.
