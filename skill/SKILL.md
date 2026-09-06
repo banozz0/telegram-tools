@@ -1,13 +1,13 @@
 ---
 name: telegram-tools
-description: "Use when you need the real numeric ID of a Telegram chat, channel, group or forum topic — 'what's the ID of that topic?', 'which chat is -100…?', 'where do I send this?' — when the user wants their own Telegram messages searched or exported (JSON, CSV, JSONL, Markdown, HTML), when a history question can be answered from the local archive instead of a fresh fetch, when a message must be posted to a chat or topic the user has allowlisted, or when a message the user named should get a reply, a reaction, a pin, or be forwarded, copied or bookmarked."
-version: 1.10.0
+description: "Use when you need the real numeric ID of a Telegram chat, channel, group or forum topic — 'what's the ID of that topic?', 'which chat is -100…?', 'where do I send this?' — when the user wants their own Telegram messages searched or exported (JSON, CSV, JSONL, Markdown, HTML), when a history question can be answered from the local archive instead of a fresh fetch, when a message must be posted to a chat or topic the user has allowlisted, when a message the user named should get a reply, a reaction, a pin, or be forwarded, copied or bookmarked, or when the user asks who the admins of a chat are, who is waiting to join, which invite links exist, or what a chat's slow mode is."
+version: 1.11.0
 author: banozz0
 license: MIT
 platforms: [macos]
 metadata:
   hermes:
-    tags: [telegram, chat-ids, topic-ids, forum, search, archive, export, send, reply, react, message, review, structure, blueprint, cli]
+    tags: [telegram, chat-ids, topic-ids, forum, search, archive, export, send, reply, react, message, review, structure, blueprint, admin, member, invite, cli]
 ---
 
 # telegram-tools
@@ -59,6 +59,11 @@ It can also **send** a message, act on one that exists (**`message`**: reply, re
 pin, forward, copy, bookmark and more), and **create** — or **delete** — a group,
 channel or topic. Those write to Telegram as the user, so rules 2, 3 and 10 below
 govern them — read those before running any. It still does not run bots.
+
+It can also run a chat: **`admin`**, **`member`**, **`join-requests`**, **`invite`**
+and **`settings`** list and change who administers a group, who is in it, who is
+waiting at its door, which links open it and how fast people may post. The reads are
+yours; rule 13 below says which of the writes are, and which two never are.
 
 Downloads exist, and only one way: the **review queue**. A sync notes every link and
 file it sees; `review list` shows them; a person approves, and later accepts, each one
@@ -162,6 +167,26 @@ and change nothing. When the user wants a chat to match a blueprint, hand them t
 not a copy: never describe it as copying members, admins, messages or history, because
 `never_transferred` in the file says it does not, and `structure export` prints the same.
 
+**13. Never run `member ban --execute` or `admin demote --execute`.** They take a
+person's membership or a person's rights away, for everyone in the chat, and their
+gate is `delete`'s: `--execute` plus the person's exact label typed at a terminal,
+refused without one in either mode (`APPROVAL_REQUIRED`, exit 3), and no `--yes`. Do
+not drive either through the menu, a pty, or a piped answer; hand the user the command
+and relay the dry-run (no `--execute`), which is safe to run and shows who would be
+affected. The other administration writes — `admin promote`, `admin rights`, `member
+unban`, `mute`, `unmute`, `restrict`, `join-requests approve` and `decline`, `invite
+create` and `revoke`, `settings set` — ask `y/N` and have no `--yes`, so from an agent
+session they block; run one only when the user asked for that exact change of that
+exact person or link in this conversation, and expect to hand it over rather than
+answer for them. Never add `--reason` on the user's behalf, never pick an `--until`
+the user did not give, and never guess a person: `member list` and `admin list` show
+ids and usernames. The reads — `admin list`, `member list`, `join-requests list`,
+`invite list`, `settings show` — are yours to run. `invite list` prints real invite
+links: they are credentials to the chat, so quote one back only to the user who asked
+for it and never paste one anywhere else. `HIERARCHY_DENIED` means the account holds
+the right but cannot use it on that person (it lacks a right it would grant, or the
+person holds more than it does); relay both rights sets from the message and stop.
+
 ## Machine-readable output
 
 Put `--json` **before** the subcommand and the command prints exactly one object
@@ -213,7 +238,8 @@ question), `PLAN_DRIFT` (the chat changed mid-run — re-run and re-read),
 command in the hint), `IDENTITY_MODE_UNSUPPORTED` (that command needs the
 account, not a bot — rule 9; the hint is the same command without `--as-bot`),
 `BULK_LIMIT` (a `message delete`, `forward` or `copy`
-selection above `--limit` — narrow it; rule 10), `CONFIG_INVALID` (often the file-mode refusal: something
+selection above `--limit` — narrow it; rule 10), `HIERARCHY_DENIED` (an admin action
+the account's own rights do not reach — rule 13, relay both rights sets), `CONFIG_INVALID` (often the file-mode refusal: something
 under `~/.telegram-tools` is readable by others and every write refuses until it
 is not; the hint carries the `chmod`, and `telegram-tools doctor`
 names the files).
@@ -250,6 +276,17 @@ names the files).
 | "how does that chat differ from the blueprint?" | `telegram-tools --json structure diff --blueprint /path/hermes.json --chat <id>` — reads only |
 | "set that chat up like the blueprint" / "make a forum from it" | run the dry-run `telegram-tools --json structure apply --blueprint /path/hermes.json --chat <id>` and relay the steps; hand them the same command with `--execute` (or `--create --execute`) — rule 12, they type the title |
 | "which new topic is which?" after an apply | `telegram-tools --json structure remap --apply-id <id>` — offline |
+| "who are the admins of that chat?" / "what can X do there?" | `telegram-tools --json admin list --chat <id>` — reads only |
+| "who is in that chat?" / "is X banned?" | `telegram-tools --json member list --chat <id> --query <name>` (`--banned` for the banned and restricted) — reads only |
+| "who is waiting to join?" | `telegram-tools --json join-requests list --chat <id>` — reads only |
+| "what invite links does that chat have?" | `telegram-tools --json invite list --chat <id>` — reads only; the links are real, quote them to the user only |
+| "what's the slow mode / do people need approval to join?" | `telegram-tools --json settings show --chat <id>` — reads only |
+| "make X an admin" / "let X pin things" (they named the person and the rights) | hand them `telegram-tools admin promote --chat <id> --user <@x> --rights pin_messages` — rule 13, it asks y/N |
+| "ban X" / "remove X as admin" | hand them `telegram-tools member ban --chat <id> --user <@x> --execute` or `admin demote … --execute` — rule 13, they type the label; the dry-run without `--execute` is yours to show |
+| "mute X for an hour" / "let X back in" | hand them `telegram-tools member mute --chat <id> --user <@x> --until 1h` / `member unmute …` — rule 13 |
+| "let X in" / "turn X down" (a join request) | hand them `telegram-tools join-requests approve --chat <id> --user <@x>` or `… decline …` — rule 13 |
+| "make an invite link" / "kill that link" | hand them `telegram-tools invite create --chat <id> --expires 7d` or `invite revoke --chat <id> --link <link>` — rule 13 |
+| "set slow mode to a minute" | hand them `telegram-tools settings set --chat <id> --slow-mode 60` — rule 13 |
 | "make me a group with topics" (they asked) | `telegram-tools create group --title "..." --forum --yes` |
 | "add a topic to that group" (they asked) | `telegram-tools create topic --chat <id> --title "..." --yes` |
 | "delete that topic/group" | hand them `telegram-tools delete topic --chat <id> --topic <id> --execute` — rule 4, they run it |
@@ -309,7 +346,7 @@ names the files).
   the login session" means the user has the menu open somewhere. Say so; a retry
   loop will not free it.
 - **A write leaves a local record.** Every executed send, message verb, create, clear, delete,
-  blueprint step or bot edit appends one line to `~/.telegram-tools/audit.jsonl`. It is the
+  blueprint step, admin or member change or bot edit appends one line to `~/.telegram-tools/audit.jsonl`. It is the
   user's log, it holds no secrets, and you never need to read it — but do not
   suggest deleting it either.
 - **Check the tool's own help before using a flag** that is not in this table. The
@@ -355,6 +392,10 @@ names the files).
   behind the chat's exact title typed at a terminal, with no `--yes`. Rule 12. The
   dry-run (no `--execute`), `export`, `diff` and `remap` are the read-only half and are
   fine to run.
+- **`member ban --execute` and `admin demote --execute`** — a person's membership or
+  rights, for everyone, behind their exact label typed at a terminal, with no `--yes`.
+  Rule 13. The dry-run (no `--execute`) and the five reads are fine to run; the other
+  administration writes ask `y/N` and are the user's to answer.
 - **`archive retention` and `archive forget`** — they remove rows from the user's
   local archive. Dry-run is the default and executing needs `--execute` plus the
   scope's exact title typed at a prompt, with no `--yes`; hand the user the command.

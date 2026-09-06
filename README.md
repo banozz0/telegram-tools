@@ -20,9 +20,10 @@ Built on [Telethon](https://github.com/LonamiWebs/Telethon). Everything runs on 
 - **`create`** — makes a supergroup (optionally with topics already on), a broadcast channel, or a topic inside a forum group, and prints the new ID.
 - **`delete`** — removes a supergroup, a broadcast channel, or a forum topic: the thing itself, not just its messages. Dry-run by default; deleting requires `--execute` *and* typing the target's exact title at a prompt. It deletes exactly what `create` can make, so nothing this tool removes is beyond making again.
 - **`structure`** — a chat's shape as a file: `structure export` writes a blueprint (kind, title, description, topics, default rights, slow mode, join approval — never members, admins, messages, history or invite links), `structure diff` says what another chat would need to match it, `structure apply` makes the missing topics and settings behind the same typed-title gate `delete` has and never deletes anything on the target, and `structure remap` prints the id table an apply wrote. See [Structure blueprints](#structure-blueprints).
+- **`admin`, `member`, `join-requests`, `invite`, `settings`** — running a group or channel: list, promote, change and demote admins; list, ban, unban, mute, unmute and restrict members; approve or decline join requests; list, create and revoke invite links; show a chat's settings and set slow mode. Every write names the right it needs before it starts, and banning or demoting someone asks for their exact label at a terminal. See [Admins and members](#admins-and-members).
 - **`bots`** — lists the bots you own with their numeric IDs, and edits what @BotFather edits: display name, bio, description, commands, profile photo, and default admin rights.
 - **`doctor`** — checks your local setup without printing any secrets.
-- **`--as-bot NICK`** — runs `send`, `create topic` or a message verb as one of your own bots instead of as you, naming both on every screen. See [Acting as a bot](#acting-as-a-bot).
+- **`--as-bot NICK`** — runs `send`, `create topic`, a message verb or an administration command as one of your own bots instead of as you, naming both on every screen. See [Acting as a bot](#acting-as-a-bot).
 - **`--json`** — any command, machine-readable: one object on stdout carrying the result, the target, the gate and the error code. For agents and scripts; see [For scripts and agents](#for-scripts-and-agents).
 
 ## What it doesn't do (on purpose)
@@ -459,6 +460,39 @@ The file is `cli-tools/blueprint/telegram/1`: sorted keys, ids replaced by handl
 
 The kinds have to match — a forum blueprint applies to a forum, a channel's to a channel — and a basic group has no blueprint at all, for the reason `delete` refuses one: `create` makes supergroups, so it could never be applied back. Admin rights are held by people on Telegram, so they are on the never-transferred list rather than in the file; the administration commands set them on a person you name.
 
+## Admins and members
+
+Running a forum from a terminal means the people in it as much as the topics, and these five groups are the app's admin screens as commands:
+
+```bash
+telegram-tools admin list --chat @teamhermes
+telegram-tools admin promote --chat @teamhermes --user @harry --rights pin_messages,manage_topics --rank ops
+telegram-tools admin rights --chat @teamhermes --user @harry --rights pin_messages
+telegram-tools admin demote --chat @teamhermes --user @harry --execute          # asks for their exact label
+telegram-tools member list --chat @teamhermes --query har                       # --banned lists the banned and restricted
+telegram-tools member ban --chat @teamhermes --user @troll --reason spam --execute
+telegram-tools member mute --chat @teamhermes --user @harry --until 2h
+telegram-tools member restrict --chat @teamhermes --user @harry --rights send_media,send_stickers --until 7d
+telegram-tools member unmute --chat @teamhermes --user @harry                   # unban lifts a ban the same way
+telegram-tools join-requests list --chat @teamhermes
+telegram-tools join-requests approve --chat @teamhermes --user @newbie          # or decline
+telegram-tools invite list --chat @teamhermes                                   # the links, in full
+telegram-tools invite create --chat @teamhermes --title night --expires 7d --usage-limit 5 --request-needed
+telegram-tools invite revoke --chat @teamhermes --link https://t.me/+…
+telegram-tools settings show --chat @teamhermes
+telegram-tools settings set --chat @teamhermes --slow-mode 60                   # 0, 10, 30, 60, 300, 900 or 3600
+```
+
+Every write shows who acts, on whom, in which chat, and what changes, then asks. Two of them are `delete`'s gate, because they take something away from a person rather than adding to a chat: `member ban` and `admin demote` dry-run by default, take `--execute`, ask you to type the person's exact label (`@harry`, or their name when they have no username), refuse without a terminal in either mode, and have no `--yes`. Everything else asks `y/N` and has no `--yes` either — no allowlist exists for an admin action, so nothing here ever runs unattended.
+
+Before anything is sent, the tool asks Telegram what rights your account holds in the chat and refuses by name when the one it needs is missing (`ban_users` for the member verbs, `add_admins` for the admin ones, `invite_users` for join requests and links, `change_info` for settings). The hierarchy is checked the same way: an admin can give only rights it holds and edit only an admin who holds no more than it does, the creator can do anything, and a grant or edit outside that refuses with `HIERARCHY_DENIED` naming both rights sets before the call. Banning an admin is refused too and names `admin demote`. After you answer the gate, the chat and the person are looked up a second time — someone promoted in that window refuses with `PLAN_DRIFT` — and afterwards the person is read back and their new status reported.
+
+Telegram stores no reason beside a ban. `--reason` is kept in the plan, the readback and the line `member ban` appends to `~/.telegram-tools/audit.jsonl`, and that local line is the only record of why. Mutes and restrictions are bounded: `--until` is required, takes a duration (`30m`, `2h`, `7d`, `1w`) or an ISO date or time, and has to be at least a minute ahead and at most a year, because Telegram treats anything longer as forever and a restriction with no end is a ban under another name.
+
+Invite links are credentials to a chat, so they appear only where you asked for them: `invite list` and `invite create` print them and carry them in `result`. Every other screen, envelope field and audit line goes through the same redaction pass as a token, which blanks a link — including the one you handed to `invite revoke`.
+
+Under `--as-bot` all five groups run as the bot, where the bot is an admin of the chat; a bot that is a plain member refuses with `IDENTITY_MODE_UNSUPPORTED` before any preview, and a bot admin without the specific right is refused by name like the account would be. A basic group is refused (`PLATFORM_UNSUPPORTED`): every call here is a supergroup call, and Telegram itself upgrades a basic group the moment you change a setting on it in the app.
+
 ## The menu
 
 Run `telegram-tools` with no arguments and you get a menu instead of flags:
@@ -558,7 +592,7 @@ telegram-tools --json send --chat -1001234567890 --topic 141 --text "deploy is g
 - **Everything a person would read moves to stderr** under either flag — tables,
   previews, progress, prompts — so stdout stays parseable.
 - **`error.code` is stable.** `NOT_ALLOWLISTED`, `TARGET_NOT_FOUND`,
-  `TARGET_KIND_MISMATCH`, `PERMISSION_DENIED`, `PLAN_DRIFT`, `APPROVAL_REQUIRED`, `BULK_LIMIT`,
+  `TARGET_KIND_MISMATCH`, `PERMISSION_DENIED`, `HIERARCHY_DENIED`, `PLAN_DRIFT`, `APPROVAL_REQUIRED`, `BULK_LIMIT`,
   `SESSION_IN_USE`, `CONFIG_MISSING`, `CONFIG_INVALID`, `LOGIN_REQUIRED`,
   `RATE_LIMITED` and others. `error.hint` is the exact command or edit that
   would fix it — worth relaying verbatim.
@@ -575,6 +609,13 @@ telegram-tools --json send --chat -1001234567890 --topic 141 --text "deploy is g
   is the same answer behind the live command's flags. A `--json archive sync` carries
   the coverage table in `result.scopes` and `result.skipped`, one entry per scope,
   and `result.manifests` counts the links and files it noted for review.
+- **The administration reads are safe to run** (`admin list`, `member list`,
+  `join-requests list`, `invite list`, `settings show`): they read a chat and change
+  nothing; `result.admins[]`, `result.members[]` and `result.requests[]` carry ids,
+  labels, statuses and rights, and `invite list` carries the links, which no other
+  envelope does. `member ban` and `admin demote` are not for an agent to drive: each
+  asks a person for the exact label at a terminal, refuses without one
+  (`APPROVAL_REQUIRED`, exit 3, in either mode), and has no `--yes`.
 - **`review list` and `review status` are offline too**, and the answer is safe to
   read: `result.candidates[].url` is the link exactly as the message wrote it, never
   resolved. `review approve` and `review accept` are not for an agent to drive: each
@@ -588,7 +629,7 @@ Exit codes, unchanged apart from one addition:
 | 0 | done — `ok`, `empty`, `dry_run` |
 | 1 | not done — cancelled at a gate, a declined confirm, `partial` (`doctor` with a failed check) |
 | 2 | refused — usage, config, permission, a platform error |
-| 3 | **new:** the command asks for confirmation and there is no terminal to ask on. Under `--json`, and for `review approve`, `review accept`, `review reject` and `structure apply --execute` in either mode; `error.hint` is the same command for a human to run |
+| 3 | **new:** the command asks for confirmation and there is no terminal to ask on. Under `--json`, and for `review approve`, `review accept`, `review reject`, `structure apply --execute`, `member ban --execute` and `admin demote --execute` in either mode; `error.hint` is the same command for a human to run |
 | 130 | interrupted |
 
 `discover --json out.json` and `bots --json out.json` still write those files
@@ -596,8 +637,9 @@ exactly as before; a bare `--json` on either means the envelope. A run whose
 output goes to a file prints no `Acting as:` banner, so its stdout stays what it
 has always been: empty.
 
-`--as-bot NICK` goes before the subcommand too and runs `send`, `create topic` or a
-message verb (all but `read`, `unread`, `bookmark` and `draft`) as that bot; any other
+`--as-bot NICK` goes before the subcommand too and runs `send`, `create topic`, a
+message verb (all but `read`, `unread`, `bookmark` and `draft`) or an administration
+command (where the bot is an admin of the chat) as that bot; any other
 command under it refuses with `IDENTITY_MODE_UNSUPPORTED`
 and the same command minus the flag as the hint. An agent should pass it only
 when the user named the bot.
@@ -618,6 +660,9 @@ for a code or a password. Relay the refusal and let the person run it.
 | `review approve`, `review retry` | Outward-facing — after a `y/N` at a terminal, contacts the link's host (redirects walked one `HEAD` at a time) or reads the file through your login, into quarantine, through eleven checks and the scanner. No `--yes`; refuses without a terminal (`APPROVAL_REQUIRED`, exit 3) |
 | `review accept`, `review reject` | Local only — move a quarantined file into `media/` after showing its verdict, or delete the quarantined bytes; each after a `y/N`, no `--yes`. `BLOCKED` and `INFECTED` can never be accepted |
 | `structure export`, `structure diff`, `structure remap` | No — export and diff read one chat and write a local file or a screen; remap reads the local archive and never connects |
+| `admin list`, `member list`, `join-requests list`, `invite list`, `settings show` | No — read the chat's people, requests, links or settings; `invite list` shows the links you asked for |
+| `admin promote`, `admin rights`, `member unban`, `member mute`, `member unmute`, `member restrict`, `join-requests approve/decline`, `invite create`, `invite revoke`, `settings set` | Visible to the chat — each shows who acts, on whom and what changes, then asks `y/N`; there is no `--yes`. A missing right, or a right the account cannot grant, refuses by name before the call; mutes and restrictions need `--until`, a minute to a year |
+| `member ban`, `admin demote` | Yes — a person's membership or a person's rights, for everyone. Dry-run by default; only with `--execute` **and** the person's exact label typed at a terminal, in either mode; there is no `--yes`. A ban's `--reason` is kept in the local audit line, because Telegram stores none |
 | `structure apply` | Additive on the target — makes topics and sets the chat's settings, never deletes a topic, a setting or the chat. Dry-run by default; executing needs `--execute` **and** the target's exact title typed at a terminal, in either mode; there is no `--yes`. `--create` makes a new chat of the blueprint's kind first |
 | `archive retention`, `archive forget` | Local only — prune or remove rows of the local archive, never anything on Telegram. Dry-run by default; executing needs `--execute` **and** the scope's exact title typed back; there is no `--yes` |
 | `auth` | Local only — writes or removes this machine's login. `--logout` needs the profile's name typed back, `--migrate` a `y/N`; there is no `--yes`, and it cannot run unattended. Nothing it asks for is stored: a two-step-verification password goes straight into the sign-in call |
@@ -633,7 +678,7 @@ for a code or a password. Relay the refusal and let the person run it.
 
 `bots` refuses to edit a bot you do not own, and it never fetches or exports a bot token from Telegram — the three token-only edits simply fail with a message naming the fields they need one for.
 
-Every write — sending, a message verb, creating, clearing, deleting, applying a blueprint, editing a bot — now also
+Every write — sending, a message verb, creating, clearing, deleting, applying a blueprint, an admin or member change, editing a bot — now also
 asks Telegram what rights your account actually holds in that chat before it
 does anything, and refuses by name when one it needs is missing. Once you have
 answered the gate, the target is resolved a second time and compared with the

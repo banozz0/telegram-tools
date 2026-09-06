@@ -73,7 +73,9 @@ The terms this codebase uses, and the boundaries they imply.
   count typed above 1000; every other message verb = `send`'s gate, with
   `--yes` bound to the chat the write *lands in*; `structure apply` = dry-run
   default + `--execute` + the target's exact title, no `--yes`, a terminal
-  required in either mode. The menu builds the same args the flags would and never sets
+  required in either mode; `member ban` and `admin demote` = the same gate on
+  a person, their exact label typed; every other administration write = a
+  `y/N` with no `--yes`. The menu builds the same args the flags would and never sets
   `yes`/`execute` itself — it is never a shorter path past a gate.
 - **Message verb** — one of the fifteen things `message` does to a message
   (`messages.VERBS`). Each is an `Op`: its approval kind, the rights its plan
@@ -183,11 +185,11 @@ The terms this codebase uses, and the boundaries they imply.
   terminal; `tests/test_columns.py` carries the fourteen measured shapes.
   `cell` cuts to fit (a picker row must stay one line), `pad` never cuts (a
   tree's reader came for the name).
-- **Reserved row** — a root-menu number that names a capability a later
-  version brings (`Manage`). It is on the menu now so that every row above and
-  below it keeps its number when that version lands; picking it says which
-  version fills it and comes straight back. `Watch` held its number the same
-  way until the review queue filled it; rules and the runner join it there.
+- **Reserved row** — a root-menu number held for a capability a later version
+  brings, so that every row above and below it keeps its number when that
+  version lands. `Manage` and `Watch` were both held this way; `Watch` was
+  filled by the review queue and `Manage` by the administration groups, and
+  none is reserved now, though `Watch` still waits for rules and the runner.
 - **Candidate** — one link or one file a sync saw, as the review queue holds
   it: a `manifests` row of kind `link` (the URL exactly as the message wrote
   it) or `media` (Telegram's own file key, `document:ID` or `photo:ID`, as the
@@ -266,6 +268,46 @@ The terms this codebase uses, and the boundaries they imply.
   archive's `remaps` table under its `apply_id`, one row per minted or matched
   id, each its own transaction. `structure remap --apply-id` prints them
   offline.
+- **Administration verb** — one of the eighteen things the five groups do
+  (`manage.OPS`, keyed by group and verb): `admin list/promote/rights/demote`,
+  `member list/ban/unban/mute/unmute/restrict`, `join-requests
+  list/approve/decline`, `invite list/create/revoke`, `settings show/set`. Each
+  `Op` names its approval kind (None for a read), the right its plan states,
+  the mutation op the plan records and whether it names a person. The calls
+  are `adapters/manage.py`; `cli._run_manage` is the one handler.
+- **Member** — one participant as the screens and the hierarchy rule see them
+  (`manage.Member`): id, label, username, a status (`creator`, `admin`,
+  `member`, `restricted`, `banned`, `left`, `none` for someone not in the
+  chat), the rights that are on, a rank, an `until`. Read off the participant
+  object Telegram returns (`adapters/manage.member_of`).
+- **Typed label** — the gate `member ban` and `admin demote` share with
+  `delete`: dry-run by default, `--execute`, and the person's exact label typed
+  back — their `@username`, or their name when they have none, either with or
+  without the `@`, case-insensitively. No `--yes`, and a terminal in either
+  mode, because a person's membership or rights is a container's worth of
+  consequence. The re-derivation after the gate compares the chat's title and
+  the person's status, so someone promoted in the window is `PLAN_DRIFT`.
+- **Hierarchy** — section 7's second refusal, `HIERARCHY_DENIED`
+  (`manage.require_hierarchy`): an admin gives only rights it holds, and edits
+  only an admin holding no more than it does and whom Telegram marks editable
+  by it; the creator is never refused; banning or restricting an admin is
+  refused and names `admin demote`. Checked after the preflight and before the
+  gate, naming both rights sets, because Telegram would refuse after the call
+  without saying which right was short.
+- **Bounded restriction** — `member mute` and `member restrict` need
+  `--until` (`manage.parse_until`): a duration (`30m`, `2h`, `7d`, `1w`) or an
+  ISO date or time, at least a minute ahead and at most a year, because
+  Telegram reads more than a year as forever and a restriction with no end is
+  a ban under another name. Without it the command is a usage error, exit 2.
+- **Local reason** — a ban's `--reason`. Telegram has no reason field beside a
+  ban (section 16's exception), so the reason goes into the mutation's
+  params, the readback and the audit line, and the docs say that line is the
+  only record.
+- **Invite link** — a credential to a chat, and the one thing the shared
+  redaction blanks that a command can legitimately need to print. `invite
+  list` and `invite create` show links and carry them in `result` through
+  `Reporter.result(show_invites=True)`; every other screen, envelope field and
+  audit line, `invite revoke`'s own included, goes through the redaction.
 - **Trail** — the breadcrumb a screen's title carries (`Main › Clear › Ops`),
   built by `ui.crumb`. A flow passes its own trail down; a screen never invents
   one.
@@ -306,8 +348,9 @@ The terms this codebase uses, and the boundaries they imply.
   re-derives it.
 - **Approval kind** — which gate a write needs, one of four: `prompt_y`,
   `typed_delete` (messages inside a container that survives), `typed_name` (the
-  container itself), `yes_allowlist` (the unattended path, where an allowlist
-  exists — only `send` has one).
+  container itself, or a person's membership or rights), `yes_allowlist` (the
+  unattended path, where an allowlist exists — only `send` and the message
+  verbs have one; no administration write does).
 - **Preflight** — the rights a plan needs against the rights the account holds.
   The distinction that matters is between a right Telegram reports as absent,
   which refuses the write by name, and one it will not answer for at all — a
