@@ -1,4 +1,5 @@
 import asyncio
+from pathlib import Path
 
 from telegram_tools import menu
 from telegram_tools._core.columns import width
@@ -1568,3 +1569,74 @@ def test_a_command_s_own_output_is_not_treated_as_a_screen():
     plain = "chat  -100111\n" + menu.RULE + "\nmore output"
 
     assert menu._screen_with_banner(plain, "Acting as: X · account") == plain
+
+
+# -- the two laws the regroup must not break ---------------------------------
+
+MENU_SOURCE = (Path(menu.__file__)).read_text(encoding="utf-8")
+
+# A flag the menu deliberately has no row for, and why. Section 14: "every flag
+# has a row" -- these are the named exceptions to it, not an escape hatch.
+NO_ROW = {
+    # Output modes belong to a script, not to a person at a menu.
+    "json_envelope": "the envelope is for --json callers; the menu is the human path",
+    "jsonl": "same",
+    # A global that selects the login before the menu opens; `run_menu` takes it.
+    "profile": "chosen before the menu starts, and named on every screen instead",
+    # The whole point of the menu's safety story.
+    "yes": "the menu never skips a confirm; that is the gate rule",
+    "help": "argparse's own",
+}
+
+
+def _flag_dests():
+    """Every flag every subcommand defines, by the attribute it sets."""
+    from telegram_tools.cli import build_parser
+
+    parser = build_parser()
+    found: dict[str, str] = {}
+
+    def walk(p, trail):
+        for action in p._actions:
+            if action.dest in ("==SUPPRESS==",):
+                continue
+            if action.choices and hasattr(action, "_name_parser_map"):
+                for name, sub in action._name_parser_map.items():
+                    walk(sub, f"{trail} {name}".strip())
+                continue
+            found.setdefault(action.dest, trail or "(root)")
+
+    walk(parser, "")
+    return found
+
+
+def test_every_flag_has_a_row_in_the_menu_or_a_named_reason_not_to():
+    """Section 14's rule, checked against the parser rather than remembered.
+
+    A dest the menu never names is a flag no menu row can reach, which is how a
+    capability quietly becomes flags-only. The exceptions are listed above with
+    their reasons; anything else fails here.
+    """
+    missing = []
+    for dest, where in sorted(_flag_dests().items()):
+        if dest in NO_ROW or dest == "command":
+            continue
+        if dest not in MENU_SOURCE:
+            missing.append(f"{dest} (from `{where}`)")
+
+    assert not missing, (
+        "the menu reaches no row for: " + ", ".join(missing) + ". Section 14: every flag has a row. "
+        "A flag that deliberately has none belongs in NO_ROW with its reason."
+    )
+
+
+def test_the_menu_never_builds_a_skipped_confirm():
+    """The gate rule, as a property of the source rather than of one journey.
+
+    `--yes` skips a preview; the menu is not allowed to be the shorter path past
+    one. Every namespace it builds leaves `yes` False, and the typed gates
+    (`DELETE`, an exact title, a profile name) are answered in the CLI, on the
+    same prompt a flag user sees.
+    """
+    assert "yes=True" not in MENU_SOURCE
+    assert "yes = True" not in MENU_SOURCE
