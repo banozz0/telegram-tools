@@ -1,13 +1,13 @@
 ---
 name: telegram-tools
-description: "Use when you need the real numeric ID of a Telegram chat, channel, group or forum topic — 'what's the ID of that topic?', 'which chat is -100…?', 'where do I send this?' — when the user wants their own Telegram messages searched or exported to JSON/CSV, or when a message must be posted to a chat or topic the user has allowlisted."
-version: 1.6.0
+description: "Use when you need the real numeric ID of a Telegram chat, channel, group or forum topic — 'what's the ID of that topic?', 'which chat is -100…?', 'where do I send this?' — when the user wants their own Telegram messages searched or exported (JSON, CSV, JSONL, Markdown, HTML), when a history question can be answered from the local archive instead of a fresh fetch, or when a message must be posted to a chat or topic the user has allowlisted."
+version: 1.7.0
 author: banozz0
 license: MIT
 platforms: [macos]
 metadata:
   hermes:
-    tags: [telegram, chat-ids, topic-ids, forum, search, export, send, cli]
+    tags: [telegram, chat-ids, topic-ids, forum, search, archive, export, send, cli]
 ---
 
 # telegram-tools
@@ -47,6 +47,13 @@ their screen — a chat ID, a channel ID, a forum topic (thread) ID — or when 
 their own message history searched, filtered or exported. It is the fastest way to
 settle "which thread does this go to?", which is the single most common cause of a
 message being delivered into a topic nobody reads.
+
+It also keeps a **local archive**: `archive sync` copies what the account can read
+into a searchable file on the user's machine, and `archive search` answers a history
+question from it with no connection, no flood-wait and full-text ranking. When the
+question is about the past — "when did we decide X?", "find every mention of Y" —
+the archive is the cheap way to answer it; the live `search` is for what happened
+since the last sync, or a chat the archive does not hold yet.
 
 It can also **send** a message and **create** — or **delete** — a group, channel or topic. Those write
 to Telegram as the user, so rules 2 and 3 below govern them — read those before
@@ -178,7 +185,13 @@ names the files).
 | "give me that as a file" | `telegram-tools discover --json /path/out.json` |
 | "find where X was discussed" | `telegram-tools search --chat <id> --keyword "X"` |
 | "everything in that topic since Monday" | `telegram-tools search --chat <id> --topic <topic-id> --since 2026-08-10` |
-| "export it" | `telegram-tools search --chat <id> --format csv --output /path/out.csv` |
+| "export it" | `telegram-tools search --chat <id> --format csv --output /path/out.csv` (also `jsonl`, `markdown`, `html`) |
+| "when did we talk about X?" / anything about the past | `telegram-tools --json archive search --query "X" --context 2` — offline, ranked, marked `«…»` |
+| "is the archive up to date?" / "what's in it?" | `telegram-tools --json archive status` — offline |
+| "archive my chats" / the archive is stale or empty | `telegram-tools --json archive sync` — read-only against Telegram, resumes, may take a while; `--scope tg:chat:<id>` for one chat |
+| "give me everything about X as a file" | `telegram-tools --json archive export --query "X" --format markdown --output /path/out.md` |
+| the live `search` flags, but from the archive | `telegram-tools --json search --archive --chat <id> --keyword "X"` |
+| "prune / forget the archive" | hand them `telegram-tools archive retention --scope <rid> --keep 90d --execute` or `archive forget --scope <rid> --execute` — they type the title, you do not |
 | "post this to that topic" (allowlisted) | `telegram-tools send --chat <id> --topic <topic-id> --text "..." --yes` |
 | a long or multi-line message | pipe it: `... \| telegram-tools send --chat <id> --text - --yes` |
 | "send them that file" (allowlisted) | `telegram-tools send --chat <id> --file /path/to/file --text "caption" --yes` |
@@ -201,6 +214,21 @@ names the files).
 - **`[media]` in a `search` row means a photo or file is attached.** A media-only
   message has no text at all, so without that marker the row looks empty and reads
   as "nothing is there". `--format json` carries the same fact as `has_media`.
+- **`archive search` is offline and `--query` is FTS5 syntax**: words, `"a phrase"`,
+  `AND`, `OR`, `NOT`, `prefix*`. Punctuation inside a bare word (a hyphen, a dot) is
+  syntax to FTS5, so quote it: `--query '"v3.4.1"'`. `--scope <rid>`, `--from
+  tg:user:<id>`, `--since`/`--until`, `--regex` and `--context N` narrow or widen it;
+  `result.messages[].highlight` carries the match marked `«…»`, `context_before` and
+  `context_after` the neighbours. An empty answer on a fresh machine usually means
+  no sync has run: `archive status` says, and `result.coverage` on a sync names every
+  scope it could not read and why.
+- **`archive sync` is the one archive command that connects.** It reads history and
+  writes only the local file; it never posts, edits or deletes anything on Telegram,
+  so it is fine to run when the user asked for the archive or a history question
+  needs it. It can take minutes on a large account and honours flood-waits by
+  sleeping — `meta.waited_ms` says how long. `status` is `partial` and the exit code
+  1 when a scope failed; the rest still landed. Under `--as-bot` every archive
+  command refuses with `IDENTITY_MODE_UNSUPPORTED`: a bot cannot read history.
 - **`search` requires `--chat`.** Accepts a username, a link, or the numeric ID.
   Narrow with `--topic`, `--keyword`, `--from-user` (a username, an ID, or `me`),
   `--since` / `--until` (ISO dates), and `--limit`. With no `--output` it prints a
@@ -254,6 +282,10 @@ names the files).
   back.
 - **`auth`** — the login itself, in every form. Rule 6 above. `profiles` is the
   read-only half and is fine to run.
+- **`archive retention` and `archive forget`** — they remove rows from the user's
+  local archive. Dry-run is the default and executing needs `--execute` plus the
+  scope's exact title typed at a prompt, with no `--yes`; hand the user the command.
+  The dry-run (no `--execute`) is safe to run to show them what would go.
 - **`bots`** — it edits a live bot's name, bio, description, commands, profile photo
   and default admin rights. Those are the user's public-facing bots; the edits are
   theirs to make. Check `--help` for whether the installed build has it at all.

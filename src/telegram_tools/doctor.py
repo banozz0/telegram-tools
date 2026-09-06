@@ -8,7 +8,10 @@ from typing import Mapping
 
 from dotenv import dotenv_values
 
+from telegram_tools import archive as archive_store
 from telegram_tools import profiles, proxy
+from telegram_tools._core.archive import fts5_report
+from telegram_tools._core.config import human_bytes
 from telegram_tools.config import ConfigError, config_dir, parse_bot_tokens, parse_send_allowlist
 
 
@@ -142,6 +145,30 @@ def require_tight_modes(home: Path | None = None) -> None:
     )
 
 
+def check_search_index() -> DoctorCheck:
+    """Whether the SQLite this Python links has FTS5, which the archive is built on."""
+    report = fts5_report()
+    if report["available"]:
+        return DoctorCheck("OK", f"Archive search: {report['detail']}")
+    return DoctorCheck("FAIL", f"Archive search: {report['detail']} (install a Python whose SQLite has FTS5)")
+
+
+def check_archive(home: Path | None = None) -> DoctorCheck:
+    """What the local archive holds and how much of its budget it takes. Reads the file; migrates nothing."""
+    usage = archive_store.budget_usage(home)
+    if usage is None:
+        return DoctorCheck("WARN", "No archive yet (run `telegram-tools archive sync` to make one)")
+    if "error" in usage:
+        return DoctorCheck("FAIL", f"The archive could not be read: {usage['error']}")
+    budget = usage["budgets"][0]
+    status = "FAIL" if budget["over"] else "OK"
+    return DoctorCheck(
+        status,
+        f"Archive: {usage['messages']} message(s) in {usage['scopes']} scope(s), "
+        f"{human_bytes(usage['bytes'])} of the {budget['limit']} archive_max_bytes budget ({budget['percent']}%)",
+    )
+
+
 def _effective_env(root: Path, env: Mapping[str, str], home: Path | None = None) -> dict[str, str]:
     merged: dict[str, str] = {}
     for path in (config_dir(home) / ".env", root / ".env"):
@@ -221,6 +248,8 @@ def run_doctor(
         check_proxy(root, env, home),
         check_bot_tokens(root, env, home),
         check_send_allowlist(root, env, home),
+        check_search_index(),
+        check_archive(home),
     ]
 
     for check in checks:

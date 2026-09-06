@@ -4,6 +4,24 @@ All notable changes to this project will be documented here.
 
 This project follows a practical changelog style: user-visible changes, safety changes, and release notes belong here; active task tracking belongs outside the repo.
 
+## 3.11.0 - 2026-09-06
+
+- **A local archive of your chats.** `telegram-tools archive sync` copies what your account can read into `~/.telegram-tools/archive.sqlite` — every chat, and every topic of every forum group — and resumes where it stopped: a sync killed halfway restarts from the last committed batch and never writes a row twice, and a second run fetches only what arrived since. One progress line per scope, then a coverage table naming every scope it could not read and why (`no_access`, `unsupported_kind`, `rate_limited`). `--scope tg:chat:ID` or `tg:topic:ID:TOPIC` narrows it, `--since` bounds it, `--full` walks everything from the top again. It is read-only against Telegram; flood waits are slept and counted in the envelope's `meta.waited_ms`.
+
+- **Search it offline.** `archive search --query "deploy AND green"` is full-text search over everything synced, ranked by relevance, with the match marked `«like this»` — no connection, no flood wait. `--regex` post-filters, `--scope`, `--identity`, `--from`, `--since` and `--until` narrow it, `--context N` shows the messages around each hit. `archive export --format json|csv|jsonl|markdown|html --output NAME` writes the same rows the search printed, in the same order, all five formats agreeing; a bare name lands in `~/.telegram-tools/exports/`, an absolute path is honoured. The HTML is one self-contained page with no scripts.
+
+- **`search --archive` answers the live command's flags from the archive.** `--chat` (a numeric id or `@username` the archive has synced), `--topic`, `--keyword`, `--from-user`, `--since`, `--until`, `--limit`, `--format` and `--output` all mean what they always did, and nothing connects. It is the documented alias of `archive search` for a script that already speaks `search`.
+
+- **`search --format` gains `jsonl`, `markdown` and `html`.** `json` and `csv` are written byte for byte as before. The two human formats go through the same writers as the archive export, so a live export and an archive export read the same.
+
+- **`archive status`** prints scopes, rows, oldest and newest, size against the 2 GiB `archive_max_bytes` budget in `~/.telegram-tools/config.json` (created with the defaults on first use) and the coverage summary. `doctor` now also says whether your Python's SQLite has FTS5 — the archive is built on it and refuses with `ARCHIVE_UNAVAILABLE` without it — and how full the archive is.
+
+- **`archive retention --scope RID --keep 90d|N` and `archive forget --scope RID | --identity ID`** prune and remove, dry-run by default, and execute only with `--execute` plus the scope's exact title typed back — the same gate `delete` has, for the same reason, and with no `--yes` either. Each executed one leaves a line in the audit log.
+
+- **The menu's Read row** now opens a screen of six: the live search, sync, status, search or export, prune and forget. The root's nine rows and their numbers do not move. `--as-bot` refuses every archive command with `IDENTITY_MODE_UNSUPPORTED`: a bot cannot read history.
+
+- **A sync or prune refuses while the tool's own files are readable by others**, like every other write here; the archive and its config are created 0600 and the exports directory 0700.
+
 ## 3.10.0 - 2026-09-06
 
 - **Act as one of your bots, explicitly.** `telegram-tools --as-bot alerts send --chat -100… --text "…"` posts as the bot whose token is stored under the nickname `alerts` in `TELEGRAM_BOT_TOKENS` — the same nicknames `bots --bot` has always used. The token opens an in-memory session and is never written to disk. Every screen names both: `Acting as: @alertsbot · bot (via Sven (@sven)) · Target: …`, and the `--json` envelope's `identity` carries `mode: "bot"`, `id: "tg:bot:…"` and `via: "tg:user:…"` — the account it belongs to. The send preview says `Sending as @alertsbot (via Sven (@sven))`. Without `--as-bot` nothing differs from before.

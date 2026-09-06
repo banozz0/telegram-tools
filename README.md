@@ -2,7 +2,7 @@
 
 [![Site: cli-tools-site.vercel.app](https://img.shields.io/badge/site-cli--tools--site.vercel.app-00afff?style=flat-square&labelColor=09090b)](https://cli-tools-site.vercel.app/)
 
-A local CLI for your own Telegram chats: find the real IDs of your groups, channels and forum topics, search and export messages, send a message into a chat or topic, and create and delete groups, channels and topics.
+A local CLI for your own Telegram chats: find the real IDs of your groups, channels and forum topics, search and export messages, keep a local archive of them you can search offline, send a message into a chat or topic, and create and delete groups, channels and topics.
 
 It also empties a forum topic without destroying the topic itself — the one job the app will not do.
 
@@ -11,7 +11,8 @@ Built on [Telethon](https://github.com/LonamiWebs/Telethon). Everything runs on 
 ## What it does
 
 - **`discover`** — lists your chats, channels, and forum groups with their exact numeric IDs and every forum topic ID. The fastest way to answer "what is this chat's `-100…` ID and what are its topic IDs?"
-- **`search`** — searches messages by text, sender, date range, or topic, and prints a table or exports JSON/CSV. Messages carrying a photo or file are marked `[media]`.
+- **`search`** — searches messages by text, sender, date range, or topic, and prints a table or exports JSON, CSV, JSON lines, Markdown or HTML. Messages carrying a photo or file are marked `[media]`. `search --archive` answers the same flags from the local archive, offline.
+- **`archive`** — a local, searchable copy of everything your account can read: `archive sync` fills it and resumes where it stopped, `archive search` is full-text search over it with no connection, `archive export` writes one search in five formats, `archive status` says what it holds, and `archive retention` / `archive forget` prune it behind the same typed-title gate `delete` has. See [The local archive](#the-local-archive).
 - **`clear-messages`** — deletes all messages inside selected forum topic(s) while preserving the topics and their IDs. Dry-run by default; deleting requires both `--execute` *and* typing `DELETE` at a prompt.
 - **`send`** — posts a message, a file, or both to a chat or into one forum topic. Shows you the whole message and its destination, then asks `y/N`.
 - **`create`** — makes a supergroup (optionally with topics already on), a broadcast channel, or a topic inside a forum group, and prints the new ID.
@@ -24,7 +25,7 @@ Built on [Telethon](https://github.com/LonamiWebs/Telethon). Everything runs on 
 ## What it doesn't do (on purpose)
 
 - No deleting forum topics, and no renaming them — `clear-messages` leaves topic IDs untouched.
-- No media downloads. `send` can attach files; nothing downloads them back.
+- No media downloads. `send` can attach files; nothing downloads them back — the archive keeps text and a `has_media` mark, never the files.
 - No automation loops. The `bots` command edits bot *settings*; it never runs a bot.
 - No changing a bot's `@username`, creating or deleting bots, or reading/revoking bot tokens — those stay with @BotFather.
 - No cloud anything — credentials and session files stay in `~/.telegram-tools/`.
@@ -215,8 +216,14 @@ telegram-tools --profile work discover
 # Search a group
 telegram-tools search --chat @mygroup --contains deploy
 
-# Export a topic to JSON
+# Export a topic to JSON (or --format csv|jsonl|markdown|html)
 telegram-tools search --chat @mygroup --topic 141 --output topic-141.json
+
+# Keep a local copy of everything, then search it without touching Telegram
+telegram-tools archive sync
+telegram-tools archive search --query "deploy AND green" --context 2
+telegram-tools archive export --query deploy --format html --output deploys.html
+telegram-tools search --archive --chat @mygroup --keyword deploy   # the live flags, answered offline
 
 # Clear a topic (dry-run first — this is the default)
 telegram-tools clear-messages --chat @mygroup --topic 141
@@ -273,6 +280,41 @@ Topics
 16    General
 ```
 
+## The local archive
+
+`archive sync` copies what your account can read into `~/.telegram-tools/archive.sqlite`:
+every chat, and every topic of every forum group (a forum's messages all live in topics,
+so the topic is the unit, never the group). It walks each scope from the newest message
+down and commits in batches, so a sync you kill halfway restarts from the last batch
+that landed and never writes a row twice; a second run fetches only what arrived since.
+It prints one line per scope and ends with a coverage table naming every scope it could
+not read and why. Flood waits are slept and counted, and a wait longer than ten minutes
+marks that scope failed rather than holding the run.
+
+```bash
+telegram-tools archive sync                                   # everything, resuming
+telegram-tools archive sync --scope tg:topic:-1001234567890:141 --since 2026-06-01
+telegram-tools archive status
+telegram-tools archive search --query "deploy AND green" --regex '3\.\d+' --context 2
+telegram-tools archive export --query deploy --format markdown --output deploys.md
+telegram-tools archive retention --scope tg:chat:-1001234567890 --keep 90d   # dry-run
+telegram-tools archive forget --scope tg:chat:-1001234567890 --execute        # asks for the title
+```
+
+`archive search` is FTS5 full-text search — words, `"a phrase"`, `AND`, `OR`, `NOT`,
+`prefix*` — ranked by relevance and marked `«like this»` on screen, and it never
+connects. `archive export` writes the same rows the search printed in `json`, `csv`,
+`jsonl`, `markdown` or `html` (one self-contained page, no scripts); a bare `--output`
+name lands in `~/.telegram-tools/exports/`, an absolute path is honoured. `search
+--archive` takes the live command's flags and answers them from the archive.
+
+The archive is per profile's account, not per profile: every row records which
+identity synced it, and `--identity tg:user:ID` narrows a search or a status to one.
+It lives under a 2 GiB budget (`archive_max_bytes` in `~/.telegram-tools/config.json`,
+written with the defaults on first use); a sync that would cross it stops before
+writing with `DISK_BUDGET` and names the retention command that frees space. The
+archive needs a Python whose SQLite has FTS5 — `doctor` says whether yours does.
+
 ## The menu
 
 Run `telegram-tools` with no arguments and you get a menu instead of flags:
@@ -282,7 +324,7 @@ telegram-tools
 Acting as: Sven (@sven) · account
 --------------------------------------------
 1. Find IDs (chats, topics)
-2. Read (search, export)
+2. Read (search live, archive, export)
 3. Write (send)
 4. Build (create, delete)
 5. Clear messages
@@ -300,7 +342,7 @@ needing credentials, and `Check setup` never needs any.
 
 `0` always steps back one screen — inside a picker or on a flow's own screen alike —
 and exits once you're back at the root; on a text prompt a blank line does the same.
-Every screen below the root carries its trail (`Main › Search › Hermes › From`), so
+Every screen below the root carries its trail (`Main › Read › Search › Hermes › From`), so
 you always know where you are. Chats, topics, bots, and admin rights come from live
 pick-lists rather than prompts asking you to type an ID; long lists page on `n` and
 `p`, and an item keeps its number on every page. Bot fields show their current value
@@ -313,7 +355,9 @@ the menu, `0` still exits, and `doctor` keeps the plain Enter/`0` prompt. Backin
 a form with something typed in it — a message, search filters, bot edits — asks first.
 Every flag has a row:
 the clear screen offers *All topics* and a batch size, the bots screen can save the
-whole bot list to JSON and look up a bot you do not own, read-only.
+whole bot list to JSON and look up a bot you do not own, read-only, and *Read* opens
+a screen of six — the live search, then sync, status, search or export, prune and
+forget for the archive, whose scope picker is the archive's own list of what it holds.
 
 The menu is in colour when it is talking to a terminal, and plain text in a pipe, under
 `NO_COLOR`, or with `TERM=dumb`.
@@ -323,7 +367,8 @@ a multi-line message works instead of feeding its later lines to the menu as ans
 
 The safety gates are the same as the flags', not looser: clearing topic messages
 dry-runs first and still asks you to type `DELETE`, deleting a group, channel or topic
-dry-runs first and still asks you to type its exact title, sending shows the whole
+dry-runs first and still asks you to type its exact title, pruning or forgetting part
+of the archive dry-runs first and asks for the scope's title too, sending shows the whole
 message and asks `y/N`, and bot edits still print a diff and ask before writing. The
 menu has no equivalent of `--yes` at all. With no terminal attached it prints this help instead.
 
@@ -370,8 +415,14 @@ telegram-tools --json send --chat -1001234567890 --topic 141 --text "deploy is g
   from, and `target` what it acted on. Under `--as-bot` its `mode` is `bot`, its
   `id` is `tg:bot:…` and `via` is the account's `tg:user:…`. Neither ever carries
   a phone number, a token or a session path.
-- **`meta.api_calls` and `meta.waited_ms` are not measured yet** and report 0.
-  They are in the schema because both tools share it; a later release fills them.
+- **`meta.waited_ms` is the flood-wait time an `archive sync` slept**; every other
+  command reports 0 there, and `meta.api_calls` is not measured yet by any.
+- **The archive commands are offline** except `archive sync`: `status`, `search`,
+  `export`, `retention` and `forget` read `~/.telegram-tools/archive.sqlite` and
+  open no connection, so they never wait on Telegram and never see a flood-wait.
+  `archive search` is the cheap way to answer a history question; `search --archive`
+  is the same answer behind the live command's flags. A `--json archive sync` carries
+  the coverage table in `result.scopes` and `result.skipped`, one entry per scope.
 
 Exit codes, unchanged apart from one addition:
 
@@ -403,7 +454,9 @@ for a code or a password. Relay the refusal and let the person run it.
 
 | Command | Destructive? |
 | --- | --- |
-| `discover`, `search`, `doctor`, `profiles` | No — read-only |
+| `discover`, `search`, `doctor`, `profiles`, `archive status`, `archive search`, `archive export` | No — read-only |
+| `archive sync` | Read-only against Telegram — writes only the local archive, resuming without duplicating; refuses under `--as-bot` |
+| `archive retention`, `archive forget` | Local only — prune or remove rows of the local archive, never anything on Telegram. Dry-run by default; executing needs `--execute` **and** the scope's exact title typed back; there is no `--yes` |
 | `auth` | Local only — writes or removes this machine's login. `--logout` needs the profile's name typed back, `--migrate` a `y/N`; there is no `--yes`, and it cannot run unattended. Nothing it asks for is stored: a two-step-verification password goes straight into the sign-in call |
 | `create` | No — makes new things, changes nothing existing, after a `y/N` unless you pass `--yes` |
 | `send` | Outward-facing — posts publicly as you (text, files, or both), after showing the whole message and asking `y/N`. `--yes` skips the prompt only for destinations in `TELEGRAM_SEND_ALLOWLIST`. Under `--as-bot` it posts as that bot, only into chats the bot is in, behind the same preview and the same allowlist |

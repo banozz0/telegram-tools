@@ -75,6 +75,41 @@ The terms this codebase uses, and the boundaries they imply.
   unattended (`--yes`) send may reach. Unset refuses every one of them; only
   the unattended path consults it, because a human who saw the preview has
   already made the decision the list exists to make for them.
+- **Archive** — `~/.telegram-tools/archive.sqlite`, the shared store
+  (`_core/archive.py`, schema `cli-tools/archive/1`) holding what this
+  account can read, opened through `archive.open_archive`. The file is created
+  0600 *before* SQLite sees it, because SQLite makes a database at the umask
+  and hands the `-wal` and `-shm` files the database's mode. Every row records
+  the identity that synced it. `archive sync` is the one archive command that
+  connects; status, search, export, retention and forget read the file, and
+  the identity they act as comes from the profile record.
+- **Scope** — one syncable unit, named by its rid: a chat (`tg:chat:ID`) or a
+  forum topic (`tg:topic:ID:TOPIC`). A forum group is its topics and never
+  itself, because every message in a forum belongs to one topic and a
+  chat-level walk would archive each row twice under two rids. The listing is
+  `adapters/archive.py`, this tool's `ArchiveSource`.
+- **Cursor** — what the store hands back to resume a scope. Telegram serves
+  history newest first, so this tool's cursor is a state, `top:low:open|done`:
+  every id in `[low, top]` is archived, and `done` means everything below `low`
+  is too. A run first asks for what arrived above `top` (`min_id`), then
+  continues below `low` (`offset_id`) when the walk never finished; one record
+  of lookahead is what lets the last record say `done`. A cursor this adapter
+  did not write reads as none, which is a full walk.
+- **Coverage** — the row per scope saying what the identity could see of it,
+  with a named reason when it could not: `no_access` (a `--scope` the account
+  cannot resolve, or a forum whose topics it cannot list), `unsupported_kind`
+  (a rid that is not a place messages live), `rate_limited` and the rest of
+  the shared vocabulary, and `bot_live_only` for a bot identity, which lists
+  what its runner will fill later and reads no history now.
+- **Exports directory** — `~/.telegram-tools/exports/`, 0700, where a relative
+  `archive export --output` name lands (`_core/export.py` resolves it). The
+  live `search --output` keeps its old behaviour, relative to the working
+  directory, because scripts already pass it paths.
+- **Typed name** — the gate `archive retention` and `archive forget` share
+  with `delete`: a dry-run by default, and with `--execute` the scope's exact
+  title typed back, no `--yes`. The re-derivation after the gate compares the
+  scope row's title, not the plan id, because a retention plan's cutoff moves
+  with the clock.
 - **Chat reference** — what `--chat` accepts: a numeric ID, a `@username` or a
   link. `resolve_chat` (`resolver.py`) is the one place it becomes an entity;
   a numeric reference is looked for in the dialog list first, because Telegram

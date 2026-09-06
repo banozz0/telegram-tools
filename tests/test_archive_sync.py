@@ -641,3 +641,28 @@ def test_no_archive_output_carries_a_phone_number_or_a_path(run_cli, capsys, hom
     _code, out2, err2, _fake = run_cli(["--json", "archive", "status"], capsys=capsys)
     for text in (out, err, out2, err2):
         assert "35699001122" not in text and str(home) not in text and ".session" not in text
+
+
+# -- doctor ---------------------------------------------------------------
+
+
+def test_doctor_reports_fts5_the_archive_rows_and_the_budget(run_cli, capsys, home):
+    from telegram_tools.doctor import run_doctor
+
+    code, out, _err, _fake = run_cli(["--json", "doctor"], capsys=capsys)
+    lines = [check["message"] for check in envelope_of(out)["result"]["checks"]]
+    assert any(line.startswith("Archive search: SQLite") and "has FTS5" in line for line in lines)
+    assert "No archive yet (run `telegram-tools archive sync` to make one)" in lines
+
+    run_cli(["archive", "sync"], capsys=capsys)
+    code, out, _err, _fake = run_cli(["--json", "doctor"], capsys=capsys)
+    envelope = envelope_of(out)
+    archive_line = next(check["message"] for check in envelope["result"]["checks"] if check["message"].startswith("Archive:"))
+    assert "52 message(s) in 3 scope(s)" in archive_line and "archive_max_bytes" in archive_line and "2.0 GiB" in archive_line
+    assert str(home) not in out
+
+    # A file that is not a database is reported, not raised.
+    (home / ".telegram-tools" / "archive.sqlite").write_bytes(b"not a database at all, just bytes")
+    code = run_doctor(root=home, env={"TELEGRAM_API_ID": "1", "TELEGRAM_API_HASH": "h"}, version_info=(3, 11, 0), home=home)
+    assert code == 1
+    assert "The archive could not be read" in capsys.readouterr().out

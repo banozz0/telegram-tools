@@ -32,11 +32,12 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 
-# The journey the site slices its terminal out of: the root, then a search built
-# up field by field, run, tweaked and discarded, then the new Identity screen.
-# One entry per prompt, in order.
+# The journey the site slices its terminal out of: the root, the Read screen,
+# then a live search built up field by field, run, tweaked and discarded, then
+# the Identity screen. One entry per prompt, in order.
 KEYSTROKES = [
-    "2",        # Read (search, export)
+    "2",        # Read (search live, archive, export)
+    "1",        # Search live (asks Telegram)
     "1",        # Forum groups
     "1",        # Team Hermes
     "2",        # Contains
@@ -47,6 +48,7 @@ KEYSTROKES = [
     "2",        # Tweak it
     "0",        # Back (discards)
     "0",        # Discard it and go back
+    "0",        # Back to the Read screen
     "0",        # Back to the root
     "8",        # Identity (profiles, my bots)
     "1",        # Profiles on this machine
@@ -110,6 +112,10 @@ def _canned():
         async def bot_profile(self, _reference):
             await self.client()
             return bots[0]
+
+        def archive_scopes(self):
+            # The archive's own scope list, invented like everything else here.
+            return [("tg:topic:-1001000000001:141", "Deploys"), ("tg:chat:-1001000000003", "Alerts")]
 
         async def close(self) -> None:
             self.closed = True
