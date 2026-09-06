@@ -1,0 +1,5 @@
+usage: telegram-tools archive status [-h] [--identity ID]
+
+options:
+  -h, --help     show this help message and exit
+  --identity ID  Count only what this identity (tg:user:ID) archived

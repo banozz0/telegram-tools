@@ -2,20 +2,25 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import os
 import sys
 from functools import partial
 from pathlib import Path
 from typing import Sequence
 
+from telegram_tools._core import export as _export
 from telegram_tools._core import rid as _rid
 from telegram_tools._core.audit import AuditLog
-from telegram_tools._core.identity import Target
-from telegram_tools._core.plan import Mutation
+from telegram_tools._core.contract import CodedError, exit_code
+from telegram_tools._core.identity import Identity, Target
+from telegram_tools._core.plan import Evidence, Mutation
+from telegram_tools import archive as archive_store
 from telegram_tools import login
 from telegram_tools import profiles as profile_store
 from telegram_tools.adapters import AccountIdentity, ChatPermissions, ChatTargets, Rights
 from telegram_tools.adapters.account import account_label
+from telegram_tools.adapters.archive import TelegramArchiveSource, scope_rid_for
 from telegram_tools.adapters.bot import BotIdentity, BotPermissions, resolve_chat_as_bot
 from telegram_tools.bot_session import apply_bot_edits, bot_client
 from telegram_tools.bots import (
@@ -46,13 +51,14 @@ from telegram_tools.delete import (
 )
 from telegram_tools.discovery import classify_entity, discover_chats, filter_chats, format_discovery_table
 from telegram_tools.doctor import require_tight_modes, run_doctor
-from telegram_tools.envelope import PLATFORM, PREFIX, CommandError, Reporter, account_command, error_for, platform_error
-from telegram_tools.exporters import json_text, write_records
+from telegram_tools.envelope import PLATFORM, PREFIX, TOOL, CommandError, Reporter, account_command, error_for, platform_error
+from telegram_tools.exporters import SEARCH_FORMATS, json_text, write_records
 from telegram_tools.resolver import EntityResolutionError, resolve_chat
 from telegram_tools.search import format_message_records, search_messages
 from telegram_tools.send import SendTarget, confirm_send, format_send_preview, require_send_allowed, send_message
 from telegram_tools.topics import get_forum_topics, get_forum_topics_by_ids
 from telegram_tools.writes import build_plan, read_back, recheck_for, require_rights
+from telegram_tools import __version__
 
 # Every right a write here needs, by the command that needs it. Named in
 # Telegram's own vocabulary so a refusal can be read straight into the app.
@@ -68,6 +74,9 @@ DELETE_TOPIC_RIGHTS = ("delete_messages",)
 # `auth` is here because it writes a session, which is the one local file worth
 # being strict about.
 WRITES = ("send", "create", "delete", "clear-messages", "bots", "auth")
+# The archive commands that write the local store. `status`, `search` and
+# `export` read it, and a read is left alone for the same reason `doctor` is.
+ARCHIVE_WRITES = ("sync", "retention", "forget")
 
 # What `--as-bot` may run. Section 5.2: a bot has no dialog list, no history and
 # no search (Telegram marks those user-only), owns nothing it could delete, and
@@ -146,8 +155,50 @@ def build_parser() -> argparse.ArgumentParser:
     search.add_argument("--since", help="Inclusive ISO date or datetime lower bound")
     search.add_argument("--until", help="Inclusive ISO date or datetime upper bound")
     search.add_argument("--limit", type=positive_int, help="Maximum exported messages")
-    search.add_argument("--format", choices=("json", "csv"), default="json", help="Export format")
+    search.add_argument("--format", choices=SEARCH_FORMATS, default="json", help="Export format")
     search.add_argument("--output", help="Output path; prints a readable table when omitted")
+    search.add_argument(
+        "--archive",
+        action="store_true",
+        help="Search the local archive instead of Telegram (the same as `archive search`)",
+    )
+
+    archive_parser = subparsers.add_parser("archive", help="Sync, search and export the local archive")
+    archive_kinds = archive_parser.add_subparsers(dest="archive_kind")
+
+    archive_sync = archive_kinds.add_parser("sync", help="Copy what this account can read into the local archive and resume where it stopped")
+    archive_sync.add_argument("--scope", dest="scope", action="append", metavar="RID", help="Only this chat or topic (tg:chat:ID or tg:topic:ID:TOPIC); repeatable")
+    archive_sync.add_argument("--since", help="Archive nothing older than this ISO date or datetime")
+    archive_sync.add_argument("--full", action="store_true", help="Walk every scope from the top again instead of resuming")
+
+    archive_status = archive_kinds.add_parser("status", help="Scopes, rows, bytes, coverage and the disk budget")
+    archive_status.add_argument("--identity", metavar="ID", help="Count only what this identity (tg:user:ID) archived")
+
+    archive_search = archive_kinds.add_parser("search", help="Full-text search of the local archive")
+    archive_export = archive_kinds.add_parser("export", help="Write one search's rows to a file in one of five formats")
+    for query_parser in (archive_search, archive_export):
+        query_parser.add_argument("--query", required=True, help="Full-text query (FTS5 syntax: words, \"a phrase\", AND, OR, NOT, prefix*)")
+        query_parser.add_argument("--regex", metavar="PATTERN", help="Keep only matches whose text also matches this Python regex")
+        query_parser.add_argument("--scope", dest="scope", action="append", metavar="RID", help="Only this chat or topic rid; repeatable")
+        query_parser.add_argument("--identity", metavar="ID", help="Only rows archived by this identity (tg:user:ID)")
+        query_parser.add_argument("--from", dest="author", metavar="RID", help="Only messages from this sender (tg:user:ID)")
+        query_parser.add_argument("--since", help="Inclusive ISO date or datetime lower bound")
+        query_parser.add_argument("--until", help="Inclusive ISO date or datetime upper bound")
+        query_parser.add_argument("--context", type=int, default=0, metavar="N", help="Show N neighbouring messages by date on each side of a match")
+        query_parser.add_argument("--limit", type=positive_int, default=50, help="Maximum matches (default 50)")
+    archive_export.add_argument("--format", choices=archive_store.EXPORT_FORMATS, default="json", help="Export format")
+    archive_export.add_argument("--output", required=True, help="Output path; a relative name lands in ~/.telegram-tools/exports/")
+
+    archive_retention = archive_kinds.add_parser("retention", help="Prune a scope's rows older than a window (dry-run by default)")
+    archive_retention.add_argument("--scope", required=True, metavar="RID", help="The chat or topic rid to prune")
+    archive_retention.add_argument("--keep", required=True, help="What stays: a window like 90d, or a number of newest messages")
+    archive_retention.add_argument("--execute", action="store_true", help="Actually prune after typing the scope's exact title")
+
+    archive_forget = archive_kinds.add_parser("forget", help="Remove everything archived for one scope or one identity (dry-run by default)")
+    forget_what = archive_forget.add_mutually_exclusive_group(required=True)
+    forget_what.add_argument("--scope", metavar="RID", help="The chat or topic rid to forget")
+    forget_what.add_argument("--identity", metavar="ID", help="The identity (tg:user:ID) whose every row goes")
+    archive_forget.add_argument("--execute", action="store_true", help="Actually remove it after typing its exact title")
 
     bots_parser = subparsers.add_parser("bots", help="List the bots you own and edit their BotFather settings")
     bots_parser.add_argument("--bot", help="Bot nickname from TELEGRAM_BOT_TOKENS, @username, or numeric ID")
@@ -418,9 +469,9 @@ async def _run_search(client, args, *, report: Reporter | None = None) -> int:
         report.record(record)
 
     if args.output:
-        write_records(records, args.output, args.format)
-    elif args.format == "csv":
-        raise ValueError("--output is required for CSV export")
+        write_records(records, args.output, args.format, query=args.keyword or "", chat_title=report.target_title)
+    elif args.format != "json":
+        raise ValueError(f"--output is required for {args.format.upper()} export")
     elif not report.machine:
         print(format_message_records(records))
 
@@ -430,6 +481,263 @@ async def _run_search(client, args, *, report: Reporter | None = None) -> int:
         # can be: the same rows the table would have shown.
         result["messages"] = records
     report.result(result, status="ok" if records else "empty")
+    return 0
+
+
+# -- the archive -----------------------------------------------------------
+
+
+async def _offline_identity(config, report: Reporter) -> Identity:
+    """The account this run acts as, without opening its session when the profile record says.
+
+    The archive commands that never touch Telegram -- status, search, export,
+    retention, forget -- still act *as* someone: rows are identity-scoped and
+    a retention plan is signed by whoever approved it. The profile record
+    `auth` wrote answers that with no connection; a profile without one is
+    asked once, through its session, exactly as bot mode does.
+    """
+    if report.acting is None:
+        user_id, label = await _via_account(config, report)
+        report.set_identity(
+            Identity(
+                platform=PLATFORM,
+                mode="account",
+                label=label,
+                id=str(_rid.make(PREFIX, "user", user_id)),
+                profile=getattr(config, "profile", profile_store.DEFAULT_PROFILE),
+            )
+        )
+    return report.acting
+
+
+def _query_kwargs(args, identity: Identity) -> dict:
+    """The `Archive.search` arguments an `archive search`/`export` namespace carries."""
+    author = getattr(args, "author", None)
+    if author == "me":
+        author = identity.id
+    return {
+        "regex": getattr(args, "regex", None),
+        "scope": getattr(args, "scope", None) or None,
+        "identity": getattr(args, "identity", None),
+        "author": author,
+        "since": getattr(args, "since", None),
+        "until": getattr(args, "until", None),
+        "context": int(getattr(args, "context", 0) or 0),
+        "limit": int(getattr(args, "limit", None) or 50),
+        "markers": archive_store.MARKERS,
+    }
+
+
+async def _run_archive_sync(client, args, *, report: Reporter) -> int:
+    """Walk what the account can read into the archive, resuming; one progress line per scope."""
+    identity = await _acting(client, report)
+    report.show_banner()
+    source = TelegramArchiveSource(client, only=getattr(args, "scope", None))
+    with archive_store.open_archive() as archive:
+        result = await archive.sync(
+            source,
+            identity,
+            since=getattr(args, "since", None),
+            full=bool(getattr(args, "full", False)),
+            progress=report.info,
+        )
+    report.waited_ms += source.waited_ms
+    if not report.machine:
+        print(archive_store.format_coverage(result))
+    for scope in result.scopes:
+        report.record(scope.to_dict())
+    report.result({**result.to_dict(), "waited_ms": source.waited_ms}, status=result.status)
+    return 1 if result.status == "partial" else 0
+
+
+async def _run_archive_status(args, config, *, report: Reporter) -> int:
+    await _offline_identity(config, report)
+    report.show_banner()
+    with archive_store.open_archive() as archive:
+        status = archive.status(identity=getattr(args, "identity", None))
+    # Where the file lives is this machine's business; the rest is the answer.
+    status.pop("path", None)
+    if not report.machine:
+        print(archive_store.format_status(status))
+    report.result(status, status="ok" if status["messages"] else "empty")
+    return 0
+
+
+async def _run_archive_search(args, config, *, report: Reporter) -> int:
+    identity = await _offline_identity(config, report)
+    report.show_banner()
+    with archive_store.open_archive() as archive:
+        hits = archive.search(args.query, **_query_kwargs(args, identity))
+    rows = [hit.to_dict() for hit in hits]
+    for row in rows:
+        report.record(row)
+    if not report.machine:
+        print(archive_store.format_hits(hits))
+    report.result({"matched": len(rows), "query": args.query, "messages": rows}, status="ok" if rows else "empty")
+    return 0
+
+
+async def _run_archive_export(args, config, *, report: Reporter) -> int:
+    identity = await _offline_identity(config, report)
+    report.show_banner()
+    with archive_store.open_archive() as archive:
+        hits = archive.search(args.query, **_query_kwargs(args, identity))
+    path = _export.write(
+        hits,
+        args.output,
+        args.format,
+        paths=archive_store.paths_for(),
+        query=args.query,
+        title=f"{TOOL} archive export",
+    )
+    for hit in hits:
+        report.record(hit.to_dict())
+    report.info(f"Wrote {len(hits)} message(s) as {args.format} to {path}")
+    report.result(
+        {"matched": len(hits), "query": args.query, "format": args.format, "output": str(path)},
+        status="ok" if hits else "empty",
+    )
+    return 0
+
+
+async def _run_archive_prune(args, config, *, report: Reporter) -> int:
+    """`archive retention` and `archive forget`: a dry-run, then the exact title typed back.
+
+    The same gate `delete` has, for the same reason -- the mistake worth
+    catching is the wrong target, not the absent intent -- and no `--yes`,
+    so neither ever runs unattended. Executed, it leaves an audit line.
+    """
+    identity = await _offline_identity(config, report)
+    kind = args.archive_kind
+    with archive_store.open_archive() as archive:
+        if kind == "retention":
+            plan = archive.retention_plan(tool=TOOL, version=__version__, identity=identity, scope=args.scope, keep=args.keep)
+        else:
+            plan = archive.forget_plan(
+                tool=TOOL, version=__version__, identity=identity, scope=args.scope, identity_id=args.identity
+            )
+        target = plan.targets[0]
+        report.set_target(target)
+        report.set_plan(plan)
+        report.show_banner()
+        preview = archive_store.format_plan(plan, execute=args.execute)
+        described = {**plan.describe(), "target": target.to_dict()}
+
+        if not args.execute:
+            report.info(preview)
+            report.result({**described, "dry_run": True, "executed": False}, status="dry_run")
+            return 0
+
+        if not archive_store.confirm_typed_name(preview, target.title, **report.confirm_io()):
+            report.info("That is not the title; nothing was removed.")
+            report.result({**described, "dry_run": False, "executed": False, "cancelled": True}, status="cancelled")
+            return 1
+
+        # Re-derive after the gate: the row the title was typed for has to be
+        # the row still there. A retention plan's cutoff moves with the clock,
+        # so the target is compared, not the plan id.
+        fresh = archive.scope_target(target.rid) if args.scope else target
+        if fresh is None or fresh.title != target.title:
+            raise CommandError(
+                "The scope changed between the preview and the execution.",
+                code="PLAN_DRIFT",
+                hint="Run it again: the preview will show what it is now.",
+            )
+
+        outcome = archive.retention(plan) if kind == "retention" else archive.forget(plan)
+        remaining = archive.connection.execute(
+            "SELECT COUNT(*) FROM messages WHERE rid = ?" if args.scope else "SELECT COUNT(*) FROM messages WHERE identity_id = ?",
+            (args.scope or args.identity,),
+        ).fetchone()[0]
+    evidence = Evidence.verified(f"{remaining} message(s) remain for {target.rid}")
+    report.set_evidence(evidence)
+    report.audit(plan, status="ok", evidence=evidence)
+    report.printed_result({**outcome, "dry_run": False, "executed": True, "remaining": remaining}, status="ok")
+    return 0
+
+
+def _archive_scope_rids(connection, reference: str, topic: int | None) -> list[str]:
+    """The archive's scope rids a live `--chat` reference names, for `search --archive`.
+
+    A numeric id or a `@username` only: the archive has no dialog list to
+    resolve a title or a link against, and resolving through Telegram would
+    make an offline command connect.
+    """
+    reference = str(reference).strip()
+    rows = connection.execute("SELECT rid, platform_json FROM scopes").fetchall()
+    chat_ids: set[str] = set()
+    if reference.lstrip("-").isdigit():
+        chat_ids.add(reference)
+    else:
+        wanted = reference.lstrip("@").casefold()
+        for row in rows:
+            extras = json.loads(row["platform_json"] or "{}")
+            username = extras.get("username")
+            if username and str(username).casefold() == wanted:
+                chat_ids.add(_rid.parse(row["rid"]).ids[0])
+    if not chat_ids:
+        raise CommandError(
+            f"{reference!r} is not a chat in the archive (a numeric id or a @username the archive has synced).",
+            code="TARGET_NOT_FOUND",
+            hint="telegram-tools archive status",
+        )
+    rids: list[str] = []
+    for row in rows:
+        parsed = _rid.parse(row["rid"])
+        if parsed.ids[0] not in chat_ids:
+            continue
+        if topic is not None and (parsed.kind != "topic" or parsed.ids[1] != str(topic)):
+            continue
+        rids.append(row["rid"])
+    if topic is not None and not rids:
+        rids = [scope_rid_for(chat_id, topic) for chat_id in sorted(chat_ids)]
+    return rids
+
+
+async def _run_search_archive(args, config, *, report: Reporter) -> int:
+    """`search --archive`: the live command's flags, answered from the archive, offline."""
+    if not args.keyword:
+        raise ValueError("search --archive needs --keyword: the archive is searched by text.")
+    identity = await _offline_identity(config, report)
+    report.show_banner()
+    with archive_store.open_archive() as archive:
+        rids = _archive_scope_rids(archive.connection, args.chat, args.topic)
+        author = args.from_user
+        if author == "me":
+            author = identity.id
+        elif author is not None and str(author).lstrip("@").isdigit():
+            author = str(_rid.make(PREFIX, "user", str(author).lstrip("@")))
+        elif author is not None:
+            row = archive.connection.execute(
+                "SELECT rid FROM authors WHERE LOWER(username) = ?", (str(author).lstrip("@").casefold(),)
+            ).fetchone()
+            author = row["rid"] if row else str(author)
+        # A keyword is a phrase, not FTS5 syntax: what `search` has always matched.
+        query = '"' + args.keyword.replace('"', '""') + '"'
+        hits = archive.search(
+            query,
+            scope=rids,
+            author=author,
+            since=args.since,
+            until=args.until,
+            limit=args.limit or 50,
+            markers=archive_store.MARKERS,
+        )
+    rows = [hit.to_dict() for hit in hits]
+    for row in rows:
+        report.record(row)
+    if args.output:
+        path = Path(args.output)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(_export.render(rows, args.format, query=args.keyword, title=f"{TOOL} archive export"), encoding="utf-8")
+    elif args.format != "json":
+        raise ValueError(f"--output is required for {args.format.upper()} export")
+    elif not report.machine:
+        print(archive_store.format_hits(hits))
+    result = {"matched": len(rows), "format": args.format, "output": args.output, "archive": True}
+    if not args.output:
+        result["messages"] = rows
+    report.result(result, status="ok" if rows else "empty")
     return 0
 
 
@@ -1238,7 +1546,7 @@ async def run(args, *, client=None, config=None, report: Reporter | None = None)
     # Section 5.2: a write refuses while this tool's own files are readable by
     # anyone else on the machine. Reads are left alone, because someone whose
     # modes have drifted still has to be able to run `doctor` and read why.
-    if args.command in WRITES:
+    if args.command in WRITES or (args.command == "archive" and getattr(args, "archive_kind", None) in ARCHIVE_WRITES):
         require_tight_modes()
 
     if args.command == "auth":
@@ -1246,6 +1554,24 @@ async def run(args, *, client=None, config=None, report: Reporter | None = None)
 
     if as_bot:
         return await run_as_bot(args, config, report=report)
+
+    # The archive commands that never touch Telegram run before a client is
+    # opened: they read a local file, and the identity they act as comes from
+    # the profile record. `archive sync` is the one that connects.
+    if args.command == "archive":
+        kind = getattr(args, "archive_kind", None)
+        if kind is None:
+            raise ValueError("archive needs one of: sync, status, search, export, retention, forget.")
+        if kind == "status":
+            return await _run_archive_status(args, config, report=report)
+        if kind == "search":
+            return await _run_archive_search(args, config, report=report)
+        if kind == "export":
+            return await _run_archive_export(args, config, report=report)
+        if kind in ("retention", "forget"):
+            return await _run_archive_prune(args, config, report=report)
+    if args.command == "search" and getattr(args, "archive", False):
+        return await _run_search_archive(args, config, report=report)
 
     owns_client = client is None
     if owns_client:
@@ -1273,6 +1599,8 @@ async def run(args, *, client=None, config=None, report: Reporter | None = None)
             return await _run_create(client, args, report=report)
         if args.command == "delete":
             return await _run_delete(client, args, report=report)
+        if args.command == "archive":
+            return await _run_archive_sync(client, args, report=report)
         raise ValueError(f"Unknown command: {args.command}")
     finally:
         if owns_client:
@@ -1281,7 +1609,7 @@ async def run(args, *, client=None, config=None, report: Reporter | None = None)
 
 def command_name(args) -> str:
     """What the envelope calls this run: the subcommand, and its kind where it has one."""
-    kind = getattr(args, "create_kind", None) or getattr(args, "delete_kind", None)
+    kind = getattr(args, "create_kind", None) or getattr(args, "delete_kind", None) or getattr(args, "archive_kind", None)
     return f"{args.command} {kind}" if kind else str(args.command or "")
 
 
@@ -1338,6 +1666,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             return report.failed(error_for(exc))
         print(f"error: {exc}", file=sys.stderr)
         return 2
+    except CodedError as exc:
+        # The shared store refusing by code: a crossed budget, a database newer
+        # than this build, a SQLite without FTS5. Same exit as any refusal, and
+        # the hint printed in human mode because it names the way out.
+        if report.machine:
+            return report.failed(exc.error)
+        print(f"error: {exc.error.message}", file=sys.stderr)
+        if exc.error.hint:
+            print(f"hint: {exc.error.hint}", file=sys.stderr)
+        return exit_code("refused", exc.code)
     except OSError as exc:
         # A missing or unreadable path is a usage mistake, not a crash. Must stay
         # below PermissionError, which is an OSError subclass with its own exit.

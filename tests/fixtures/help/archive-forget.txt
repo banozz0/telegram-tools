@@ -1,0 +1,8 @@
+usage: telegram-tools archive forget [-h] (--scope RID | --identity ID)
+                                     [--execute]
+
+options:
+  -h, --help     show this help message and exit
+  --scope RID    The chat or topic rid to forget
+  --identity ID  The identity (tg:user:ID) whose every row goes
+  --execute      Actually remove it after typing its exact title

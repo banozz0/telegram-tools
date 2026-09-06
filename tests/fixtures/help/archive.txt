@@ -1,0 +1,18 @@
+usage: telegram-tools archive [-h]
+                              {sync,status,search,export,retention,forget} ...
+
+positional arguments:
+  {sync,status,search,export,retention,forget}
+    sync                Copy what this account can read into the local archive
+                        and resume where it stopped
+    status              Scopes, rows, bytes, coverage and the disk budget
+    search              Full-text search of the local archive
+    export              Write one search's rows to a file in one of five
+                        formats
+    retention           Prune a scope's rows older than a window (dry-run by
+                        default)
+    forget              Remove everything archived for one scope or one
+                        identity (dry-run by default)
+
+options:
+  -h, --help            show this help message and exit

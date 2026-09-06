@@ -1,0 +1,8 @@
+usage: telegram-tools archive retention [-h] --scope RID --keep KEEP
+                                        [--execute]
+
+options:
+  -h, --help   show this help message and exit
+  --scope RID  The chat or topic rid to prune
+  --keep KEEP  What stays: a window like 90d, or a number of newest messages
+  --execute    Actually prune after typing the scope's exact title

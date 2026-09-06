@@ -53,6 +53,13 @@ COMMANDS = {
     "login": ("auth",),
     "profiles": ("profiles",),
     "doctor": ("doctor",),
+    "archive": ("archive",),
+    "archive-sync": ("archive", "sync"),
+    "archive-status": ("archive", "status"),
+    "archive-search": ("archive", "search"),
+    "archive-export": ("archive", "export"),
+    "archive-retention": ("archive", "retention"),
+    "archive-forget": ("archive", "forget"),
 }
 
 # The only text this card was allowed to add, spelled exactly as the help spells
@@ -77,6 +84,20 @@ ALLOWED_ADDITIONS = (
     # switch into acting as an owned bot. No subcommand gained or lost a flag.
     "[--as-bot NICK]",
     "--as-bot NICK Act as this bot (a TELEGRAM_BOT_TOKENS nickname) instead of the account; send and create topic only",
+    # The archive card (agent-bo-95421940): one new subcommand group, and on
+    # the live `search` a switch that is the documented alias of `archive
+    # search`. The subcommand name appears twice, as `auth,profiles,` does.
+    "archive,",
+    "archive Sync, search and export the local archive",
+    "[--archive]",
+    "--archive Search the local archive instead of Telegram (the same as `archive search`)",
+)
+
+# A choice list that grew. The help line is the same words; the braces name
+# more formats. Section 15: `--format` gains jsonl, markdown and html, and
+# json and csv stay first so a script reading the usage line still finds them.
+ALLOWED_REWRITES = (
+    ("{json,csv,jsonl,markdown,html}", "{json,csv}"),
 )
 
 # The per-command `--json` gained an optional path, which argparse spells with
@@ -112,6 +133,9 @@ def test_help_text_is_the_captured_one(name):
     live = normalise(render(COMMANDS[name]))
     for addition in ALLOWED_ADDITIONS:
         live = live.replace(normalise(addition), "")
+    if name == "search":
+        for wide, narrow in ALLOWED_REWRITES:
+            live = live.replace(wide, narrow)
     expected = normalise((FIXTURES / f"{name}.txt").read_text(encoding="utf-8"))
 
     assert squeeze(live) == expected, (

@@ -1,0 +1,8 @@
+usage: telegram-tools archive sync [-h] [--scope RID] [--since SINCE] [--full]
+
+options:
+  -h, --help     show this help message and exit
+  --scope RID    Only this chat or topic (tg:chat:ID or tg:topic:ID:TOPIC);
+                 repeatable
+  --since SINCE  Archive nothing older than this ISO date or datetime
+  --full         Walk every scope from the top again instead of resuming

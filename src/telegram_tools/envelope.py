@@ -19,6 +19,7 @@ from typing import Any, Callable, Iterable, Sequence
 
 from telegram_tools import __version__
 from telegram_tools._core.contract import (
+    CodedError,
     Error,
     Meta,
     build_envelope,
@@ -105,6 +106,8 @@ def error_for(exc: BaseException) -> Error | None:
     """
     if isinstance(exc, CommandError):
         return exc.as_error()
+    if isinstance(exc, CodedError):
+        return exc.error
     code = getattr(exc, "envelope_code", None)
     if code:
         return Error(code=code, message=str(exc), hint=getattr(exc, "envelope_hint", None))
@@ -213,6 +216,9 @@ class Reporter:
         self._status = "ok"
         self._warnings: list[str] = []
         self._banner_shown = False
+        # Milliseconds this run slept on flood waits, for `meta.waited_ms`.
+        # Counted by the one place that sleeps them, the archive source.
+        self.waited_ms = 0
 
     # -- what a person reads ------------------------------------------------
 
@@ -293,6 +299,10 @@ class Reporter:
     def set_target(self, target: Target) -> None:
         self._target = target
 
+    @property
+    def target_title(self) -> str:
+        return self._target.title if self._target is not None else ""
+
     def set_plan(self, plan: Plan) -> None:
         self._plan = plan
 
@@ -352,10 +362,14 @@ class Reporter:
     # -- the end ------------------------------------------------------------
 
     def _meta(self) -> Meta:
-        # api_calls and waited_ms have no counter yet: the client seam that
-        # could count them is owned by a later card, and a made-up number is
-        # worse than a zero the documentation admits to.
-        return Meta(started=self._started, duration_ms=int((time.monotonic() - self._clock) * 1000))
+        # api_calls has no counter yet: the client seam that could count them
+        # is owned by a later card, and a made-up number is worse than a zero
+        # the documentation admits to. waited_ms is counted where it is slept.
+        return Meta(
+            started=self._started,
+            duration_ms=int((time.monotonic() - self._clock) * 1000),
+            waited_ms=int(self.waited_ms),
+        )
 
     def envelope(self, *, status: str | None = None, error: Error | None = None) -> dict[str, Any]:
         return build_envelope(

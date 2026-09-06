@@ -1,0 +1,26 @@
+usage: telegram-tools archive export [-h] --query QUERY [--regex PATTERN]
+                                     [--scope RID] [--identity ID]
+                                     [--from RID] [--since SINCE]
+                                     [--until UNTIL] [--context N]
+                                     [--limit LIMIT]
+                                     [--format {json,csv,jsonl,markdown,html}]
+                                     --output OUTPUT
+
+options:
+  -h, --help            show this help message and exit
+  --query QUERY         Full-text query (FTS5 syntax: words, "a phrase", AND,
+                        OR, NOT, prefix*)
+  --regex PATTERN       Keep only matches whose text also matches this Python
+                        regex
+  --scope RID           Only this chat or topic rid; repeatable
+  --identity ID         Only rows archived by this identity (tg:user:ID)
+  --from RID            Only messages from this sender (tg:user:ID)
+  --since SINCE         Inclusive ISO date or datetime lower bound
+  --until UNTIL         Inclusive ISO date or datetime upper bound
+  --context N           Show N neighbouring messages by date on each side of a
+                        match
+  --limit LIMIT         Maximum matches (default 50)
+  --format {json,csv,jsonl,markdown,html}
+                        Export format
+  --output OUTPUT       Output path; a relative name lands in ~/.telegram-
+                        tools/exports/
