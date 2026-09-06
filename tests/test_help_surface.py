@@ -76,6 +76,13 @@ COMMANDS = {
     "message-unread": ("message", "unread"),
     "message-bookmark": ("message", "bookmark"),
     "message-draft": ("message", "draft"),
+    "review": ("review",),
+    "review-list": ("review", "list"),
+    "review-approve": ("review", "approve"),
+    "review-accept": ("review", "accept"),
+    "review-reject": ("review", "reject"),
+    "review-retry": ("review", "retry"),
+    "review-status": ("review", "status"),
 }
 
 # The only text this card was allowed to add, spelled exactly as the help spells
@@ -117,6 +124,11 @@ ALLOWED_ADDITIONS = (
     "message Act on messages: reply, edit, delete, forward, copy, react, pin, poll, read, bookmark, draft",
     "[--reply-to MSG]",
     "--reply-to MSG Post it as a reply to this message id",
+    # The review-queue card (agent-bo-95421943): one new subcommand group, the
+    # links and files a sync noted, fetched only after a human approves. No
+    # existing command gained or lost a flag. Both spellings of the name.
+    "review,",
+    "review The review queue: links and files the archive saw, fetched only after you approve",
 )
 
 # A choice list that grew. The help line is the same words; the braces name

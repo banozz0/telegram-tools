@@ -1,0 +1,5 @@
+usage: telegram-tools review accept [-h] --ids ID[,ID…]
+
+options:
+  -h, --help      show this help message and exit
+  --ids ID[,ID…]  Candidate ids; repeatable, comma-separated

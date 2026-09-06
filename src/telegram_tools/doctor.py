@@ -12,6 +12,8 @@ from telegram_tools import archive as archive_store
 from telegram_tools import profiles, proxy
 from telegram_tools._core.archive import fts5_report
 from telegram_tools._core.config import human_bytes
+from telegram_tools._core.review import directory_bytes
+from telegram_tools._core.scanner import ClamAVAdapter
 from telegram_tools.config import ConfigError, config_dir, parse_bot_tokens, parse_send_allowlist
 
 
@@ -180,6 +182,37 @@ def check_archive(home: Path | None = None) -> DoctorCheck:
     )
 
 
+def check_scanner(adapter=None) -> DoctorCheck:
+    """Whether a local scanner would run on an approved download, and which binary.
+
+    Section 9.4: no scanner is not a failure, it is `UNSCANNED` on every
+    verdict, and this line is where a person learns that before approving
+    anything. The binaries looked for are named so the fix is obvious.
+    """
+    found = (adapter or ClamAVAdapter()).report()
+    if found.get("binary"):
+        return DoctorCheck("OK", f"Scanner: {found['command']} found; approved downloads get a CLEAN or INFECTED verdict")
+    looked = ", ".join(found.get("looked_for", ()))
+    return DoctorCheck("WARN", f"No scanner on PATH (looked for {looked}): every approved download is UNSCANNED until one is installed")
+
+
+def check_quarantine(home: Path | None = None) -> DoctorCheck:
+    """What quarantine holds against its budget. Two directory walks, no archive open."""
+    paths = profiles.paths_for(home)
+    budgets = archive_store.budgets_for(home) if paths.root.exists() else None
+    if budgets is None or not paths.quarantine.exists():
+        return DoctorCheck("OK", "Quarantine: empty (nothing has been approved for download)")
+    held = [entry for entry in paths.quarantine.iterdir() if entry.is_dir()]
+    used = directory_bytes(paths.quarantine)
+    limit = budgets.limit("quarantine_max_bytes")
+    status = "FAIL" if used > limit else "OK"
+    return DoctorCheck(
+        status,
+        f"Quarantine: {len(held)} download(s) held, {human_bytes(used)} of {human_bytes(limit)}"
+        + (" (over budget: accept or reject something)" if status == "FAIL" else ""),
+    )
+
+
 def _effective_env(root: Path, env: Mapping[str, str], home: Path | None = None) -> dict[str, str]:
     merged: dict[str, str] = {}
     for path in (config_dir(home) / ".env", root / ".env"):
@@ -261,6 +294,8 @@ def run_doctor(
         check_send_allowlist(root, env, home),
         check_search_index(),
         check_archive(home),
+        check_quarantine(home),
+        check_scanner(),
     ]
 
     for check in checks:

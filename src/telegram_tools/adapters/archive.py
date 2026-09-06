@@ -27,6 +27,12 @@ Account mode only. A bot cannot read history, and `archive sync` refuses
 under `--as-bot` before anything connects; the bot-mode branch below exists
 so a bot identity can still *list* what it will be able to fill from live
 events later, each such scope carrying `bot_live_only`.
+
+What a message links to or attaches is noted as it goes by: every served
+message's URL entities and its photo or document become `Candidate`s in
+`self.candidates` (`adapters/media.py`), which `archive sync` hands the review
+queue once the store has committed. Noted, never fetched: the walk reads
+history and nothing else.
 """
 
 from __future__ import annotations
@@ -41,7 +47,9 @@ from telethon.errors import FloodWaitError
 from telegram_tools._core import rid as _rid
 from telegram_tools._core.archive import ScopeListing
 from telegram_tools._core.identity import Target
+from telegram_tools._core.review import Candidate
 from telegram_tools.adapters.account import ChatTargets, chat_title
+from telegram_tools.adapters.media import candidates_of
 from telegram_tools.discovery import classify_entity
 from telegram_tools.envelope import PLATFORM, PREFIX
 from telegram_tools.records import parse_date_bound
@@ -172,6 +180,10 @@ class TelegramArchiveSource:
         # and this is what `archive sync --full` compares the store against.
         self.seen: dict[str, set[int]] = {}
         self.floored: set[str] = set()
+        # The links and files the served messages carry, for the review queue.
+        # Collected here and enqueued by the command after the sync commits,
+        # because the store holds its own transaction while a walk runs.
+        self.candidates: list[Candidate] = []
 
     # -- scopes ------------------------------------------------------------
 
@@ -281,6 +293,7 @@ class TelegramArchiveSource:
             message_id = int(message.id)
             if pending is not None:
                 yield pending
+            self._note_candidates(message, known)
             if phase == "above":
                 # Above the old top the state stays the old one until the phase
                 # ends: a kill here refetches only what was new anyway.
@@ -299,6 +312,10 @@ class TelegramArchiveSource:
         # is still there and the cursor stays open for a later run to continue.
         done = scope.rid not in self.floored
         yield {**pending, "cursor": Cursor(top, low if low is not None else top, done).encode()}
+
+    def _note_candidates(self, message: Any, scope: _Scope) -> None:
+        author = author_of(message)
+        self.candidates.extend(candidates_of(message, scope.target.rid, author["rid"] if author else None))
 
     async def _stream(self, scope: _Scope, state: Cursor | None, floor):
         """Messages newest first, each tagged `above` (the old top) or `below` (the walk)."""

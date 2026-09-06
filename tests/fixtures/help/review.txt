@@ -1,0 +1,20 @@
+usage: telegram-tools review [-h]
+                             {list,approve,accept,reject,retry,status} ...
+
+positional arguments:
+  {list,approve,accept,reject,retry,status}
+    list                What is waiting and what has been fetched (asks
+                        nothing of any host)
+    approve             Approve queued candidates (a pick, then y/N), then
+                        fetch them into quarantine
+    accept              Accept quarantined downloads into the media store,
+                        after seeing the verdict (y/N)
+    reject              Reject candidates and delete their quarantined bytes
+                        (y/N)
+    retry               Run a failed download again from where it stopped (no
+                        new approval)
+    status              Counts, quarantine and media against their budgets,
+                        the scanner, and every fetched candidate
+
+options:
+  -h, --help            show this help message and exit

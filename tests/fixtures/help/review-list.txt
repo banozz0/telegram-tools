@@ -1,0 +1,8 @@
+usage: telegram-tools review list [-h] [--kind {media,link}]
+                                  [--state {queued,approved,fetching,quarantined,accepted,rejected,failed}]
+
+options:
+  -h, --help            show this help message and exit
+  --kind {media,link}   Only links, or only files
+  --state {queued,approved,fetching,quarantined,accepted,rejected,failed}
+                        Only candidates in this state

@@ -65,6 +65,7 @@ class FakeSession:
         self.closed = False
         self.released = 0
         self.topic_calls = []
+        self.review_states = []
         # The identity line the real session learns when it connects. Screens
         # below the root carry it; a test that wants the bare screen sets None.
         self.banner = "Acting as: Sven (@sven) \u00b7 account"
@@ -88,6 +89,10 @@ class FakeSession:
     def archive_scopes(self):
         return list(self._scopes)
 
+    def review_candidates(self, states):
+        self.review_states.append(tuple(states))
+        return [row for row in getattr(self, "_review", REVIEW) if row[1].split("  ")[2] in states]
+
     async def close(self):
         self.closed = True
 
@@ -95,6 +100,13 @@ class FakeSession:
         self.released += 1
         self.closed = True
         self.banner = None
+
+
+# What the review pickers see: `(manifest id, label)`, the label's third field the state.
+REVIEW = [
+    ("bbbb000000000001", "bbbb000000000001  link  queued  https://x.example/a"),
+    ("bbbb000000000002", "bbbb000000000002  media  failed  report.bin"),
+]
 
 
 def recorder(result=0, error=None):
@@ -1454,11 +1466,94 @@ def test_manage_says_it_arrives_later_and_comes_straight_back():
     assert text.count(ROOT_ROWS[0]) == 2, "and lands back on the root"
 
 
-def test_watch_says_it_arrives_later_too():
-    _code, calls, output = run_menu([WATCH, "", "0"])
+WATCH_ROWS = (
+    "1. Review queue (what is waiting; fetches nothing)",
+    "2. Approve downloads (pick, y/N, then the fetch runs into quarantine)",
+    "3. Accept a quarantined download (shows the verdict, then y/N)",
+    "4. Reject a candidate (deletes its quarantined bytes, after y/N)",
+    "5. Retry a failed download (from where it stopped)",
+    "6. Review status (counts, quarantine, scanner)",
+)
+REVIEW_LIST = ("7", "1")
+REVIEW_APPROVE = ("7", "2")
+REVIEW_ACCEPT = ("7", "3")
+REVIEW_REJECT = ("7", "4")
+REVIEW_RETRY = ("7", "5")
+REVIEW_STATUS = ("7", "6")
 
+
+def test_watch_lists_the_review_rows_and_runs_nothing_by_itself():
+    _code, calls, output = run_menu([WATCH, "0", "0"])
+
+    text = screens(output)
     assert calls == []
-    assert "Rules, the runner and the review queue arrive in a later version." in screens(output)
+    assert "Main › Watch\n" in text
+    for row in WATCH_ROWS:
+        assert row in text, row
+
+
+def test_review_list_stages_a_kind_and_a_state_then_runs_offline():
+    # 1 = kind, 2 = link; 2 = state, 1 = queued; 3 = show; Enter = menu; 0 0 = out
+    code, calls, output = run_menu([REVIEW_LIST, "1", "2", "2", "1", "3", "", "0", "0"])
+    assert code == 0
+    (args,) = calls
+    assert (args.command, args.review_kind, args.kind, args.state) == ("review", "list", "link", "queued")
+    text = screens(output)
+    assert "Kind   [link]" in text and "State  [queued]" in text
+    assert "Main › Watch › Review queue › Kind\n" in text
+
+
+def test_review_approve_passes_no_ids_and_no_answer_so_the_cli_asks():
+    # The menu builds `review approve` with nothing filled in: the pick and the
+    # y/N happen in the CLI on this terminal, exactly as a flag user sees them.
+    code, calls, _output = run_menu([REVIEW_APPROVE, "", "0", "0"])
+    assert code == 0
+    (args,) = calls
+    assert (args.command, args.review_kind, args.ids) == ("review", "approve", None)
+    assert not getattr(args, "yes", False) and not getattr(args, "execute", False)
+
+
+def test_accept_reject_and_retry_tick_candidates_from_the_queue_and_never_answer_for_you():
+    session = FakeSession()
+    session._review = [
+        ("aaaa000000000001", "aaaa000000000001  link  quarantined  https://x.example/a  verdict=UNSCANNED"),
+        ("aaaa000000000002", "aaaa000000000002  media  quarantined  report.bin  verdict=CLEAN"),
+    ]
+    # 1 = tick the first, 4 = Continue (two rows, Select all, Continue), Enter = menu
+    code, calls, output = run_menu([REVIEW_ACCEPT, "1", "4", "", "0", "0"], session=session)
+    assert code == 0
+    (args,) = calls
+    assert (args.command, args.review_kind, args.ids) == ("review", "accept", ["aaaa000000000001"])
+    assert not getattr(args, "yes", False)
+    assert session.review_states[-1] == ("quarantined",)
+    assert "Main › Watch › Accept\n" in screens(output)
+
+    code, calls, _output = run_menu([REVIEW_REJECT, "2", "4", "", "0", "0"], session=session)
+    (args,) = calls
+    assert (args.command, args.review_kind, args.ids) == ("review", "reject", ["aaaa000000000002"])
+    assert "queued" in session.review_states[-1] and "quarantined" in session.review_states[-1]
+
+    session._review = [("aaaa000000000003", "aaaa000000000003  media  failed  report.bin")]
+    # One row: 1 = tick it, 3 = Continue (Select all is 2)
+    code, calls, _output = run_menu([REVIEW_RETRY, "1", "3", "", "0", "0"], session=session)
+    (args,) = calls
+    assert (args.command, args.review_kind, args.ids) == ("review", "retry", ["aaaa000000000003"])
+    assert session.review_states[-1] == ("failed",)
+
+
+def test_a_review_move_with_nothing_to_pick_says_so_and_comes_back():
+    session = FakeSession()
+    session._review = []
+    _code, calls, output = run_menu([REVIEW_ACCEPT, "", "0", "0"], session=session)
+    assert calls == []
+    assert "No candidate is quarantined." in screens(output)
+
+
+def test_review_status_runs_offline_and_comes_straight_back():
+    code, calls, _output = run_menu([REVIEW_STATUS, "", "0"])
+    assert code == 0
+    (args,) = calls
+    assert (args.command, args.review_kind) == ("review", "status")
 
 
 def test_build_holds_create_and_delete():

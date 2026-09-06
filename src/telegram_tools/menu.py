@@ -24,6 +24,7 @@ from telegram_tools.records import parse_date_bound
 from telegram_tools import messages as message_ops
 from telegram_tools.prompts import BACK, CLEAR, EXIT, MENU, RULE, Extra, after_action, after_run, ask_int, ask_lines, ask_text, choose, edit_field, pick, pick_many
 from telegram_tools.resolver import resolve_chat
+from telegram_tools import review as review_ops
 from telegram_tools.topics import get_forum_topics
 from telegram_tools import ui
 from telegram_tools.ui import crumb
@@ -51,10 +52,10 @@ ROOT_ITEMS = (
     "Identity (profiles, my bots)",
     "Check setup",
 )
-# What rows 6 and 7 say when picked, by row. One screen, one line, straight back.
+# What row 6 says when picked. One screen, one line, straight back. Row 7 holds
+# the review queue now; rules and the runner join it in a later version.
 LATER = {
     5: ("Manage", "Admins, members, invites and chat settings arrive in a later version."),
-    6: ("Watch", "Rules, the runner and the review queue arrive in a later version."),
 }
 
 
@@ -118,6 +119,15 @@ class MenuSession:
     def archive_scopes(self) -> list[tuple[str, str]]:
         """The scopes the local archive holds, for its pickers. Reads the file; opens no connection."""
         return archive_store.list_scopes()
+
+    def review_candidates(self, states: tuple[str, ...]) -> list[tuple[str, str]]:
+        """Candidates in any of `states` as `(manifest id, label)`, for the review pickers.
+        A query over the archive; no host is contacted and nothing is fetched."""
+        if not archive_store.archive_exists():
+            return []
+        with archive_store.open_archive() as archive:
+            rows = review_ops.queue_for(archive).list()
+        return [(row.manifest_id, _candidate_label(row)) for row in rows if row.state in states]
 
     async def close(self) -> None:
         if self._client is not None:
@@ -1830,8 +1840,109 @@ async def _flow_build(*, session, runner, read, write) -> bool:
             return outcome
 
 
+def _candidate_label(row) -> str:
+    what = row.url if row.kind == "link" else (row.extra.get("display_name") or row.extra.get("locator") or "")
+    verdict = f"  verdict={row.verdict}" if row.verdict else ""
+    return f"{row.manifest_id}  {row.kind}  {row.state}  {what}{verdict}"
+
+
+def _pick_candidates(session, *, states: tuple[str, ...], read, write, trail: str) -> Any:
+    """Tick candidates from the queue's own rows; the ids, or BACK."""
+    rows = session.review_candidates(states)
+    if not rows:
+        write(f"No candidate is {' or '.join(states)}.")
+        read("Enter = back: ")
+        return BACK
+    picked = pick_many(rows, title=trail, label=lambda row: row[1], read=read, write=write)
+    if picked is BACK or picked == "all" or isinstance(picked, str):
+        return BACK
+    return [row[0] for row in picked]
+
+
+async def _flow_review_list(*, session, runner, read, write) -> bool:
+    """The queue: an optional kind, an optional state, then the list. Fetches nothing."""
+    trail = crumb(MAIN, "Watch", "Review queue")
+    staged: dict[str, Any] = {"kind": None, "state": None}
+    while True:
+        rows = [
+            ("kind", f"Kind   [{_shown(staged['kind'], '(links and files)')}]"),
+            ("state", f"State  [{_shown(staged['state'], '(every state)')}]"),
+            ("run", "Show the queue (asks nothing of any host)"),
+        ]
+        choice = choose([label for _key, label in rows], title=trail, read=read, write=write)
+        if choice is BACK:
+            return True
+        key = rows[choice][0]
+        if key == "run":
+            args = _namespace(command="review", review_kind="list", kind=staged["kind"], state=staged["state"])
+            result = await _act(args, session=session, runner=runner, read=read, write=write, trail=trail, connect=False)
+            if result is not STAY:
+                return _leave(result)
+            continue
+        options = review_ops.kinds() if key == "kind" else review_ops.states()
+        picked = choose(list(options), title=crumb(trail, "Kind" if key == "kind" else "State"), read=read, write=write, back_label="Any")
+        staged[key] = None if picked is BACK else options[picked]
+
+
+async def _flow_review_approve(*, session, runner, read, write) -> bool:
+    """Approve: the CLI's own pick and y/N on this terminal, then the fetch. The
+    menu passes no ids and no answer; it is not a shorter path past the gate."""
+    trail = crumb(MAIN, "Watch", "Approve downloads")
+    args = _namespace(command="review", review_kind="approve", ids=None)
+    result = await _act(args, session=session, runner=runner, read=read, write=write, trail=trail, rows=((STAY, "Approve more"),))
+    while result is STAY:
+        result = await _act(args, session=session, runner=runner, read=read, write=write, trail=trail, rows=((STAY, "Approve more"),))
+    return _leave(result)
+
+
+def _flow_review_move(kind: str, *, title: str, states: tuple[str, ...], connect: bool):
+    """Accept, reject, retry: tick the candidates, then the CLI shows them and asks."""
+
+    async def flow(*, session, runner, read, write) -> bool:
+        trail = crumb(MAIN, "Watch", title)
+        while True:
+            ids = _pick_candidates(session, states=states, read=read, write=write, trail=trail)
+            if ids is BACK:
+                return True
+            args = _namespace(command="review", review_kind=kind, ids=ids)
+            result = await _act(args, session=session, runner=runner, read=read, write=write, trail=trail, rows=((STAY, f"{title} again"),), connect=connect)
+            if result is not STAY:
+                return _leave(result)
+
+    return flow
+
+
+async def _flow_review_status(*, session, runner, read, write) -> bool:
+    """Status: one screen, straight back. Reads the archive and two directories."""
+    args = _namespace(command="review", review_kind="status")
+    await _call(args, session=session, runner=runner, write=write, connect=False)
+    return _leave_action(after_action(read=read, write=write))
+
+
+WATCH_ROWS = (
+    ("Review queue (what is waiting; fetches nothing)", _flow_review_list),
+    ("Approve downloads (pick, y/N, then the fetch runs into quarantine)", _flow_review_approve),
+    ("Accept a quarantined download (shows the verdict, then y/N)", _flow_review_move("accept", title="Accept", states=("quarantined",), connect=False)),
+    ("Reject a candidate (deletes its quarantined bytes, after y/N)", _flow_review_move("reject", title="Reject", states=("queued", "approved", "fetching", "quarantined", "failed"), connect=False)),
+    ("Retry a failed download (from where it stopped)", _flow_review_move("retry", title="Retry", states=("failed",), connect=True)),
+    ("Review status (counts, quarantine, scanner)", _flow_review_status),
+)
+
+
+async def _flow_watch(*, session, runner, read, write) -> bool:
+    """Row 7. The review queue; rules and the runner join it in a later version."""
+    trail = crumb(MAIN, "Watch")
+    while True:
+        choice = choose([label for label, _flow in WATCH_ROWS], title=trail, read=read, write=write)
+        if choice is BACK:
+            return True
+        outcome = await _group(WATCH_ROWS[choice][1], session=session, runner=runner, read=read, write=write)
+        if outcome is not True:
+            return outcome
+
+
 def _flow_later(index: int):
-    """Rows 6 and 7: a number that is reserved rather than a number that lies.
+    """Row 6: a number that is reserved rather than a number that lies.
 
     They are on the root now so that nothing above or below them ever moves
     again. Picking one says what it will hold and comes straight back.
@@ -1960,7 +2071,7 @@ async def run_menu(*, read=None, write=None, session=None, runner=None, profile=
         _flow_build,
         _flow_clear,
         _flow_later(5),
-        _flow_later(6),
+        _flow_watch,
         _flow_identity,
         _flow_doctor,
     )

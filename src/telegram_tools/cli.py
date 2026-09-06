@@ -51,9 +51,11 @@ from telegram_tools.delete import (
 )
 from telegram_tools.discovery import classify_entity, discover_chats, filter_chats, format_discovery_table
 from telegram_tools.doctor import require_tight_modes, run_doctor
-from telegram_tools.envelope import PLATFORM, PREFIX, TOOL, CommandError, Reporter, account_command, error_for, platform_error
+from telegram_tools.envelope import PLATFORM, PREFIX, TOOL, ApprovalRequired, CommandError, Reporter, account_command, error_for, platform_error
 from telegram_tools.exporters import SEARCH_FORMATS, json_text, write_records
 from telegram_tools import messages as message_ops
+from telegram_tools.prompts import BACK, pick_many
+from telegram_tools import review as review_ops
 from telegram_tools.resolver import EntityResolutionError, resolve_chat
 from telegram_tools.search import format_message_records, search_messages
 from telegram_tools.send import SendTarget, confirm_send, format_send_preview, require_send_allowed, send_message
@@ -78,6 +80,9 @@ WRITES = ("send", "message", "create", "delete", "clear-messages", "bots", "auth
 # The archive commands that write the local store. `status`, `search` and
 # `export` read it, and a read is left alone for the same reason `doctor` is.
 ARCHIVE_WRITES = ("sync", "retention", "forget")
+# The review commands that write: a queue state, quarantine bytes, the media
+# store. `list` and `status` read the archive and two directories.
+REVIEW_WRITES = ("approve", "accept", "reject", "retry")
 
 # What `--as-bot` may run. Section 5.2: a bot has no dialog list, no history and
 # no search (Telegram marks those user-only), owns nothing it could delete, and
@@ -203,6 +208,27 @@ def build_parser() -> argparse.ArgumentParser:
     forget_what.add_argument("--scope", metavar="RID", help="The chat or topic rid to forget")
     forget_what.add_argument("--identity", metavar="ID", help="The identity (tg:user:ID) whose every row goes")
     archive_forget.add_argument("--execute", action="store_true", help="Actually remove it after typing its exact title")
+
+    review_parser = subparsers.add_parser("review", help="The review queue: links and files the archive saw, fetched only after you approve")
+    review_kinds = review_parser.add_subparsers(dest="review_kind")
+
+    review_list = review_kinds.add_parser("list", help="What is waiting and what has been fetched (asks nothing of any host)")
+    review_list.add_argument("--kind", choices=review_ops.kinds(), help="Only links, or only files")
+    review_list.add_argument("--state", choices=review_ops.states(), help="Only candidates in this state")
+
+    review_approve = review_kinds.add_parser("approve", help="Approve queued candidates (a pick, then y/N), then fetch them into quarantine")
+    review_approve.add_argument("--ids", action="append", metavar="ID[,ID…]", help="Candidate ids; repeatable, comma-separated; without it, pick at the terminal")
+
+    review_accept = review_kinds.add_parser("accept", help="Accept quarantined downloads into the media store, after seeing the verdict (y/N)")
+    review_accept.add_argument("--ids", action="append", required=True, metavar="ID[,ID…]", help="Candidate ids; repeatable, comma-separated")
+
+    review_reject = review_kinds.add_parser("reject", help="Reject candidates and delete their quarantined bytes (y/N)")
+    review_reject.add_argument("--ids", action="append", required=True, metavar="ID[,ID…]", help="Candidate ids; repeatable, comma-separated")
+
+    review_retry = review_kinds.add_parser("retry", help="Run a failed download again from where it stopped (no new approval)")
+    review_retry.add_argument("--ids", action="append", required=True, metavar="ID[,ID…]", help="Candidate ids; repeatable, comma-separated")
+
+    review_kinds.add_parser("status", help="Counts, quarantine and media against their budgets, the scanner, and every fetched candidate")
 
     bots_parser = subparsers.add_parser("bots", help="List the bots you own and edit their BotFather settings")
     bots_parser.add_argument("--bot", help="Bot nickname from TELEGRAM_BOT_TOKENS, @username, or numeric ID")
@@ -614,13 +640,22 @@ async def _run_archive_sync(client, args, *, report: Reporter) -> int:
                     report.info(f"{scope.rid} {scope.title}: {gone} marked deleted".rstrip())
             elif scope.status == "failed" and archive_store.is_rate_limited(scope.error):
                 archive.record_coverage(scope.rid, identity.id, visible=True, skipped_reason="rate_limited")
+        # Section 9.1: every link and file the walk saw is a candidate in the
+        # review queue, noted after the store has committed and never fetched.
+        # The same link in the same message on a resync is the same row.
+        queue = review_ops.queue_for(archive)
+        noted = {"link": 0, "media": 0}
+        for candidate in source.candidates:
+            queue.enqueue(candidate, identity.id)
+            noted[candidate.kind] += 1
     report.waited_ms += source.waited_ms
     if not report.machine:
         print(archive_store.format_coverage(result))
+        print(f"{noted['link']} link(s) and {noted['media']} file(s) noted for review; nothing was fetched (review list shows them).")
     for scope in result.scopes:
         report.record(scope.to_dict())
     report.result(
-        {**result.to_dict(), "deleted": deleted, "waited_ms": source.waited_ms},
+        {**result.to_dict(), "deleted": deleted, "waited_ms": source.waited_ms, "manifests": noted},
         status=result.status,
     )
     return 1 if result.status == "partial" else 0
@@ -775,6 +810,239 @@ def _archive_scope_rids(connection, reference: str, topic: int | None) -> list[s
     if topic is not None and not rids:
         rids = [scope_rid_for(chat_id, topic) for chat_id in sorted(chat_ids)]
     return rids
+
+
+def _review_io(report: Reporter) -> dict:
+    """The read/write a queue gate asks on, or APPROVAL_REQUIRED when there is no terminal.
+
+    Section 9.1: the two human moves refuse a non-interactive caller in either
+    mode. A `y` piped into stdin is not a person at a terminal, so unlike the
+    other gates this one checks for the terminal itself rather than only
+    under --json.
+    """
+    if not review_ops.terminal_present():
+        raise ApprovalRequired(report.human_command)
+    return report.confirm_io()
+
+
+def _review_rows(queue, ids: list[str], *, state: str, what: str) -> list:
+    """The candidates `--ids` names, each checked to be in `state` before anything moves."""
+    if not ids:
+        raise ValueError(f"Nothing selected: pass --ids with at least one candidate id from `review list`.")
+    rows = []
+    for manifest_id in ids:
+        try:
+            row = queue.get(manifest_id)
+        except review_ops.ReviewError as exc:
+            raise CommandError(str(exc), code="TARGET_NOT_FOUND", hint="review list shows every candidate id") from exc
+        if row.state != state:
+            raise CommandError(
+                f"{row.manifest_id} is {row.state}, not {state}; only a {state} candidate can be {what}.",
+                code="TARGET_KIND_MISMATCH",
+                hint=f"review list --state {state}",
+            )
+        rows.append(row)
+    return rows
+
+
+def _fetch_status(reports) -> str:
+    """`ok` when every fetch ended quarantined with a verdict a human may accept, else `partial`."""
+    fine = all(item.state == "quarantined" and item.verdict not in review_ops.UNACCEPTABLE for item in reports)
+    return "ok" if fine else "partial"
+
+
+async def _review_fetch(queue, download_ids: list[str], rows, *, client, config, report: Reporter) -> list:
+    """Run the pipeline over each approved download; a file opens the account's client
+    when the caller did not pass one, a link needs none. The reports, in order."""
+    owns = client is None and any(row.kind == "media" for row in rows)
+    if owns:
+        client = await start_client(create_client(config), authorize=not report.machine)
+        if report.machine and not await client.is_user_authorized():
+            await _disconnect_quietly(client)
+            raise login.LoginRequired(getattr(config, "profile", "default"))
+    pipeline = review_ops.build_pipeline(queue, client=client)
+    reports = []
+    try:
+        for download_id in download_ids:
+            outcome = await pipeline.run(download_id)
+            reports.append(outcome)
+            report.info(review_ops.format_report(outcome))
+    finally:
+        if owns:
+            await client.disconnect()
+    return reports
+
+
+def _fetch_evidence(reports) -> Evidence:
+    quarantined = [item for item in reports if item.state == "quarantined"]
+    failed = [item for item in reports if item.state != "quarantined"]
+    verdicts = ", ".join(f"{item.manifest_id} {item.verdict}" for item in quarantined)
+    text = f"{len(quarantined)} quarantined" + (f" ({verdicts})" if verdicts else "") + (f", {len(failed)} failed" if failed else "")
+    return Evidence.verified(text)
+
+
+async def _run_review_approve(args, queue, archive, identity, *, client, config, report: Reporter) -> int:
+    """`queued -> approved` behind the y/N, then straight into the fetch (section 9.1)."""
+    ids = review_ops.parse_ids(getattr(args, "ids", None))
+    if not ids:
+        queued = queue.list(state="queued")
+        if not queued:
+            report.info("Nothing is queued; run `archive sync` to find links and files.")
+            report.result({"approved": [], "downloads": []}, status="empty")
+            return 0
+        io = _review_io(report)
+        picked = pick_many(
+            queued,
+            title="Approve which? (fetched into quarantine after the y/N)",
+            label=lambda row: f"{row.manifest_id}  {row.kind}  {row.url or row.extra.get('display_name') or row.extra.get('locator')}",
+            read=io.get("read") or input,
+            write=io.get("write") or print,
+        )
+        if picked is BACK:
+            report.info("Nothing approved.")
+            report.result({"approved": [], "downloads": [], "cancelled": True}, status="cancelled")
+            return 1
+        ids = [row.manifest_id for row in picked]
+    rows = _review_rows(queue, ids, state="queued", what="approved")
+    plan = review_ops.plan_for("review approve", "review.approve", identity, archive, rows)
+    report.set_target(plan.targets[0])
+    report.set_plan(plan)
+    preview = review_ops.format_candidates(rows, heading="Approving: fetched into quarantine, checked, and held until you accept")
+    if not message_ops.confirm_prompt_y(preview, **_review_io(report)):
+        report.result({**plan.describe(), "approved": [], "downloads": [], "cancelled": True}, status="cancelled")
+        return 1
+    download_ids = queue.approve(ids, review_ops.approval_for(True), identity)
+    try:
+        reports = await _review_fetch(queue, download_ids, rows, client=client, config=config, report=report)
+    except CodedError:
+        report.audit(plan, status="failed", evidence=Evidence.unverified("the fetch refused before it finished"))
+        raise
+    evidence = _fetch_evidence(reports)
+    report.set_evidence(evidence)
+    status = _fetch_status(reports)
+    report.audit(plan, status=status, evidence=evidence)
+    report.result({**plan.describe(), "approved": ids, "downloads": [item.to_dict() for item in reports]}, status=status)
+    return 1 if status == "partial" else 0
+
+
+async def _run_review_retry(args, queue, archive, identity, *, client, config, report: Reporter) -> int:
+    """A `failed` download run again from the bytes on disk. The human said yes once."""
+    ids = review_ops.parse_ids(getattr(args, "ids", None))
+    rows = _review_rows(queue, ids, state="failed", what="retried")
+    plan = review_ops.plan_for("review retry", "review.retry", identity, archive, rows)
+    report.set_target(plan.targets[0])
+    report.set_plan(plan)
+    download_ids = queue.retry(ids)
+    try:
+        reports = await _review_fetch(queue, download_ids, rows, client=client, config=config, report=report)
+    except CodedError:
+        report.audit(plan, status="failed", evidence=Evidence.unverified("the fetch refused before it finished"))
+        raise
+    evidence = _fetch_evidence(reports)
+    report.set_evidence(evidence)
+    status = _fetch_status(reports)
+    report.audit(plan, status=status, evidence=evidence)
+    report.result({**plan.describe(), "retried": ids, "downloads": [item.to_dict() for item in reports]}, status=status)
+    return 1 if status == "partial" else 0
+
+
+async def _run_review_accept(args, queue, archive, identity, *, report: Reporter) -> int:
+    """`quarantined -> accepted` behind the y/N, the verdict shown first; BLOCKED and
+    INFECTED are refused before the question is even asked (section 9.4)."""
+    ids = review_ops.parse_ids(getattr(args, "ids", None))
+    rows = _review_rows(queue, ids, state="quarantined", what="accepted")
+    plan = review_ops.plan_for("review accept", "review.accept", identity, archive, rows)
+    report.set_target(plan.targets[0])
+    report.set_plan(plan)
+    preview = review_ops.format_candidates(rows, heading="Accepting: moved into the media store with the verdict shown")
+    unsafe = [row for row in rows if row.verdict in review_ops.UNACCEPTABLE]
+    if unsafe:
+        report.info(preview)
+        first = unsafe[0]
+        raise CommandError(
+            f"{first.manifest_id} is {first.verdict}: {first.last_error or 'a built-in check failed'}. It cannot be accepted.",
+            code="UNSAFE_BLOCKED",
+            hint=f"review reject --ids {','.join(row.manifest_id for row in unsafe)}",
+        )
+    if not message_ops.confirm_prompt_y(preview, **_review_io(report)):
+        report.result({**plan.describe(), "accepted": [], "cancelled": True}, status="cancelled")
+        return 1
+    results = queue.accept(ids, review_ops.approval_for(True))
+    stored = [queue.paths.root / item["storage_path"] for item in results]
+    evidence = (
+        Evidence.verified(f"{len(results)} file(s) in the media store: " + ", ".join(f"{item['manifest_id']} {item['verdict']}" for item in results))
+        if all(path.is_file() for path in stored)
+        else Evidence.unverified("a stored file could not be found after the move")
+    )
+    report.set_evidence(evidence)
+    report.audit(plan, status="ok", evidence=evidence)
+    report.info(review_ops.format_accepted(results))
+    report.result({**plan.describe(), "accepted": results}, status="ok")
+    return 0
+
+
+async def _run_review_reject(args, queue, archive, identity, *, report: Reporter) -> int:
+    """`-> rejected` from any live state, the quarantined bytes deleted. It asks, because a
+    rejected candidate stays rejected: the same link or file on a later sync finds its row."""
+    ids = review_ops.parse_ids(getattr(args, "ids", None))
+    if not ids:
+        raise ValueError("Nothing selected: pass --ids with at least one candidate id from `review list`.")
+    rows = []
+    for manifest_id in ids:
+        try:
+            rows.append(queue.get(manifest_id))
+        except review_ops.ReviewError as exc:
+            raise CommandError(str(exc), code="TARGET_NOT_FOUND", hint="review list shows every candidate id") from exc
+    plan = review_ops.plan_for("review reject", "review.reject", identity, archive, rows)
+    report.set_target(plan.targets[0])
+    report.set_plan(plan)
+    preview = review_ops.format_candidates(rows, heading="Rejecting: quarantined bytes are deleted and the candidate stays rejected")
+    if not message_ops.confirm_prompt_y(preview, **_review_io(report)):
+        report.result({**plan.describe(), "rejected": [], "cancelled": True}, status="cancelled")
+        return 1
+    results = queue.reject(ids)
+    gone = all(not queue.paths.quarantine_dir(row.download_id).exists() for row in rows if row.download_id)
+    evidence = Evidence.verified(f"{len(results)} rejected, quarantine cleared") if gone else Evidence.unverified("a quarantine directory is still there")
+    report.set_evidence(evidence)
+    report.audit(plan, status="ok", evidence=evidence)
+    report.info(review_ops.format_rejected(results))
+    report.result({**plan.describe(), "rejected": results}, status="ok")
+    return 0
+
+
+async def _run_review(args, config, *, client=None, report: Reporter) -> int:
+    """The review queue over the local archive. `list` and `status` read; the rest move a
+    state behind the gate section 9.1 gives it, and `approve`/`retry` then fetch."""
+    kind = getattr(args, "review_kind", None)
+    if kind is None:
+        raise ValueError("review needs one of: list, approve, accept, reject, retry, status.")
+    identity = await _offline_identity(config, report)
+    report.show_banner()
+    with archive_store.open_archive() as archive:
+        queue = review_ops.queue_for(archive)
+        if kind == "list":
+            rows = queue.list(kind=getattr(args, "kind", None), state=getattr(args, "state", None))
+            for row in rows:
+                report.record(row.to_dict())
+            if not report.machine:
+                print(review_ops.format_queue(rows))
+            report.result({"count": len(rows), "candidates": [row.to_dict() for row in rows]}, status="ok" if rows else "empty")
+            return 0
+        if kind == "status":
+            status = review_ops.status_of(queue)
+            if not report.machine:
+                print(review_ops.format_status(status))
+            report.result(status, status="ok" if status["candidates"] else "empty")
+            return 0
+        if kind == "approve":
+            return await _run_review_approve(args, queue, archive, identity, client=client, config=config, report=report)
+        if kind == "retry":
+            return await _run_review_retry(args, queue, archive, identity, client=client, config=config, report=report)
+        if kind == "accept":
+            return await _run_review_accept(args, queue, archive, identity, report=report)
+        if kind == "reject":
+            return await _run_review_reject(args, queue, archive, identity, report=report)
+        raise ValueError(f"Unknown review command: {kind}")
 
 
 async def _run_search_archive(args, config, *, report: Reporter) -> int:
@@ -1780,6 +2048,8 @@ def require_bot_mode_supports(args, report: Reporter) -> None:
     what = command_name(args)
     if command == "message":
         why = "a bot has no dialog of its own to mark, no Saved Messages and no drafts"
+    elif command == "review":
+        why = "the review queue is the account's archive, and a bot reads no history"
     else:
         why = "a bot has no dialog list, no history and nothing of its own to delete or set up"
     raise CommandError(
@@ -1896,7 +2166,11 @@ async def run(args, *, client=None, config=None, report: Reporter | None = None)
     # Section 5.2: a write refuses while this tool's own files are readable by
     # anyone else on the machine. Reads are left alone, because someone whose
     # modes have drifted still has to be able to run `doctor` and read why.
-    if args.command in WRITES or (args.command == "archive" and getattr(args, "archive_kind", None) in ARCHIVE_WRITES):
+    if (
+        args.command in WRITES
+        or (args.command == "archive" and getattr(args, "archive_kind", None) in ARCHIVE_WRITES)
+        or (args.command == "review" and getattr(args, "review_kind", None) in REVIEW_WRITES)
+    ):
         require_tight_modes()
 
     if args.command == "auth":
@@ -1922,6 +2196,10 @@ async def run(args, *, client=None, config=None, report: Reporter | None = None)
             return await _run_archive_prune(args, config, report=report)
     if args.command == "search" and getattr(args, "archive", False):
         return await _run_search_archive(args, config, report=report)
+    # The review queue reads the archive; `approve` and `retry` open the
+    # account's client themselves, and only when a file (not a link) is fetched.
+    if args.command == "review":
+        return await _run_review(args, config, client=client, report=report)
 
     owns_client = client is None
     if owns_client:
@@ -1966,6 +2244,7 @@ def command_name(args) -> str:
         or getattr(args, "delete_kind", None)
         or getattr(args, "archive_kind", None)
         or getattr(args, "message_verb", None)
+        or getattr(args, "review_kind", None)
     )
     return f"{args.command} {kind}" if kind else str(args.command or "")
 
@@ -2017,6 +2296,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         error = error_for(exc)
         if report.machine and error is not None:
             return report.failed(error)
+        if isinstance(exc, ApprovalRequired):
+            # The review queue's gates refuse without a terminal in either mode
+            # (section 9.1), and 3 is the code that says so.
+            print(f"error: {exc}", file=sys.stderr)
+            return exit_code("refused", exc.code)
         parser.error(str(exc))
     except PermissionError as exc:
         if report.machine:
