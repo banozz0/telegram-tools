@@ -295,7 +295,7 @@ def test_a_sync_archives_every_scope_and_walks_topics_through_reply_to(home):
 
 
 def test_a_sync_killed_mid_scope_and_resumed_yields_the_same_rows(home, tmp_path):
-    """The P3 fixture on this tool: the interrupted sync ends up byte-equal to the clean one."""
+    """The P3 fixture on this tool: the interrupted sync ends up holding the same rows as the clean one."""
     clean_home = tmp_path / "clean"
     with archive_store.open_archive(clean_home) as clean:
         run(clean.sync(TelegramArchiveSource(FakeClient()), IDENTITY, batch=10))
@@ -721,3 +721,18 @@ def test_doctor_reports_fts5_the_archive_rows_and_the_budget(run_cli, capsys, ho
     code = run_doctor(root=home, env={"TELEGRAM_API_ID": "1", "TELEGRAM_API_HASH": "h"}, version_info=(3, 11, 0), home=home)
     assert code == 1
     assert "The archive could not be read" in capsys.readouterr().out
+
+
+def test_the_disk_budget_refuses_before_a_row_lands(run_cli, capsys, home):
+    """The P3 fixture's fifth bar: DISK_BUDGET fires before the budget is crossed, not after."""
+    root = home / ".telegram-tools"
+    root.mkdir(mode=0o700, exist_ok=True)
+    config = root / "config.json"
+    config.write_text(json.dumps({"archive_max_bytes": 1}) + "\n")
+    config.chmod(0o600)
+    code, out, _err, _fake = run_cli(["--json", "archive", "sync"], capsys=capsys)
+    envelope = envelope_of(out)
+    assert code == 2 and envelope["error"]["code"] == "DISK_BUDGET"
+    assert "archive_max_bytes" in envelope["error"]["message"] and "config.json" in envelope["error"]["hint"]
+    with archive_store.open_archive(home) as store:
+        assert ids_in(store.connection) == [], "the refusal came before any row was written"
