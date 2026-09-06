@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import os
 import sys
 from functools import partial
 from pathlib import Path
@@ -11,7 +12,10 @@ from telegram_tools._core import rid as _rid
 from telegram_tools._core.audit import AuditLog
 from telegram_tools._core.identity import Target
 from telegram_tools._core.plan import Mutation
+from telegram_tools import login
+from telegram_tools import profiles as profile_store
 from telegram_tools.adapters import AccountIdentity, ChatPermissions, ChatTargets, Rights
+from telegram_tools.adapters.account import account_label
 from telegram_tools.bot_session import apply_bot_edits, bot_client
 from telegram_tools.bots import (
     apply_owner_edits,
@@ -27,7 +31,7 @@ from telegram_tools.bots import (
     resolve_bot,
     right_names,
 )
-from telegram_tools.client import create_client, start_client
+from telegram_tools.client import _disconnect_quietly, create_client, start_client, tighten_session
 from telegram_tools.config import ConfigError, bot_id_from_token, load_config, lookup_bot_token, resolve_bot_token
 from telegram_tools.create import confirm_create, create_channel, create_group, create_topic, format_create_preview
 from telegram_tools.delete import (
@@ -40,7 +44,7 @@ from telegram_tools.delete import (
     kind_for_type,
 )
 from telegram_tools.discovery import classify_entity, discover_chats, filter_chats, format_discovery_table
-from telegram_tools.doctor import run_doctor
+from telegram_tools.doctor import require_tight_modes, run_doctor
 from telegram_tools.envelope import PLATFORM, PREFIX, CommandError, Reporter, error_for, platform_error
 from telegram_tools.exporters import json_text, write_records
 from telegram_tools.resolver import EntityResolutionError, resolve_chat
@@ -58,6 +62,11 @@ CREATE_TOPIC_RIGHTS = ("send_messages",)
 # Telegram lets only a chat's creator delete it, which is what the preview says.
 DELETE_CHAT_RIGHTS = ("is_creator",)
 DELETE_TOPIC_RIGHTS = ("delete_messages",)
+
+# The commands that change something at Telegram's end or on this machine.
+# `auth` is here because it writes a session, which is the one local file worth
+# being strict about.
+WRITES = ("send", "create", "delete", "clear-messages", "bots", "auth")
 
 
 def positive_int(value: str) -> int:
@@ -93,6 +102,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--jsonl",
         action="store_true",
         help="Stream one JSON line per record, then the envelope as the last line",
+    )
+    parser.add_argument(
+        "--profile",
+        metavar="NAME",
+        help="Act as this named login; default is TELEGRAM_TOOLS_PROFILE, or 'default'",
     )
     subparsers = parser.add_subparsers(dest="command")
 
@@ -182,6 +196,14 @@ def build_parser() -> argparse.ArgumentParser:
             "--execute", action="store_true", help="Actually delete it after typing its exact title"
         )
 
+    auth_parser = subparsers.add_parser("auth", help="Log a profile in or out (asks at the terminal)")
+    auth_mode = auth_parser.add_mutually_exclusive_group()
+    auth_mode.add_argument("--qr", action="store_true", help="Log in by scanning a QR code from a signed-in phone")
+    auth_mode.add_argument("--logout", action="store_true", help="End this profile's session after typing its name")
+    auth_mode.add_argument("--migrate", action="store_true", help="Move the pre-profile session into the default profile")
+
+    subparsers.add_parser("profiles", help="List the named logins on this machine")
+
     subparsers.add_parser("doctor", help="Check local setup without printing secrets")
 
     return parser
@@ -245,6 +267,10 @@ def _write_json(payload, path: str) -> None:
 
 async def _run_discover(client, args, *, report: Reporter | None = None) -> int:
     report = report or Reporter()
+    # The banner belongs to a screen. A run that writes its output to a file has
+    # none, and its stdout has been empty since before this flag existed.
+    if not args.json_output:
+        report.show_banner()
     chats = filter_chats(await discover_chats(client), admin_only=not args.all_chats)
     payload = [chat.to_dict() for chat in chats]
     if args.json_output:
@@ -263,6 +289,7 @@ async def _run_clear_messages(client, args, *, report: Reporter | None = None) -
     peer = resolved.input_entity
     chat = ChatTargets.chat_target(resolved, args.chat)
     report.set_target(chat)
+    report.show_banner()
 
     rights = await _rights(client, report, peer)
     _require_delete_permission(rights, what="clearing messages")
@@ -340,6 +367,8 @@ async def _run_search(client, args, *, report: Reporter | None = None) -> int:
     resolved = await resolve_chat(client, args.chat)
     peer = resolved.input_entity
     report.set_target(ChatTargets.chat_target(resolved, args.chat))
+    if not args.output:
+        report.show_banner()
     records = await search_messages(
         client,
         peer,
@@ -409,6 +438,7 @@ async def _run_send(client, args, config, *, report: Reporter | None = None) -> 
 
     destination = chat if topic is None else ChatTargets.topic_target(chat, topic)
     report.set_target(destination)
+    report.show_banner()
     target = SendTarget(chat_id=resolved.id, chat_title=chat.title, topic=topic)
 
     rights = await _rights(client, report, peer)
@@ -499,6 +529,7 @@ async def _run_create(client, args, *, report: Reporter | None = None) -> int:
         report.set_target(chat)
         rights = await _rights(client, report, peer)
 
+    report.show_banner()
     forum = bool(getattr(args, "forum", False))
     identity = await _acting(client, report)
     command = f"create {args.create_kind}"
@@ -633,6 +664,7 @@ async def _run_delete(client, args, *, report: Reporter | None = None) -> int:
         required = DELETE_CHAT_RIGHTS
         mutations = [Mutation("delete_chat", target.rid, {"kind": args.delete_kind})]
 
+    report.show_banner()
     plan, warnings = build_plan(
         identity=identity,
         command=command,
@@ -757,6 +789,8 @@ async def _run_bots(client, args, config, *, report: Reporter | None = None) -> 
         raise ValueError("--bot is required when editing a bot.")
 
     if not args.bot:
+        if not args.json_output:
+            report.show_banner()
         bots = await list_bots(client)
         payload = [bot.to_dict() for bot in bots]
         if args.json_output:
@@ -785,6 +819,8 @@ async def _run_bots(client, args, config, *, report: Reporter | None = None) -> 
 
     bot_target = _bot_target(profile)
     report.set_target(bot_target)
+    if not args.json_output:
+        report.show_banner()
 
     if not requested:
         if args.json_output:
@@ -876,6 +912,166 @@ async def _bot_readback(client, resolved, applied) -> str:
     return f"bot {profile.id} now reads name={profile.name!r}, applied {', '.join(applied)}"
 
 
+# -- identity --------------------------------------------------------------
+
+
+def _profile_row(profile) -> str:
+    """One line of `profiles`: the name, its label, and what is true of it.
+
+    Labels only, per section 5.2: no session path, no phone number, no token.
+    """
+    if profile.label:
+        label = profile.label
+    elif profile.logged_in:
+        # A session from before profiles, or one whose record was deleted: it
+        # works, and the name behind it is only learned by connecting.
+        label = "(logged in, name not recorded yet)"
+    else:
+        label = "(no session yet)"
+    marks = []
+    if profile.legacy and profile.logged_in:
+        marks.append("session from before profiles")
+    if profile.proxy:
+        marks.append(f"via {profile.proxy}")
+    return f"{profile.name:<12} {label}" + (f"   ({', '.join(marks)})" if marks else "")
+
+
+def _run_profiles(args, *, report: Reporter, home: Path | None = None) -> int:
+    """List the named logins. Reads the store; opens no connection."""
+    found = profile_store.listing(home)
+    if not report.machine:
+        if found:
+            for profile in found:
+                print(_profile_row(profile))
+        else:
+            print("No profiles yet. Log one in with: telegram-tools auth")
+    report.result(
+        {"profiles": [profile.to_dict() for profile in found], "active": _profile_name(args)},
+        status="ok" if found else "empty",
+    )
+    return 0
+
+
+def _profile_name(args) -> str:
+    return getattr(args, "profile", None) or os.environ.get("TELEGRAM_TOOLS_PROFILE") or profile_store.DEFAULT_PROFILE
+
+
+async def _run_auth(args, config, *, report: Reporter, home: Path | None = None) -> int:
+    """Log this profile in, log it out, or move the pre-profile session into it.
+
+    Interactive by construction. Every branch asks something at the terminal,
+    and under `--json` with nothing to ask on the run refuses with
+    APPROVAL_REQUIRED rather than blocking on a prompt nobody will answer.
+    """
+    name = config.profile
+    profile = profile_store.load(name, home=home)
+    io = report.confirm_io()
+    read = io.get("read") or input
+    write = report.info
+
+    if args.migrate:
+        return _run_migrate(profile, report=report, read=read, write=write, home=home)
+
+    if args.logout:
+        return await _run_logout(profile, config, report=report, read=read, write=write)
+
+    if args.qr and not login.qr_available():
+        raise CommandError(
+            # The install command is in the message as well as the hint: human
+            # mode prints only the message, and a refusal with no way out is
+            # worse than no refusal at all.
+            f"Logging in by QR needs the qr extra, which is not installed. Install it with: {login.QR_EXTRA_HINT}",
+            code="CONFIG_MISSING",
+            hint=login.QR_EXTRA_HINT,
+        )
+
+    write(f"Logging in to profile {name!r}.")
+    client = await start_client(create_client(config), authorize=False)
+    try:
+        if await client.is_user_authorized():
+            user = await client.get_me()
+            write(f"Profile {name!r} is already logged in as {account_label(user)}.")
+            return _record_login(profile, user, config, report=report, method="already", home=home)
+        if args.qr:
+            result = await login.sign_in_with_qr(client, write=write)
+        else:
+            result = await login.sign_in_with_code(client, read=read, write=write)
+    finally:
+        tighten_session(config.session_path)
+        await client.disconnect()
+
+    return _record_login(profile, result.user, config, report=report, method=result.method, home=home)
+
+
+def _record_login(profile, user, config, *, report: Reporter, method: str, home: Path | None) -> int:
+    """Save what the profile now knows about itself, and say who it is."""
+    label = account_label(user)
+    proxy = getattr(config, "proxy", None)
+    saved = profile_store.record_login(
+        profile,
+        label=label,
+        user_id=int(getattr(user, "id", 0)),
+        proxy=proxy.label if proxy is not None else None,
+    )
+    report.info(f"Profile {saved.name!r} is logged in as {label}.")
+    report.result({"profile": saved.to_dict(), "method": method}, status="ok")
+    return 0
+
+
+async def _run_logout(profile, config, *, report: Reporter, read, write) -> int:
+    """End the session at Telegram's end, then delete what is left locally."""
+    if not profile.logged_in:
+        raise login.LoginRequired(profile.name)
+    write(f"This ends the session for profile {profile.name!r} and deletes it from this machine.")
+    typed = read(f"Type the profile name to confirm ({profile.name}): ").strip()
+    if typed != profile.name:
+        write("That is not the profile name; nothing was logged out.")
+        report.result({"profile": profile.to_dict(), "logged_out": False}, status="cancelled")
+        return 1
+
+    client = await start_client(create_client(config), authorize=False)
+    ended = False
+    try:
+        if await client.is_user_authorized():
+            ended = await login.log_out(client)
+    finally:
+        await _disconnect_quietly(client)
+
+    removed = profile_store.forget(profile)
+    write(f"Profile {profile.name!r} is logged out." if ended else f"Profile {profile.name!r} was removed from this machine.")
+    report.result(
+        # Counts, never paths: what was removed is this machine's business,
+        # and where it lived is never printed.
+        {"profile": profile.name, "logged_out": ended, "files_removed": len(removed)},
+        status="ok",
+    )
+    return 0
+
+
+def _run_migrate(profile, *, report: Reporter, read, write, home: Path | None) -> int:
+    """Move the pre-profile session into `profiles/default/`, after a y/N."""
+    if not profile.legacy:
+        raise CommandError(
+            f"Profile {profile.name!r} already keeps its session in its own directory; nothing to migrate.",
+            code="CONFIG_INVALID",
+            hint="telegram-tools profiles",
+        )
+    if not profile.logged_in:
+        raise login.LoginRequired(profile.name)
+
+    write("The session from before profiles will be moved into the default profile's own directory.")
+    write("Nothing is sent to Telegram and you stay logged in; only the file moves.")
+    if read("Move it? [y/N]: ").strip().lower() not in ("y", "yes"):
+        write("Left where it was.")
+        report.result({"profile": profile.name, "migrated": False}, status="cancelled")
+        return 1
+
+    profile_store.migrate(home)
+    write(f"Moved. Profile {profile.name!r} now keeps its own session.")
+    report.result({"profile": profile.name, "migrated": True}, status="ok")
+    return 0
+
+
 # -- running one -----------------------------------------------------------
 
 
@@ -891,22 +1087,51 @@ async def run(args, *, client=None, config=None, report: Reporter | None = None)
     report = report or Reporter()
 
     if args.command == "doctor":
-        return run_doctor(report=report)
+        return run_doctor(report=report, profile=_profile_name(args))
+
+    # Neither of these opens a connection, and neither needs credentials: one
+    # reads the profile store, the other moves a file inside it. Dispatched
+    # before `load_config` so a half-set-up machine can still use them.
+    if args.command == "profiles":
+        return _run_profiles(args, report=report)
+    if args.command == "auth" and args.migrate:
+        io = report.confirm_io()
+        return _run_migrate(
+            profile_store.load(_profile_name(args)),
+            report=report,
+            read=io.get("read") or input,
+            write=report.info,
+            home=None,
+        )
 
     if config is None:
-        config = load_config()
+        config = load_config(profile=getattr(args, "profile", None))
 
     audit_path = getattr(config, "audit_path", None)
     if audit_path is not None and report.audit_log is None:
         report.audit_log = AuditLog(audit_path)
 
+    # Section 5.2: a write refuses while this tool's own files are readable by
+    # anyone else on the machine. Reads are left alone, because someone whose
+    # modes have drifted still has to be able to run `doctor` and read why.
+    if args.command in WRITES:
+        require_tight_modes()
+
+    if args.command == "auth":
+        return await _run_auth(args, config, report=report)
+
     owns_client = client is None
     if owns_client:
-        client = await start_client(create_client(config))
+        # In machine mode nothing may prompt, so an unauthorised session is a
+        # refusal naming `auth` rather than Telethon's own phone-number prompt
+        # blocking on a pipe. Human mode keeps that prompt, unchanged.
+        client = await start_client(create_client(config), authorize=not report.machine)
+        if report.machine and not await client.is_user_authorized():
+            await _disconnect_quietly(client)
+            raise login.LoginRequired(getattr(config, "profile", "default"))
 
     try:
-        if report.machine:
-            await _acting(client, report)
+        await _acting(client, report)
         if args.command == "discover":
             return await _run_discover(client, args, report=report)
         if args.command == "clear-messages":

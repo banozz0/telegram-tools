@@ -6,8 +6,9 @@ from telegram_tools.doctor import run_doctor
 def test_doctor_passes_without_printing_secret_values_or_paths(tmp_path, capsys):
     home = tmp_path / "home"
     session = home / ".telegram-tools" / "telegram-tools.session"
-    session.parent.mkdir(parents=True)
+    session.parent.mkdir(parents=True, mode=0o700)
     session.write_text("")
+    session.chmod(0o600)
 
     result = run_doctor(
         root=tmp_path,
@@ -23,7 +24,8 @@ def test_doctor_passes_without_printing_secret_values_or_paths(tmp_path, capsys)
     assert result == 0
     assert "OK   Python version is supported" in output
     assert "OK   Telegram config is present" in output
-    assert "OK   Session storage exists" in output
+    # Section 5.1: the profile is named, its session file never is.
+    assert "OK   profile default: session present" in output
     assert "api-hash-that-must-not-print" not in output
     assert str(tmp_path) not in output
 
@@ -46,8 +48,12 @@ def test_doctor_accepts_dotenv_presence_without_reading_it(tmp_path, capsys):
 
 def test_doctor_accepts_home_dotenv_presence(tmp_path, capsys):
     home = tmp_path / "home"
-    home.joinpath(".telegram-tools").mkdir(parents=True)
-    home.joinpath(".telegram-tools", ".env").write_text("TELEGRAM_API_HASH=x\n")
+    # 0700/0600 is what the tool itself writes; anything looser is now a FAIL,
+    # which is what test_doctor_fails_on_a_world_readable_env proves.
+    home.joinpath(".telegram-tools").mkdir(parents=True, mode=0o700)
+    env_file = home / ".telegram-tools" / ".env"
+    env_file.write_text("TELEGRAM_API_HASH=x\n")
+    env_file.chmod(0o600)
 
     result = run_doctor(
         root=tmp_path,

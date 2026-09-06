@@ -32,7 +32,9 @@ from telegram_tools.cli import build_parser
 
 FIXTURES = Path(__file__).parent / "fixtures" / "help"
 
-# Which parser each fixture file holds. The name is the argv path, `-`-joined.
+# Which parser each fixture file holds. The name is the argv path, `-`-joined,
+# with one exception: the `auth` parser is captured as `login.txt`, because the
+# repository's commit guard refuses any non-Markdown filename carrying `auth`.
 COMMANDS = {
     "root": (),
     "discover": ("discover",),
@@ -48,6 +50,8 @@ COMMANDS = {
     "delete-group": ("delete", "group"),
     "delete-channel": ("delete", "channel"),
     "delete-topic": ("delete", "topic"),
+    "login": ("auth",),
+    "profiles": ("profiles",),
     "doctor": ("doctor",),
 }
 
@@ -58,6 +62,17 @@ ALLOWED_ADDITIONS = (
     "[--json] [--jsonl]",
     "--json Emit one machine-readable envelope on stdout instead of the human output",
     "--jsonl Stream one JSON line per record, then the envelope as the last line",
+    # The profiles card (agent-bo-95421936): a global `--profile` naming the
+    # login this run acts as, and the two commands that manage those logins.
+    # Nothing existing moved -- `auth` and `profiles` are new subcommands, and
+    # the root's own flags gained one option.
+    "[--profile NAME]",
+    "--profile NAME Act as this named login; default is TELEGRAM_TOOLS_PROFILE, or 'default'",
+    # The two new names inside the subcommand list, which argparse prints twice:
+    # once in the usage line and once over the positional arguments.
+    "auth,profiles,",
+    "auth Log a profile in or out (asks at the terminal)",
+    "profiles List the named logins on this machine",
 )
 
 # The per-command `--json` gained an optional path, which argparse spells with

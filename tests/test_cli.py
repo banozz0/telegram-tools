@@ -161,6 +161,10 @@ def test_bots_command_rejects_photo_with_remove_photo():
         parse_args("bots", "--bot", "harry", "--photo", "face.png", "--remove-photo")
 
 
+async def _me():
+    return SimpleNamespace(id=7, first_name="Test", username="tester")
+
+
 def test_run_uses_a_passed_client_and_leaves_it_connected(monkeypatch):
     seen = {}
 
@@ -174,8 +178,12 @@ def test_run_uses_a_passed_client_and_leaves_it_connected(monkeypatch):
     monkeypatch.setattr(cli, "_run_discover", fake_discover)
     monkeypatch.setattr(cli, "create_client", fail_create_client)
 
-    client = SimpleNamespace(disconnect=lambda: (_ for _ in ()).throw(AssertionError("must not disconnect")))
-    args = SimpleNamespace(command="discover", json_output=None, all_chats=False)
+    # Every run now names the account it acts as, so the stand-in answers get_me.
+    client = SimpleNamespace(
+        get_me=_me,
+        disconnect=lambda: (_ for _ in ()).throw(AssertionError("must not disconnect")),
+    )
+    args = SimpleNamespace(command="discover", json_output=None, all_chats=False, profile=None)
 
     assert asyncio.run(cli.run(args, client=client, config=SimpleNamespace(bot_tokens={}))) == 0
     assert seen["client"] is client
@@ -188,6 +196,9 @@ def test_run_without_a_client_creates_and_disconnects_one(monkeypatch):
         async def start(self):
             events.append("start")
 
+        async def get_me(self):
+            return SimpleNamespace(id=7, first_name="Test", username="tester")
+
         async def disconnect(self):
             events.append("disconnect")
 
@@ -195,11 +206,11 @@ def test_run_without_a_client_creates_and_disconnects_one(monkeypatch):
         events.append("discover")
         return 0
 
-    monkeypatch.setattr(cli, "load_config", lambda: SimpleNamespace(bot_tokens={}))
+    monkeypatch.setattr(cli, "load_config", lambda **_kwargs: SimpleNamespace(bot_tokens={}))
     monkeypatch.setattr(cli, "create_client", lambda _config: FakeClient())
     monkeypatch.setattr(cli, "_run_discover", fake_discover)
 
-    args = SimpleNamespace(command="discover", json_output=None, all_chats=False)
+    args = SimpleNamespace(command="discover", json_output=None, all_chats=False, profile=None)
 
     assert asyncio.run(cli.run(args)) == 0
     assert events == ["start", "discover", "disconnect"]

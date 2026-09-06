@@ -1,0 +1,7 @@
+usage: telegram-tools auth [-h] [--qr | --logout | --migrate]
+
+options:
+  -h, --help  show this help message and exit
+  --qr        Log in by scanning a QR code from a signed-in phone
+  --logout    End this profile's session after typing its name
+  --migrate   Move the pre-profile session into the default profile

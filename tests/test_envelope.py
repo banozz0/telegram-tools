@@ -73,6 +73,9 @@ class FakeClient:
     async def get_messages(self, _peer, ids=None):
         return SimpleNamespace(id=ids)
 
+    async def is_user_authorized(self):
+        return True
+
     async def disconnect(self):
         self.disconnected = True
 
@@ -110,7 +113,8 @@ def run_cli(home, monkeypatch):
 
 
 def _started(fake):
-    async def start_client(_client):
+    async def start_client(_client, *, authorize=True):
+        # Mirrors the real signature: machine mode connects without offering a login.
         return fake
 
     return start_client

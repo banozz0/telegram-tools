@@ -7,6 +7,8 @@ from typing import Any, Mapping
 
 from dotenv import load_dotenv
 
+from telegram_tools import profiles as profile_store
+
 
 class ConfigError(RuntimeError):
     """Configuration that is absent or malformed. `envelope_code` says which."""
@@ -46,6 +48,10 @@ class Config:
     # Where an executed write leaves its line. None means nowhere, which is
     # what a config built by hand in a test gets: only `load_config` sets it.
     audit_path: Path | None = None
+    # Which named login this run acts as, and how it connects. `proxy` is the
+    # parsed `TELEGRAM_PROXY`, already checked for a usable backend, or None.
+    profile: str = "default"
+    proxy: Any = None
 
 
 def bot_id_from_token(token: str) -> int | None:
@@ -145,12 +151,29 @@ def load_config(
     *,
     cwd: Path | None = None,
     home: Path | None = None,
+    profile: str | None = None,
 ) -> Config:
+    """The settings this run uses, for the profile it was asked to act as.
+
+    `profile` names the login; unset, `TELEGRAM_TOOLS_PROFILE` decides and
+    `default` is the fallback. A profile may keep its own `.env` beside its
+    session -- a second application id, its own proxy -- and it is read
+    between the working directory's and the tool's, so a profile overrides the
+    machine-wide setting while a project-local `.env` still wins over both.
+    """
+    # `proxy` raises this module's ConfigError, so it is imported here rather
+    # than at the top, where the two would close a cycle.
+    from telegram_tools import proxy as proxy_settings
+
     cwd = cwd or Path.cwd()
     if env is None:
+        name = profile or os.environ.get("TELEGRAM_TOOLS_PROFILE") or profile_store.DEFAULT_PROFILE
         load_dotenv(dotenv_path=cwd / ".env", override=False)
+        load_dotenv(dotenv_path=profile_store.profile_dir(name, home) / ".env", override=False)
         load_dotenv(dotenv_path=config_dir(home) / ".env", override=False)
         env = os.environ
+    name = profile or env.get("TELEGRAM_TOOLS_PROFILE") or profile_store.DEFAULT_PROFILE
+    stored = profile_store.load(name, home=home)
 
     raw_api_id = env.get("TELEGRAM_API_ID")
     if not raw_api_id:
@@ -165,7 +188,10 @@ def load_config(
     if not api_hash:
         raise ConfigError("TELEGRAM_API_HASH is required.", code="CONFIG_MISSING")
 
-    session_path = Path(env.get("TELEGRAM_TOOLS_SESSION", config_dir(home) / "telegram-tools"))
+    # The environment still wins over every profile: a session someone points at
+    # by hand is the one they meant, and that has been true since before profiles.
+    override = env.get("TELEGRAM_TOOLS_SESSION")
+    session_path = Path(override) if override else stored.session
     return Config(
         api_id=api_id,
         api_hash=api_hash,
@@ -173,4 +199,6 @@ def load_config(
         bot_tokens=parse_bot_tokens(env.get("TELEGRAM_BOT_TOKENS")),
         send_allowlist=parse_send_allowlist(env.get("TELEGRAM_SEND_ALLOWLIST")),
         audit_path=config_dir(home) / "audit.jsonl",
+        profile=stored.name,
+        proxy=proxy_settings.from_env(env),
     )

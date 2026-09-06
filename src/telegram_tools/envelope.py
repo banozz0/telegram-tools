@@ -27,7 +27,7 @@ from telegram_tools._core.contract import (
     jsonl_line,
     utc_now,
 )
-from telegram_tools._core.identity import Identity, Target
+from telegram_tools._core.identity import Identity, Target, banner
 from telegram_tools._core.plan import Evidence, Plan
 
 TOOL = "telegram-tools"
@@ -187,6 +187,7 @@ class Reporter:
         self._result: dict[str, Any] = {}
         self._status = "ok"
         self._warnings: list[str] = []
+        self._banner_shown = False
 
     # -- what a person reads ------------------------------------------------
 
@@ -202,6 +203,32 @@ class Reporter:
     def write(self) -> Callable[[Any], None]:
         """A `write` a prompt or a preview can be handed."""
         return self.info
+
+    def banner(self) -> str | None:
+        """`Acting as: … · account · Target: …`, or None before there is an identity.
+
+        Section 5.1. The line every command prints before its own output, so a
+        run that is about to act on the wrong account or the wrong chat says so
+        while there is still time to stop it.
+        """
+        if self.acting is None:
+            return None
+        return banner(self.acting, self._target)
+
+    def show_banner(self) -> None:
+        """Print the identity line, once per run.
+
+        Under `--json` it goes to stderr like every other human word, and the
+        envelope carries the same identity and target as fields; in human mode
+        it is the first thing the command prints.
+        """
+        if self._banner_shown:
+            return
+        line = self.banner()
+        if line is None:
+            return
+        self._banner_shown = True
+        self.info(line)
 
     # -- what a machine reads -----------------------------------------------
 
