@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -19,6 +20,7 @@ from telegram_tools import profiles as profile_store
 from telegram_tools.config import ConfigError, load_config, lookup_bot_token, resolve_bot_token
 from telegram_tools.delete import kind_for_type
 from telegram_tools.discovery import list_dialog_choices
+from telegram_tools.records import parse_date_bound
 from telegram_tools.prompts import BACK, CLEAR, EXIT, MENU, RULE, Extra, after_action, after_run, ask_int, ask_lines, ask_text, choose, edit_field, pick, pick_many
 from telegram_tools.resolver import resolve_chat
 from telegram_tools.topics import get_forum_topics
@@ -528,7 +530,7 @@ async def _flow_search(*, session, runner, read, write) -> bool:
                     _shown(staged[key], empty),
                     read=read,
                     write=write,
-                    ask=lambda: ask_text(title, read=read, write=write),
+                    ask=lambda: (ask_date if key in ("since", "until") else ask_text)(title, read=read, write=write),
                     allow_clear=True,
                     is_set=staged[key] is not None,
                 )
@@ -1285,6 +1287,34 @@ async def _pick_live_scope(session, *, read, write, trail: str) -> Any:
     return scope_rid_for(picked.reference, chosen.id)
 
 
+_DATE_HINT = "Dates are YYYY-MM-DD (DD/MM/YYYY is accepted and shown as ISO), e.g. 2026-09-05"
+
+
+def ask_date(label: str, *, read, write) -> Any:
+    """A date as the flags take it: ISO, or a European DD/MM/YYYY turned into ISO.
+
+    Sven typed 05/09/2026 at an "ISO date" prompt (2026-09-06). The flags
+    take ISO and the archive would have refused it at the run, one screen too
+    late, so the prompt converts the one other shape a person here types and
+    asks again for anything else.
+    """
+    while True:
+        typed = ask_text(label, read=read, write=write)
+        if typed is BACK:
+            return BACK
+        value = typed.strip()
+        european = re.fullmatch(r"(\d{1,2})/(\d{1,2})/(\d{4})", value)
+        if european:
+            day, month, year = (int(part) for part in european.groups())
+            value = f"{year:04d}-{month:02d}-{day:02d}"
+        try:
+            parse_date_bound(value, end_of_day=False)
+        except ValueError:
+            write(_DATE_HINT)
+            continue
+        return value
+
+
 def _yes_no(value: bool) -> str:
     return "yes" if value else "no"
 
@@ -1337,7 +1367,7 @@ async def _flow_archive_sync(*, session, runner, read, write) -> bool:
                 _shown(staged["since"], "(all history)"),
                 read=read,
                 write=write,
-                ask=lambda: ask_text("Since (ISO date)", read=read, write=write),
+                ask=lambda: ask_date("Since (YYYY-MM-DD)", read=read, write=write),
                 allow_clear=True,
                 is_set=staged["since"] is not None,
             )
@@ -1417,6 +1447,8 @@ async def _flow_archive_query(*, session, runner, read, write) -> bool:
             ask = lambda: _pick_scope(session, read=read, write=write, trail=crumb(trail, title))
         elif key in ("context", "limit"):
             ask = lambda: ask_int(title, read=read, write=write)
+        elif key in ("since", "until"):
+            ask = lambda: ask_date(title, read=read, write=write)
         else:
             ask = lambda: ask_text(title, read=read, write=write)
         answer = edit_field(

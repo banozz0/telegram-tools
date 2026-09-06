@@ -1847,3 +1847,21 @@ def test_main_menu_after_an_action_is_the_root_not_the_group_screen():
     # And 0 on the after-run screen still exits outright.
     code, output = journey([SEARCH, "1", "1", "7", "0"])
     assert code == 0 and "Main › Read › Search › Hermes › Done" in screens(output)
+
+
+def test_a_date_prompt_takes_european_and_iso_and_asks_again_for_anything_else():
+    # Sync: 2 = since, a European date; then run. The row shows ISO and the run gets ISO.
+    code, calls, output = run_menu([ARCHIVE_SYNC, "2", "05/09/2026", "4", "", "0"])
+    assert code == 0 and calls[0].since == "2026-09-05"
+    assert "Since          [2026-09-05]" in screens(output)
+
+    # Nonsense is asked again, with the hint, until a date or a blank.
+    code, calls, output = run_menu([ARCHIVE_SYNC, "2", "yesterday", "2026-09-05T10:00", "4", "", "0"])
+    assert code == 0 and calls[0].since == "2026-09-05T10:00"
+    assert "Dates are YYYY-MM-DD" in screens(output)
+
+    # The live search's Since and Until, and the archive query's, go through the same prompt.
+    code, calls, _output = run_menu([SEARCH, "1", "1", "4", "1/2/2026", "5", "31/12/2026", "7", "", "0"])
+    assert code == 0 and (calls[0].since, calls[0].until) == ("2026-02-01", "2026-12-31")
+    code, calls, _output = run_menu([ARCHIVE_QUERY, "1", "deploy", "6", "05/09/2026", "10", "", "0"])
+    assert code == 0 and calls[0].since == "2026-09-05"

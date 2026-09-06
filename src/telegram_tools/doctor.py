@@ -92,17 +92,29 @@ def check_profiles(home: Path | None = None) -> DoctorCheck:
     return DoctorCheck("OK", f"{len(found)} profile(s): {', '.join(found)}")
 
 
+def _guarded_loose_modes(paths) -> list[tuple[Path, int]]:
+    """Every loose path the mode rule covers: the tool's own files, never the user's exports.
+
+    `exports/` is where a JSON or CSV the user means to share lands, and on a
+    real machine it sits at 0755 for exactly that reason (Sven's, 2026-09-06).
+    Nothing secret is ever written there, so its mode is the user's business
+    and not a reason to refuse a sync.
+    """
+    return [(path, mode) for path, mode in paths.loose_modes() if path != paths.exports and paths.exports not in path.parents]
+
+
 def check_file_modes(home: Path | None = None) -> DoctorCheck:
     """Whether anything under the tool's directory is readable by group or others.
 
     A FAIL here is what `require_tight_modes` refuses writes on: the `.env`
     holds an application hash and the profiles hold logins, and a mode anyone
-    on the machine can read makes both of those someone else's too.
+    on the machine can read makes both of those someone else's too. The
+    exports directory is not counted: what lands there is meant to be shared.
     """
     paths = profiles.paths_for(home)
     if not paths.root.exists():
         return DoctorCheck("OK", "No local files yet, so nothing is readable by anyone else")
-    loose = paths.loose_modes()
+    loose = _guarded_loose_modes(paths)
     if not loose:
         return DoctorCheck("OK", "Local files are private to you (0600 files, 0700 directories)")
     # Named relative to the root, never absolutely: `session.session` alone
@@ -126,7 +138,7 @@ def _under_root(path: Path, root: Path) -> str:
 
 def loose_mode_paths(home: Path | None = None) -> list[Path]:
     paths = profiles.paths_for(home)
-    return [] if not paths.root.exists() else [path for path, _mode in paths.loose_modes()]
+    return [] if not paths.root.exists() else [path for path, _mode in _guarded_loose_modes(paths)]
 
 
 def require_tight_modes(home: Path | None = None) -> None:

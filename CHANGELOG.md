@@ -22,7 +22,7 @@ This project follows a practical changelog style: user-visible changes, safety c
 
 - **"Main menu" after a job now means the main menu.** From a row under Read, Build or Identity it used to land on that group's screen, one step short; it goes to the root now, and `0` still exits outright.
 
-- **A sync or prune refuses while the tool's own files are readable by others**, like every other write here; the archive and its config are created 0600 and the exports directory 0700.
+- **A sync or prune refuses while the tool's own files are readable by others**, like every other write here; the archive and its config are created 0600. `exports/` no longer counts: it is where a file you mean to share lands, nothing secret is ever written there, and a machine that keeps it at 0755 was being refused a sync over it. The menu's date prompts take `DD/MM/YYYY` as well as ISO and show what it became.
 
 ## 3.10.0 - 2026-09-06
 

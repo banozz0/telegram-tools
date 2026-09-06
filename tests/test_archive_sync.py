@@ -625,6 +625,20 @@ def test_a_coded_refusal_from_the_store_is_an_exit_2_in_both_modes(run_cli, caps
     assert code == 2 and "without FTS5" in err and "hint:" in err
 
 
+def test_a_shared_exports_directory_is_not_a_reason_to_refuse_a_sync(run_cli, capsys, home):
+    """Sven's machine keeps exports/ at 0755: that is where a shared file lands, and nothing secret is."""
+    root = home / ".telegram-tools"
+    root.mkdir(mode=0o700, exist_ok=True)
+    (root / "exports").mkdir(mode=0o755)
+    (root / "exports" / "old.json").write_text("[]\n")
+    (root / "exports" / "old.json").chmod(0o644)
+    code, out, _err, _fake = run_cli(["--json", "archive", "sync"], capsys=capsys)
+    assert code == 0 and envelope_of(out)["status"] == "ok"
+    code, out, _err, _fake = run_cli(["--json", "doctor"], capsys=capsys)
+    modes = next(check for check in envelope_of(out)["result"]["checks"] if "private" in check["message"] or "readable" in check["message"])
+    assert modes["status"] == "OK", modes
+
+
 def test_archive_writes_refuse_while_the_tools_files_are_loose(run_cli, capsys, home):
     root = home / ".telegram-tools"
     root.mkdir(mode=0o700, exist_ok=True)

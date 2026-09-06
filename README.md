@@ -487,7 +487,9 @@ redaction pass covers it, every envelope and every error message.
 Sessions are written `0600` inside `0700` directories, and every command that
 writes something refuses while anything under `~/.telegram-tools` is readable by
 group or others — `doctor` names the files and the `chmod` that fixes them.
-Reads still work, so `doctor` can always tell you why.
+Reads still work, so `doctor` can always tell you why. `exports/` is the one
+exception: what lands there is meant to be shared, nothing secret is ever written
+there, and its mode is yours to choose.
 
 ## Status
 
