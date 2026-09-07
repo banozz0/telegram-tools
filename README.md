@@ -21,6 +21,8 @@ Built on [Telethon](https://github.com/LonamiWebs/Telethon). Everything runs on 
 - **`delete`** — removes a supergroup, a broadcast channel, or a forum topic: the thing itself, not just its messages. Dry-run by default; deleting requires `--execute` *and* typing the target's exact title at a prompt. It deletes exactly what `create` can make, so nothing this tool removes is beyond making again.
 - **`structure`** — a chat's shape as a file: `structure export` writes a blueprint (kind, title, description, topics, default rights, slow mode, join approval — never members, admins, messages, history or invite links), `structure diff` says what another chat would need to match it, `structure apply` makes the missing topics and settings behind the same typed-title gate `delete` has and never deletes anything on the target, and `structure remap` prints the id table an apply wrote. See [Structure blueprints](#structure-blueprints).
 - **`admin`, `member`, `join-requests`, `invite`, `settings`** — running a group or channel: list, promote, change and demote admins; list, ban, unban, mute, unmute and restrict members; approve or decline join requests; list, create and revoke invite links; show a chat's settings and set slow mode. Every write names the right it needs before it starts, and banning or demoting someone asks for their exact label at a terminal. See [Admins and members](#admins-and-members).
+- **`watch`** — rules over live Telegram events and the runner that fires them: `watch rules add` writes a rule (what to watch, what to alert about, what to tag, bookmark, archive or queue for review), `watch run` keeps one process up that receives updates, replays what it missed and fires those rules, and `watch status`, `stop` and `reload` operate it. A rule can never download or change anything. See [Watching and scheduling](#watching-and-scheduling).
+- **`schedule`** and **`send --at`** — messages posted later, and the tool says plainly which of them survives this machine being off: `send --at` hands the message to Telegram (**server-held**), `schedule post` stores one this runner posts (**runner-held**). `schedule list` shows both with their guarantee, `schedule cancel` cancels either. See [Watching and scheduling](#watching-and-scheduling).
 - **`bots`** — lists the bots you own with their numeric IDs, and edits what @BotFather edits: display name, bio, description, commands, profile photo, and default admin rights.
 - **`doctor`** — checks your local setup without printing any secrets.
 - **`--as-bot NICK`** — runs `send`, `create topic`, a message verb or an administration command as one of your own bots instead of as you, naming both on every screen. See [Acting as a bot](#acting-as-a-bot).
@@ -33,6 +35,8 @@ Built on [Telethon](https://github.com/LonamiWebs/Telethon). Everything runs on 
 - No cloud scanning. The one scanner is a local ClamAV, if you have one; without it every verdict is `UNSCANNED`, said plainly, never "clean".
 - No perfect clones. A blueprint carries a chat's structure — kind, title, description, topics, default rights, slow mode, join approval — and nothing that belongs to people or to time: no members, no admins, no messages, no history, no invite links, no linked discussion group. `structure export` says so every time it runs, and the file lists it too.
 - No automation loops. The `bots` command edits bot *settings*; it never runs a bot.
+- No background service. `watch run` runs in the foreground, started by you and stopped by you or `watch stop`; the tool neither installs nor prints a launchd or systemd unit. A schedule this runner holds fires only while it is up, and every listing says so.
+- No rule that downloads or changes anything. A rule may alert, tag, bookmark, record what the platform sent, sync a scope into the archive, or put a link or file in the review queue — that is the whole list, and it is checked when the rule is written. There is no `download` and no `send` beyond the alert's fixed template, so a rule can put something in front of you but never act for you.
 - No changing a bot's `@username`, creating or deleting bots, or reading/revoking bot tokens — those stay with @BotFather.
 - No cloud anything — credentials and session files stay in `~/.telegram-tools/`.
 
@@ -493,6 +497,43 @@ Invite links are credentials to a chat, so they appear only where you asked for 
 
 Under `--as-bot` all five groups run as the bot, where the bot is an admin of the chat; a bot that is a plain member refuses with `IDENTITY_MODE_UNSUPPORTED` before any preview, and a bot admin without the specific right is refused by name like the account would be. A basic group is refused (`PLATFORM_UNSUPPORTED`): every call here is a supergroup call, and Telegram itself upgrades a basic group the moment you change a setting on it in the app.
 
+## Watching and scheduling
+
+Two things live here: rules over what happens in your chats, and messages posted later.
+
+### Rules and the runner
+
+A rule is a JSON file in `~/.telegram-tools/rules/`, `0600`, one per file, and the flags are a convenience — the file stays yours to edit by hand.
+
+```bash
+telegram-tools watch rules add --name deploys \
+  --on message --on link --scope tg:topic:-1001234567890:141 \
+  --domain github.com --keyword deploy \
+  --alert-to tg:chat:-1009876543210 --queue-review --cooldown 300
+telegram-tools watch rules list
+telegram-tools watch rules test --event recorded.json      # says what would fire; fires nothing
+telegram-tools watch rules disable --name deploys          # enable, remove (asks first)
+telegram-tools watch run                                   # foreground; Ctrl-C or `watch stop`
+telegram-tools watch status
+```
+
+`--on` takes `message`, `edit`, `reaction`, `member_join`, `member_leave`, `link` and `media`. One message can be three events: it is always a `message`, and *also* a `link` when it carries URLs and a `media` when it carries a file — so a rule watching links does not have to watch every message in the chat. In a forum the scope is the topic (`tg:topic:CHAT:TOPIC`), not the group.
+
+What a rule may do is a closed list: `--alert-to` a chat or topic, `--alert-command` something on your PATH, `--tag`, `--bookmark`, `--capture-metadata` (record what the platform delivered — never a fetch), `--archive-scope`, `--queue-review`. Anything else is refused when the rule is written. An alert to a chat goes out through this tool's own send under the same `TELEGRAM_SEND_ALLOWLIST` an unattended `send --yes` answers to: a destination outside the list is reported `NOT_ALLOWLISTED` rather than posted. An alert to a command runs that command with the alert text on stdin; a command that is not on PATH is `COMMAND_MISSING` when the rule loads, not when it would have fired. Every alert ends with an origin marker line, and the runner drops an event that carries one and was sent by a bot — which is what stops two runners alerting each other forever.
+
+`watch run` is one process per machine. It takes an exclusive lock, so a second one exits 2 with `RUNNER_LOCKED` naming the holder, before it connects. It does not hold your login's session file: it copies the authorization into memory at start, so `telegram-tools send` in another terminal keeps working while it runs. On start it replays each scope from where it stopped, with duplicate suppression on, so an event it saw before its last exit fires nothing and one the exit swallowed fires once. It needs a file lock, which macOS and Linux have and Windows does not — there `watch run` exits 2 with `PLATFORM_UNSUPPORTED` and every one-shot command still works. `doctor` reports the holder, the last thing the runner logged, and whether your rules load.
+
+### The two guarantees
+
+```bash
+telegram-tools send --chat @teamhermes --text "standup" --at 2026-09-09T09:00     # server-held
+telegram-tools schedule post --chat @teamhermes --text "standup" --every "0 9 * * mon"
+telegram-tools schedule list --chat @teamhermes
+telegram-tools schedule cancel --id 12ab34cd56ef                                 # --chat too, for one Telegram holds
+```
+
+`send --at` hands the message to Telegram, which holds it and posts it with this machine off, your laptop shut and the tool uninstalled: **server-held**. A time with no offset is this machine's local time, and the tool echoes it back with the offset applied so there is no doubt which moment was meant. Telegram has no repeat, so `--every` is always the other kind: `schedule post` stores a row **this runner** posts, and every listing spells it out — `runner-held: fires only while watch run is up on this machine`. `--every` takes an interval (`15m`, `2h`, `1d`) or a five-field cron expression. Both kinds are checked against the right to post before they are stored, and `schedule list --chat C` shows them together, each row carrying its own guarantee. `schedule cancel --id N --chat C` cancels one Telegram is holding; without `--chat` it cancels one of this runner's. Scheduling is account-only: Telegram gives a bot no way to hand it a message for later, so `--as-bot` refuses `send --at` and `schedule` by name. Watching is not — a bot receives updates for the chats it is in, and `--as-bot watch run` works.
+
 ## The menu
 
 Run `telegram-tools` with no arguments and you get a menu instead of flags:
@@ -513,8 +554,8 @@ Acting as: Sven (@sven) · account
 0. Exit
 ```
 
-Rows 6 and 7 name what a later version brings and say so when you pick them; they hold
-their numbers now so nothing above or below them has to move again. The `Acting as:`
+Every row now opens something; the nine numbers are settled and nothing above or below
+them has to move again. The `Acting as:`
 line appears once something has connected — a bare `telegram-tools` opens without
 needing credentials, and `Check setup` never needs any.
 
@@ -542,6 +583,12 @@ the chat from your live chats and staging the verb's fields; Send's form has a *
 row, and Delete's *Delete for real* toggle is its `--execute`. *Build* opens six rows: create,
 delete, then export a blueprint, diff one against a chat, apply one — the dry-run runs first,
 and the exact title is typed at the CLI's own prompt — and show an apply's remap table.
+*Manage* opens the five administration groups, a row per verb. *Watch* opens four screens:
+*Rules* (list, add, edit, enable, disable, remove, test — the add form has a row for every
+flag the command takes, and the file it writes stays editable by hand), *Runner* (run it
+here in the foreground, its status, stop, reload), *Scheduled* (what is scheduled with its
+guarantee, schedule one this runner posts, cancel either kind) and *Review queue*, whose
+six rows are unchanged.
 
 The menu is in colour when it is talking to a terminal, and plain text in a pipe, under
 `NO_COLOR`, or with `TERM=dumb`.
@@ -554,7 +601,8 @@ dry-runs first and still asks you to type `DELETE`, deleting a group, channel or
 dry-runs first and still asks you to type its exact title, pruning or forgetting part
 of the archive dry-runs first and asks for the scope's title too, deleting messages
 dry-runs first and still asks for `DELETE`, sending or any other message verb shows
-the whole thing and asks `y/N`, and bot edits still print a diff and ask before writing. The
+the whole thing and asks `y/N`, scheduling a message shows it with its guarantee and asks,
+removing a rule asks, and bot edits still print a diff and ask before writing. The
 menu has no equivalent of `--yes` at all. With no terminal attached it prints this help instead.
 
 ## For scripts and agents
@@ -594,6 +642,7 @@ telegram-tools --json send --chat -1001234567890 --topic 141 --text "deploy is g
 - **`error.code` is stable.** `NOT_ALLOWLISTED`, `TARGET_NOT_FOUND`,
   `TARGET_KIND_MISMATCH`, `PERMISSION_DENIED`, `HIERARCHY_DENIED`, `PLAN_DRIFT`, `APPROVAL_REQUIRED`, `BULK_LIMIT`,
   `SESSION_IN_USE`, `CONFIG_MISSING`, `CONFIG_INVALID`, `LOGIN_REQUIRED`,
+  `RULE_INVALID`, `COMMAND_MISSING`, `RUNNER_LOCKED`, `RUNNER_NOT_RUNNING`,
   `RATE_LIMITED` and others. `error.hint` is the exact command or edit that
   would fix it — worth relaying verbatim.
 - **`identity` names the account every run acted as**, with the profile it came
@@ -616,6 +665,14 @@ telegram-tools --json send --chat -1001234567890 --topic 141 --text "deploy is g
   envelope does. `member ban` and `admin demote` are not for an agent to drive: each
   asks a person for the exact label at a terminal, refuses without one
   (`APPROVAL_REQUIRED`, exit 3, in either mode), and has no `--yes`.
+- **The watch reads are offline** (`watch rules list`, `watch rules test`, `watch status`,
+  and `schedule list` without `--chat`): they read local files and the local archive, and
+  `rules test` says what a recorded event *would* do without firing any of it. Writing a
+  rule is a user's decision, not an agent's: relay the `watch rules add` line you would run
+  and let the person run it, and leave `watch run` to them too — it is a process they start
+  and stop. Every schedule in `result` carries `guarantee`, either `server-held` or
+  `runner-held: fires only while watch run is up on this machine`; quote it, because the
+  difference is whether the message survives this machine being off.
 - **`review list` and `review status` are offline too**, and the answer is safe to
   read: `result.candidates[].url` is the link exactly as the message wrote it, never
   resolved. `review approve` and `review accept` are not for an agent to drive: each
@@ -659,6 +716,12 @@ for a code or a password. Relay the refusal and let the person run it.
 | `review list`, `review status` | No — read the archive and two local directories; no host is contacted and no redirect is resolved |
 | `review approve`, `review retry` | Outward-facing — after a `y/N` at a terminal, contacts the link's host (redirects walked one `HEAD` at a time) or reads the file through your login, into quarantine, through eleven checks and the scanner. No `--yes`; refuses without a terminal (`APPROVAL_REQUIRED`, exit 3) |
 | `review accept`, `review reject` | Local only — move a quarantined file into `media/` after showing its verdict, or delete the quarantined bytes; each after a `y/N`, no `--yes`. `BLOCKED` and `INFECTED` can never be accepted |
+| `watch rules list`, `watch rules test`, `watch status`, `schedule list` (without `--chat`) | No — read local files and the local archive; `test` fires nothing and contacts nobody |
+| `watch rules add/edit/enable/disable/remove` | Local only — write or delete a rule file in `~/.telegram-tools/rules/`; `remove` asks `y/N` and there is no `--yes`. A rule can never download or mutate anything: the action list is closed and checked when the file is written |
+| `watch run` | Outward-facing only through its rules — receives updates, and posts an alert through the ordinary send path under `yes_allowlist`, so a destination outside `TELEGRAM_SEND_ALLOWLIST` is refused `NOT_ALLOWLISTED`. Holds an exclusive lock (`RUNNER_LOCKED` for a second one), holds no session file, installs no service |
+| `watch stop`, `watch reload` | Local only — a signal to the runner this machine is running; `RUNNER_NOT_RUNNING` when there is none |
+| `send --at`, `schedule post` | Outward-facing, later — `--at` hands the message to Telegram (`server-held`), `schedule post` stores one this runner posts (`runner-held`, and it says so). Both behind the same preview and `y/N` as `send`, both preflighted for the right to post, and both account-only |
+| `schedule cancel` | Visible to nobody until it would have posted — cancels a message Telegram is holding (`--chat`) or one of this runner's, after a `y/N`; there is no `--yes` |
 | `structure export`, `structure diff`, `structure remap` | No — export and diff read one chat and write a local file or a screen; remap reads the local archive and never connects |
 | `admin list`, `member list`, `join-requests list`, `invite list`, `settings show` | No — read the chat's people, requests, links or settings; `invite list` shows the links you asked for |
 | `admin promote`, `admin rights`, `member unban`, `member mute`, `member unmute`, `member restrict`, `join-requests approve/decline`, `invite create`, `invite revoke`, `settings set` | Visible to the chat — each shows who acts, on whom and what changes, then asks `y/N`; there is no `--yes`. A missing right, or a right the account cannot grant, refuses by name before the call; mutes and restrictions need `--until`, a minute to a year |
@@ -678,7 +741,7 @@ for a code or a password. Relay the refusal and let the person run it.
 
 `bots` refuses to edit a bot you do not own, and it never fetches or exports a bot token from Telegram — the three token-only edits simply fail with a message naming the fields they need one for.
 
-Every write — sending, a message verb, creating, clearing, deleting, applying a blueprint, an admin or member change, editing a bot — now also
+Every write — sending, a message verb, creating, clearing, deleting, applying a blueprint, an admin or member change, a rule file, a schedule, editing a bot — now also
 asks Telegram what rights your account actually holds in that chat before it
 does anything, and refuses by name when one it needs is missing. Once you have
 answered the gate, the target is resolved a second time and compared with the

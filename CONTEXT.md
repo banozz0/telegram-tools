@@ -64,6 +64,10 @@ The terms this codebase uses, and the boundaries they imply.
   import itself and refuses: someone who asked to go through a proxy must never
   silently connect from their own address. The same shape governs `auth --qr`
   without the `qr` extra.
+- **Local write** — a write whose target is this machine, not Telegram: a rule
+  file, a runner-held schedule row. It carries a plan, a readback and an audit
+  line like any other write; its preflight is empty because no Telegram right
+  exists to check, which is stated rather than skipped.
 - **Gate** — the confirmation pattern on every path that writes. `send` =
   full-message preview + `y/N` (`--yes` instead requires the allowlist);
   `create` = preview + `y/N`; `clear-messages` = dry-run default + `--execute`
@@ -75,7 +79,9 @@ The terms this codebase uses, and the boundaries they imply.
   default + `--execute` + the target's exact title, no `--yes`, a terminal
   required in either mode; `member ban` and `admin demote` = the same gate on
   a person, their exact label typed; every other administration write = a
-  `y/N` with no `--yes`. The menu builds the same args the flags would and never sets
+  `y/N` with no `--yes`; `schedule post`, `schedule cancel` and `watch rules
+  remove` = a `y/N` with no `--yes` either, because nothing unattended should
+  write a rule or a schedule. The menu builds the same args the flags would and never sets
   `yes`/`execute` itself — it is never a shorter path past a gate.
 - **Message verb** — one of the fifteen things `message` does to a message
   (`messages.VERBS`). Each is an `Op`: its approval kind, the rights its plan
@@ -188,8 +194,9 @@ The terms this codebase uses, and the boundaries they imply.
 - **Reserved row** — a root-menu number held for a capability a later version
   brings, so that every row above and below it keeps its number when that
   version lands. `Manage` and `Watch` were both held this way; `Watch` was
-  filled by the review queue and `Manage` by the administration groups, and
-  none is reserved now, though `Watch` still waits for rules and the runner.
+  filled by the review queue, then by the rules, the runner and the schedules,
+  and `Manage` by the administration groups. Nothing is reserved now: all nine
+  root rows open something, and the numbers are settled.
 - **Candidate** — one link or one file a sync saw, as the review queue holds
   it: a `manifests` row of kind `link` (the URL exactly as the message wrote
   it) or `media` (Telegram's own file key, `document:ID` or `photo:ID`, as the
@@ -342,6 +349,48 @@ The terms this codebase uses, and the boundaries they imply.
   chosen by its owner and need not distinguish anything — Sven's own reads `--`,
   which named nothing until the digits were added. Two digits, never more, and
   the full number does not leave `phone_tail`.
+- **Rule** — one `cli-tools/rule/1` JSON file in `~/.telegram-tools/rules/`,
+  `0600`, named by its own file (`watch rules remove <name>` is honest that
+  way). A trigger (which event kinds), a filter (scope, sender, identity,
+  domain, keyword, regex, media type, byte bounds) and a closed list of
+  actions. It is validated when it is written, not when it fires, which is
+  where `RULE_INVALID` and `COMMAND_MISSING` come from. The flags are a
+  convenience: the file stays editable by hand, and `edit` replaces only the
+  fields its flags name, with `none` emptying a list.
+- **Action kind** — what a rule may do, closed at six: `alert`, `tag`,
+  `bookmark`, `capture_metadata` (record what the platform delivered — never a
+  fetch), `archive` (sync that scope now, within the budgets) and
+  `queue_review`. There is no `download`, no `send` beyond the alert's fixed
+  template, and no mutation; anything else is `RULE_INVALID` at load. A rule
+  that wants a file fetched queues it, where a person answers.
+- **Event** — one thing that happened, as the runner hands it to the engine:
+  a platform, a scope rid, a subject (a message id, or a member's rid for a
+  join or a leave), a kind, a sender and an `edit_version`. Seven kinds:
+  `message`, `edit`, `reaction`, `member_join`, `member_leave`, `link`,
+  `media`. One Telegram message is up to three of them — always a `message`,
+  also a `link` when it carries URLs and a `media` when it carries a file —
+  because the dedup key carries the kind, so a rule on links and a rule on
+  messages both see it and neither dedups the other away. In a forum the scope
+  is the topic, exactly as the archive scopes it.
+- **Origin marker** — the last line of every alert this tool sends. The
+  evaluator drops an event that carries one *and* was sent by a bot, which is
+  what stops two runners alerting each other through configured commands
+  without either knowing the other exists. A marker a person pasted is not a
+  kill switch: the sender check fails.
+- **Runner** — the one long-running process `watch run` is: an exclusive
+  `fcntl` lock at `runner.lock` (a second is `RUNNER_LOCKED`), a cursor per
+  scope replayed on start with dedup on, a monotonic-plus-wall schedule
+  planner that survives a clock jump, and one JSON line per thing it did in
+  `runner.log`. It runs in the foreground and installs no service. It never
+  holds the profile's session file: it copies the authorization into an
+  in-memory `StringSession` at start, so one-shot commands keep working while
+  it is up.
+- **Guarantee** — which of two things a scheduled message actually has, a
+  field on every listing rather than something inferred. `server-held`:
+  Telegram holds it and posts it with this machine off (`send --at`, through
+  `schedule_date`). `runner-held: fires only while watch run is up on this
+  machine`: a row this tool's runner posts (`schedule post`). Telegram has no
+  repeat of its own, so `--every` is always the second.
 - **Plan** — what a write is about to do, built before anything is asked: the
   identity, the resolved targets, the mutations, the approval kind and the
   preflight, hashed into a `plan_id`. A dry-run prints it and the real run

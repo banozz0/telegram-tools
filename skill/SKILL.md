@@ -1,13 +1,13 @@
 ---
 name: telegram-tools
-description: "Use when you need the real numeric ID of a Telegram chat, channel, group or forum topic — 'what's the ID of that topic?', 'which chat is -100…?', 'where do I send this?' — when the user wants their own Telegram messages searched or exported (JSON, CSV, JSONL, Markdown, HTML), when a history question can be answered from the local archive instead of a fresh fetch, when a message must be posted to a chat or topic the user has allowlisted, when a message the user named should get a reply, a reaction, a pin, or be forwarded, copied or bookmarked, or when the user asks who the admins of a chat are, who is waiting to join, which invite links exist, or what a chat's slow mode is."
-version: 1.11.0
+description: "Use when you need the real numeric ID of a Telegram chat, channel, group or forum topic — 'what's the ID of that topic?', 'which chat is -100…?', 'where do I send this?' — when the user wants their own Telegram messages searched or exported (JSON, CSV, JSONL, Markdown, HTML), when a history question can be answered from the local archive instead of a fresh fetch, when a message must be posted to a chat or topic the user has allowlisted, when a message the user named should get a reply, a reaction, a pin, or be forwarded, copied or bookmarked, when the user asks who the admins of a chat are, who is waiting to join, which invite links exist, or what a chat's slow mode is, or when they want a message posted at a set time or a rule that alerts them when something happens in a chat."
+version: 1.12.0
 author: banozz0
 license: MIT
 platforms: [macos]
 metadata:
   hermes:
-    tags: [telegram, chat-ids, topic-ids, forum, search, archive, export, send, reply, react, message, review, structure, blueprint, admin, member, invite, cli]
+    tags: [telegram, chat-ids, topic-ids, forum, search, archive, export, send, reply, react, message, review, structure, blueprint, admin, member, invite, watch, rules, schedule, cli]
 ---
 
 # telegram-tools
@@ -64,6 +64,13 @@ It can also run a chat: **`admin`**, **`member`**, **`join-requests`**, **`invit
 and **`settings`** list and change who administers a group, who is in it, who is
 waiting at its door, which links open it and how fast people may post. The reads are
 yours; rule 13 below says which of the writes are, and which two never are.
+
+It can **watch** live events and **schedule** a message for later. `watch rules`
+writes the rules and `watch run` is the process that fires them; `send --at` hands a
+message to Telegram to post later, and `schedule post` stores one this machine's
+runner posts. Rule 14 below is your part: read the rules and the schedules, write
+neither, and always quote the guarantee a schedule carries, because it decides
+whether the message survives the machine being off.
 
 Downloads exist, and only one way: the **review queue**. A sync notes every link and
 file it sees; `review list` shows them; a person approves, and later accepts, each one
@@ -187,6 +194,24 @@ for it and never paste one anywhere else. `HIERARCHY_DENIED` means the account h
 the right but cannot use it on that person (it lacks a right it would grant, or the
 person holds more than it does); relay both rights sets from the message and stop.
 
+**14. A rule and a runner are the user's to set up, and a schedule's guarantee is
+never yours to paraphrase.** `watch rules add` and `edit` write a file that will act
+on the user's account without them present, so propose the exact command and let them
+run it; the same for `watch run`, which is a process they start and stop, and which
+blocks until they do. The reads are yours: `watch rules list`, `watch status`,
+`schedule list`, and `watch rules test --event FILE`, which says what a recorded event
+*would* do and fires none of it. `watch rules remove` asks `y/N` and has no `--yes`,
+so from an agent session it blocks — hand it over. Every schedule in `result` carries
+`guarantee`: `server-held` means Telegram holds the message and will post it with the
+user's machine off; `runner-held: fires only while watch run is up on this machine`
+means it will not post unless their runner is running. Quote the field, do not
+summarise it as "scheduled". `send --at` is a `send`: rule 2's allowlist and preview
+apply unchanged, and it is account-only, as is every `schedule` verb. A rule can never
+download or change anything — `alert`, `tag`, `bookmark`, `capture_metadata`,
+`archive` and `queue_review` are the whole list — so if the user wants a file fetched
+automatically, say plainly that the tool will not, and that `queue_review` is the
+nearest thing: it puts the file in front of them to approve.
+
 ## Machine-readable output
 
 Put `--json` **before** the subcommand and the command prints exactly one object
@@ -239,7 +264,12 @@ command in the hint), `IDENTITY_MODE_UNSUPPORTED` (that command needs the
 account, not a bot — rule 9; the hint is the same command without `--as-bot`),
 `BULK_LIMIT` (a `message delete`, `forward` or `copy`
 selection above `--limit` — narrow it; rule 10), `HIERARCHY_DENIED` (an admin action
-the account's own rights do not reach — rule 13, relay both rights sets), `CONFIG_INVALID` (often the file-mode refusal: something
+the account's own rights do not reach — rule 13, relay both rights sets),
+`RULE_INVALID` (the rule file will not load — the message names the file and the rule
+it broke), `COMMAND_MISSING` (a rule alerts a command that is not on PATH; it is
+caught when the rule loads, not when it would fire), `RUNNER_LOCKED` (a runner is
+already up — the message names its pid), `RUNNER_NOT_RUNNING` (`watch stop` or
+`reload` with nothing to signal), `CONFIG_INVALID` (often the file-mode refusal: something
 under `~/.telegram-tools` is readable by others and every write refuses until it
 is not; the hint carries the `chmod`, and `telegram-tools doctor`
 names the files).
@@ -287,6 +317,14 @@ names the files).
 | "let X in" / "turn X down" (a join request) | hand them `telegram-tools join-requests approve --chat <id> --user <@x>` or `… decline …` — rule 13 |
 | "make an invite link" / "kill that link" | hand them `telegram-tools invite create --chat <id> --expires 7d` or `invite revoke --chat <id> --link <link>` — rule 13 |
 | "set slow mode to a minute" | hand them `telegram-tools settings set --chat <id> --slow-mode 60` — rule 13 |
+| "what am I watching for?" / "what rules do I have?" | `telegram-tools --json watch rules list` — offline |
+| "is the watcher running?" | `telegram-tools --json watch status` — offline; reports the holder, the last tick and the rules loaded |
+| "would this have fired?" | `telegram-tools --json watch rules test --event /path/event.json` — fires nothing, contacts nobody |
+| "alert me when X is posted in Y" | hand them `telegram-tools watch rules add --name <n> --on message --scope <rid> --keyword X --alert-to <rid>` then `telegram-tools watch run` — rule 14, they run both |
+| "what's scheduled?" | `telegram-tools --json schedule list --chat <id>` — quote each row's `guarantee` verbatim |
+| "send this tomorrow at 9" (allowlisted) | `telegram-tools --json send --chat <id> --text "..." --at 2026-09-09T09:00 --yes` — Telegram holds it (`server-held`); account only |
+| "post this every Monday at 9" | hand them `telegram-tools schedule post --chat <id> --text "..." --every "0 9 * * mon"` — rule 14; it is `runner-held`, so say it fires only while `watch run` is up |
+| "cancel that scheduled message" | hand them `telegram-tools schedule cancel --id <id>` (add `--chat <id>` for one Telegram holds) — rule 14, it asks y/N |
 | "make me a group with topics" (they asked) | `telegram-tools create group --title "..." --forum --yes` |
 | "add a topic to that group" (they asked) | `telegram-tools create topic --chat <id> --title "..." --yes` |
 | "delete that topic/group" | hand them `telegram-tools delete topic --chat <id> --topic <id> --execute` — rule 4, they run it |
@@ -396,6 +434,14 @@ names the files).
   rights, for everyone, behind their exact label typed at a terminal, with no `--yes`.
   Rule 13. The dry-run (no `--execute`) and the five reads are fine to run; the other
   administration writes ask `y/N` and are the user's to answer.
+- **`watch rules add`, `edit`, `enable`, `disable`, `remove`, and `watch run`** — the
+  first five write a file that acts on the user's account without them present, and
+  `watch run` is a long-running process they start and stop (it blocks until they do).
+  Rule 14. `watch rules list`, `watch status`, `schedule list` and `watch rules test`
+  are the read-only half and are fine to run.
+- **`schedule post` and `schedule cancel`** — each asks `y/N` and has no `--yes`, so
+  from an agent session they block. Rule 14; hand the user the command. `send --at` is
+  a `send` and follows rule 2: allowlisted destination, `--yes`, and the user asked.
 - **`archive retention` and `archive forget`** — they remove rows from the user's
   local archive. Dry-run is the default and executing needs `--execute` plus the
   scope's exact title typed at a prompt, with no `--yes`; hand the user the command.
