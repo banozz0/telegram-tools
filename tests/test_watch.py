@@ -871,6 +871,25 @@ def test_the_runner_replays_then_handles_the_live_stream_and_reports_what_it_did
     assert again.sent == []
 
 
+def test_a_first_write_on_a_fresh_machine_leaves_the_tree_private(run_watch, capsys, home):
+    """`mkdir(parents=True)` modes the leaf only, and every later write refuses over a loose root.
+
+    Twice now a new writer has created `~/.telegram-tools` at the umask: the
+    audit log, then the rules directory. Both paths are checked here, on a home
+    where the directory does not exist yet.
+    """
+    root = home / ".telegram-tools"
+    assert not root.exists()
+
+    add_a_rule(run_watch, capsys, "--tag", "deploy")
+    assert root.stat().st_mode & 0o777 == 0o700
+    assert (root / "rules").stat().st_mode & 0o777 == 0o700
+
+    # And the second write, which is what used to refuse.
+    code, _out, err, _fake = run_watch(["--json", "watch", "rules", "disable", "--name", "deploys"], capsys=capsys)
+    assert code == 0, err
+
+
 def test_status_says_who_holds_the_lock_and_how_many_rules_load(run_watch, capsys, home):
     add_a_rule(run_watch, capsys, "--tag", "deploy")
     code, out, _err, _fake = run_watch(["--json", "watch", "status"], capsys=capsys)

@@ -2840,6 +2840,9 @@ async def _run_watch_run(args, config, *, report: Reporter) -> int:
     """
     paths = archive_store.paths_for()
     _refuse_unrunnable(paths)
+    # The lock and the log are made under the tool's root; `mkdir(parents=True)`
+    # would give that root the umask, and the next write would refuse over it.
+    profile_store.make_private_tree(paths.root, paths.root)
     identity = await _offline_identity(config, report)
     report.show_banner()
     mode = "bot" if _in_bot_mode(report) else "account"
@@ -3068,7 +3071,10 @@ async def _run_schedule(args, config, *, client=None, report: Reporter) -> int:
             await _disconnect_quietly(client)
             raise login.LoginRequired(getattr(config, "profile", profile_store.DEFAULT_PROFILE))
     try:
-        if client is not None and reference is not None or kind == "post":
+        # The identity comes off the connection where there is one, and off the
+        # profile record where there is not: this runner's own schedules are
+        # rows in the local archive and need no Telegram.
+        if client is not None and (reference is not None or kind == "post"):
             identity = await _acting(client, report)
         else:
             identity = await _offline_identity(config, report)
