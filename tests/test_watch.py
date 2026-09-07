@@ -558,13 +558,26 @@ def test_the_queue_yields_none_when_nothing_arrives_so_the_runner_can_tick(loop_
 # -- the detached session ------------------------------------------------------
 
 
-def _telethon_session(path: Path, auth_key: bytes) -> None:
-    """A session file shaped exactly as Telethon writes one."""
+def _telethon_session(path: Path, auth_key: bytes | None) -> None:
+    """A session file shaped exactly as Telethon writes one, version row included.
+
+    Built by hand rather than through `SQLiteSession` so the test states the
+    schema `detached_session` reads: if Telethon ever moves the authorization
+    out of that one row, this file stops matching and the test says so.
+    """
+    from telethon.sessions.sqlite import CURRENT_VERSION
+
     with sqlite3.connect(path) as connection:
         connection.execute("CREATE TABLE version (version integer primary key)")
+        connection.execute("INSERT INTO version VALUES (?)", (CURRENT_VERSION,))
         connection.execute(
             "CREATE TABLE sessions (dc_id integer primary key, server_address text, port integer, auth_key blob, takeout_id integer, tmp_auth_key blob)"
         )
+        connection.execute(
+            "CREATE TABLE entities (id integer primary key, hash integer not null, username text, phone integer, name text, date integer)"
+        )
+        connection.execute("CREATE TABLE sent_files (md5_digest blob, file_size integer, type integer, id integer, hash integer, primary key(md5_digest, file_size, type))")
+        connection.execute("CREATE TABLE update_state (id integer primary key, pts integer, qts integer, date integer, seq integer)")
         connection.execute("INSERT INTO sessions VALUES (?,?,?,?,?,?)", (2, "149.154.167.51", 443, auth_key, None, None))
 
 
@@ -589,6 +602,18 @@ def test_the_runner_reads_the_session_without_holding_it_so_one_shot_commands_ke
     # The copy is in memory: nothing was written beside the session, and the
     # session itself is untouched.
     assert sorted(path.name for path in tmp_path.iterdir()) == ["default.session"]
+
+    # And the other half of the claim: the file is free afterwards, so the
+    # ordinary one-shot path opens it the way Telethon always has. This is the
+    # session object `create_client` builds, on the same file, at the same time.
+    from telethon.sessions import SQLiteSession
+
+    one_shot = SQLiteSession(str(session_path))
+    try:
+        assert one_shot.auth_key.key == key
+        assert one_shot.dc_id == 2
+    finally:
+        one_shot.close()
 
 
 def test_a_session_that_was_never_logged_in_refuses_by_name(tmp_path):
