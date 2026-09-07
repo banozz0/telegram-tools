@@ -2923,6 +2923,12 @@ async def _run_watch_rules(args, config, *, report: Reporter) -> int:
     identity = await _offline_identity(config, report)
     report.show_banner()
     paths = archive_store.paths_for()
+    if verb in RULES_WRITES:
+        # `Path.mkdir(parents=True)` gives the leaf its mode and the parents the
+        # umask, so a first rule on a fresh machine would leave
+        # `~/.telegram-tools` at 0755 -- which the very next write refuses over.
+        # The tree is made 0700 from the root down before core writes into it.
+        profile_store.make_private_tree(paths.rules, paths.root)
 
     if verb == "list":
         loaded = _rules_set()
@@ -3104,7 +3110,8 @@ async def _run_schedule_post(args, schedules, identity: Identity, *, client, rep
     text = _message_text(args.text, has_files=False)
     if not text:
         raise ValueError("schedule post needs --text.")
-    destination, peer, _resolved = await _resolve_destination(client, report, args.chat, getattr(args, "topic", None))
+    resolved, _chat, _topic, destination = await _resolve_destination(client, report, args.chat, getattr(args, "topic", None))
+    peer = resolved.input_entity
     report.set_target(destination)
     when = None if args.at is None else watch_ops.require_future(watch_ops.parse_when(args.at))
     every = None if args.every is None else watch_ops.check_every(args.every)
@@ -3141,7 +3148,7 @@ async def _run_schedule_post(args, schedules, identity: Identity, *, client, rep
     try:
         schedule = schedules.add(destination.rid, text, at=None if when is None else when.isoformat(), every=every)
     except _runner.RunnerError as exc:
-        raise watch_ops.WatchError(str(exc), code="INVALID_ARGUMENT") from exc
+        raise ValueError(str(exc)) from exc
     stored = schedules.get(schedule.id)
     evidence = Evidence.verified(f"schedule {stored.id} is stored, next {_runner._iso(stored.next_wall)}, {stored.guarantee}")
     report.set_evidence(evidence)

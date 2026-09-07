@@ -379,17 +379,25 @@ def local_zone():
     return datetime.now().astimezone().tzinfo
 
 
+# A time or a repeat that does not parse is a usage mistake, and this tool has
+# always answered one the way argparse does: the message on stderr and exit 2,
+# with no envelope code borrowed from something that means another thing. Same
+# as `member mute --until`.
+
+
 def parse_when(text: str) -> datetime:
     """`--at` as an aware datetime; a time with no offset is this machine's local time."""
     try:
         return _runner.parse_at(text, local_zone())
     except _runner.RunnerError as exc:
-        raise WatchError(str(exc), code="INVALID_ARGUMENT", hint="ISO 8601: 2026-09-09T09:00, or 2026-09-09T09:00+02:00") from exc
+        raise ValueError(
+            f"--at {text!r} is not an ISO 8601 date and time (2026-09-09T09:00, or 2026-09-09T09:00+02:00): {exc}"
+        ) from exc
 
 
 def require_future(when: datetime) -> datetime:
     if when.timestamp() <= datetime.now(timezone.utc).timestamp():
-        raise WatchError(f"{when.isoformat()} is in the past", code="INVALID_ARGUMENT", hint="pick a moment ahead of now")
+        raise ValueError(f"--at {when.isoformat()} is in the past; pick a moment ahead of now.")
     return when
 
 
@@ -398,7 +406,9 @@ def check_every(text: str) -> str:
     try:
         _runner.parse_every(text)
     except _runner.RunnerError as exc:
-        raise WatchError(str(exc), code="INVALID_ARGUMENT", hint="15m, 2h, 1d, or a cron expression like `0 9 * * mon`") from exc
+        raise ValueError(
+            f"--every {text!r} is neither an interval (15m, 2h, 1d) nor a five-field cron expression like `0 9 * * mon`: {exc}"
+        ) from exc
     return text
 
 
