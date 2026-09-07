@@ -1,0 +1,6 @@
+usage: telegram-tools watch rules test [-h] --event FILE [--name NAME]
+
+options:
+  -h, --help    show this help message and exit
+  --event FILE  A JSON file holding one recorded event
+  --name NAME   Only this rule; without it, every loaded rule

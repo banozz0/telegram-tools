@@ -1,0 +1,12 @@
+usage: telegram-tools schedule post [-h] --chat CHAT [--topic TOPIC]
+                                    --text TEXT (--at TIME | --every REPEAT)
+
+options:
+  -h, --help      show this help message and exit
+  --chat CHAT     Chat/channel username, link, or ID
+  --topic TOPIC   Topic ID to post into; omit for the chat itself
+  --text TEXT     The message, or - to read it from stdin
+  --at TIME       One ISO 8601 moment; a time with no offset is this machine's
+                  local time
+  --every REPEAT  Repeating: an interval like 15m, 2h, 1d, or a five-field
+                  cron expression

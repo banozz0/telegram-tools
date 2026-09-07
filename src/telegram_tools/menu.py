@@ -12,6 +12,7 @@ from telegram_tools import archive as archive_store
 from telegram_tools import cli
 from telegram_tools.bots import IMPLICIT_OTHER_RIGHT, format_bot_profile, get_bot_profile, list_bots, resolve_bot, right_names
 from telegram_tools.client import SessionInUseError, create_client, start_client
+from telegram_tools._core import rules as _rules
 from telegram_tools._core.columns import cell
 from telegram_tools._core.identity import banner as identity_banner
 from telegram_tools.adapters import AccountIdentity
@@ -1967,7 +1968,7 @@ def _pick_candidates(session, *, states: tuple[str, ...], read, write, trail: st
 
 async def _flow_review_list(*, session, runner, read, write) -> bool:
     """The queue: an optional kind, an optional state, then the list. Fetches nothing."""
-    trail = crumb(MAIN, "Watch", "Review queue")
+    trail = crumb(MAIN, "Watch", "Review queue", "The queue")
     staged: dict[str, Any] = {"kind": None, "state": None}
     while True:
         rows = [
@@ -1993,7 +1994,7 @@ async def _flow_review_list(*, session, runner, read, write) -> bool:
 async def _flow_review_approve(*, session, runner, read, write) -> bool:
     """Approve: the CLI's own pick and y/N on this terminal, then the fetch. The
     menu passes no ids and no answer; it is not a shorter path past the gate."""
-    trail = crumb(MAIN, "Watch", "Approve downloads")
+    trail = crumb(MAIN, "Watch", "Review queue", "Approve downloads")
     args = _namespace(command="review", review_kind="approve", ids=None)
     result = await _act(args, session=session, runner=runner, read=read, write=write, trail=trail, rows=((STAY, "Approve more"),))
     while result is STAY:
@@ -2005,7 +2006,7 @@ def _flow_review_move(kind: str, *, title: str, states: tuple[str, ...], connect
     """Accept, reject, retry: tick the candidates, then the CLI shows them and asks."""
 
     async def flow(*, session, runner, read, write) -> bool:
-        trail = crumb(MAIN, "Watch", title)
+        trail = crumb(MAIN, "Watch", "Review queue", title)
         while True:
             ids = _pick_candidates(session, states=states, read=read, write=write, trail=trail)
             if ids is BACK:
@@ -2025,8 +2026,8 @@ async def _flow_review_status(*, session, runner, read, write) -> bool:
     return _leave_action(after_action(read=read, write=write))
 
 
-WATCH_ROWS = (
-    ("Review queue (what is waiting; fetches nothing)", _flow_review_list),
+REVIEW_ROWS = (
+    ("The queue (what is waiting; fetches nothing)", _flow_review_list),
     ("Approve downloads (pick, y/N, then the fetch runs into quarantine)", _flow_review_approve),
     ("Accept a quarantined download (shows the verdict, then y/N)", _flow_review_move("accept", title="Accept", states=("quarantined",), connect=False)),
     ("Reject a candidate (deletes its quarantined bytes, after y/N)", _flow_review_move("reject", title="Reject", states=("queued", "approved", "fetching", "quarantined", "failed"), connect=False)),
@@ -2035,8 +2036,344 @@ WATCH_ROWS = (
 )
 
 
+# -- row 7: Watch -- the rules, the runner, what is scheduled, the review queue ---
+
+# One form for a rule (section 10.2). The list fields take a comma-separated
+# line, which the CLI splits exactly as it splits a repeated flag, and `none`
+# empties one on an edit. Every flag `watch rules add` and `edit` define has a
+# row here; the file the form writes is JSON and stays editable by hand.
+RULE_FIELDS = (
+    ("name", "Name (also the file name)", "text"),
+    ("on", f"Events ({', '.join(_rules.EVENT_KINDS)})", "text"),
+    ("scope", "Only these scopes (rids, comma-separated)", "text"),
+    ("sender", "Only these senders (tg:user:ID)", "text"),
+    ("identity", "Only while acting as (tg:user:ID)", "text"),
+    ("domain", "Only links to these domains", "text"),
+    ("keyword", "Only messages containing these words", "text"),
+    ("regex", "Only text matching this regex", "text"),
+    ("media_type", "Only files of these MIME types", "text"),
+    ("min_bytes", "Only files at least this many bytes", "int"),
+    ("max_bytes", "Only files at most this many bytes", "int"),
+    ("alert_to", "Alert these chats or topics (rids)", "text"),
+    ("alert_command", "Alert by running this command", "text"),
+    ("tag", "Tag the message with these labels", "text"),
+    ("bookmark", "Bookmark the message", "toggle"),
+    ("capture_metadata", "Record what the platform sent with it", "toggle"),
+    ("archive_scope", "Sync the scope into the archive", "toggle"),
+    ("queue_review", "Queue its links and files for review", "toggle"),
+    ("cooldown", "Cooldown seconds (fold further alerts)", "int"),
+    ("dedup_window", "Dedup window seconds", "int"),
+)
+RULE_LIST_FIELDS = ("on", "scope", "sender", "identity", "domain", "keyword", "media_type", "alert_to", "alert_command", "tag")
+RULE_REQUIRED_ADD = ("name", "on")
+RULE_REQUIRED_EDIT = ("name",)
+
+SCHEDULE_POST_FIELDS = (
+    ("text", "Message text", "text"),
+    ("at", "Once, at (2026-09-09T09:00, or with an offset)", "text"),
+    ("every", "Repeating (15m, 2h, 1d, or a cron expression)", "text"),
+)
+
+
+def _rule_names() -> list[str]:
+    """The rule names on this machine, for a picker. A directory that will not load is empty here."""
+    directory = archive_store.paths_for().rules
+    try:
+        return sorted(path.stem for path in directory.glob("*.json"))
+    except OSError:
+        return []
+
+
+def _pick_rule(*, read, write, trail: str) -> Any:
+    names = _rule_names()
+    if not names:
+        write("No rules yet. `Add a rule` writes the first one.")
+        read("Enter = back: ")
+        return BACK
+    choice = choose(names, title=trail, read=read, write=write)
+    return BACK if choice is BACK else names[choice]
+
+
+def _rule_values(staged: dict) -> dict:
+    """The staged form as the namespace `watch rules add|edit` reads.
+
+    A list row is handed over as a one-element list holding the whole line: the
+    CLI splits it on commas the same way it folds a repeated flag, so the menu
+    and the flags reach the same rule.
+    """
+    values: dict[str, Any] = {}
+    for key, _label, kind in RULE_FIELDS:
+        value = staged[key]
+        if key in RULE_LIST_FIELDS:
+            values[key] = [value] if value else None
+        elif kind == "toggle":
+            values[key] = bool(value)
+        else:
+            values[key] = value if value not in ("", None) else None
+    return values
+
+
+async def _run_form(fields, required, *, title, read, write, run_it, initial=None) -> Any:
+    """A staging screen over `fields`, then `run_it(values)`. Shared by the rule and schedule rows."""
+    staged: dict[str, Any] = {key: (False if kind == "toggle" else None) for key, _label, kind in fields}
+    staged.update(initial or {})
+    while True:
+        rows = [(key, f"{label:<46} [{_staged_label(kind, staged[key])}]") for key, label, kind in fields]
+        rows.append(("run", "Do it (the CLI shows the plan, then asks)"))
+        choice = choose([label for _key, label in rows], title=title, read=read, write=write, back_label="Back (discards)")
+        if choice is BACK:
+            return BACK
+        key = rows[choice][0]
+        if key == "run":
+            missing = [label for field_key, label, _kind in fields if field_key in required and staged[field_key] in (None, "")]
+            if missing:
+                write("Fill in first: " + ", ".join(missing) + ".")
+                continue
+            result = await run_it(dict(staged))
+            if result is not STAY:
+                return result
+            continue
+        _key, label, kind = fields[choice]
+        if kind == "toggle":
+            staged[key] = not staged[key]
+            continue
+        answer = ask_int(label, read=read, write=write, current=staged[key]) if kind == "int" else ask_text(label, read=read, write=write, current=staged[key] or None)
+        if answer is BACK:
+            continue
+        staged[key] = None if answer is CLEAR else answer
+
+
+def _flow_rules_write(verb: str, title: str):
+    """`watch rules add` and `edit`: one form, then the CLI writes the file and reads it back."""
+
+    async def flow(*, session, runner, read, write) -> bool:
+        trail = crumb(MAIN, "Watch", "Rules", title)
+        initial: dict[str, Any] = {}
+        if verb == "edit":
+            name = _pick_rule(read=read, write=write, trail=crumb(trail, "Which rule"))
+            if name is BACK:
+                return True
+            initial = {"name": name}
+
+        async def run_it(staged: dict) -> Any:
+            args = _namespace(command="watch", watch_kind="rules", rules_verb=verb, **_rule_values(staged))
+            return await _act(args, session=session, runner=runner, read=read, write=write, trail=trail, rows=(RUN_AGAIN, (STAY, "Another rule")), connect=False)
+
+        result = await _run_form(
+            RULE_FIELDS,
+            RULE_REQUIRED_ADD if verb == "add" else RULE_REQUIRED_EDIT,
+            title=trail,
+            read=read,
+            write=write,
+            run_it=run_it,
+            initial=initial,
+        )
+        return True if result is BACK else _leave(result)
+
+    return flow
+
+
+def _flow_rules_named(verb: str, title: str):
+    """`remove`, `enable`, `disable`: pick the rule, then the CLI asks whatever its gate asks."""
+
+    async def flow(*, session, runner, read, write) -> bool:
+        trail = crumb(MAIN, "Watch", "Rules", title)
+        while True:
+            name = _pick_rule(read=read, write=write, trail=trail)
+            if name is BACK:
+                return True
+            args = _namespace(command="watch", watch_kind="rules", rules_verb=verb, name=name)
+            result = await _act(args, session=session, runner=runner, read=read, write=write, trail=crumb(trail, name), rows=((STAY, "Another rule"),), connect=False)
+            if result is not STAY:
+                return _leave(result)
+
+    return flow
+
+
+async def _flow_rules_test(*, session, runner, read, write) -> bool:
+    """`watch rules test`: a recorded event against the rules. Fires nothing, asks no host."""
+    trail = crumb(MAIN, "Watch", "Rules", "Test")
+    while True:
+        answer = ask_text("Path to a recorded event (JSON)", read=read, write=write)
+        if answer is BACK:
+            return True
+        path = None if answer is CLEAR else answer
+        if not path:
+            continue
+        name = None
+        if _rule_names():
+            picked = choose(["Every loaded rule", "One rule"], title=crumb(trail, "Which rules"), read=read, write=write)
+            if picked is BACK:
+                continue
+            if picked == 1:
+                name = _pick_rule(read=read, write=write, trail=crumb(trail, "Which rule"))
+                if name is BACK:
+                    continue
+        args = _namespace(command="watch", watch_kind="rules", rules_verb="test", event=path, name=name)
+        result = await _act(args, session=session, runner=runner, read=read, write=write, trail=trail, rows=((STAY, "Another event"),), connect=False)
+        if result is not STAY:
+            return _leave(result)
+
+
+async def _flow_rules_list(*, session, runner, read, write) -> bool:
+    args = _namespace(command="watch", watch_kind="rules", rules_verb="list")
+    await _call(args, session=session, runner=runner, write=write, connect=False)
+    return _leave_action(after_action(read=read, write=write))
+
+
+RULES_ROWS = (
+    ("List the rules on this machine", _flow_rules_list),
+    ("Add a rule", _flow_rules_write("add", "Add")),
+    ("Edit a rule (the flags you fill in replace those fields)", _flow_rules_write("edit", "Edit")),
+    ("Enable a rule", _flow_rules_named("enable", "Enable")),
+    ("Disable a rule (the file stays)", _flow_rules_named("disable", "Disable")),
+    ("Remove a rule (asks first)", _flow_rules_named("remove", "Remove")),
+    ("Test a recorded event against the rules (fires nothing)", _flow_rules_test),
+)
+
+
+def _flow_runner_verb(kind: str):
+    """One runner lifecycle row. `run` blocks here until Ctrl-C, which is what a runner is."""
+
+    async def flow(*, session, runner, read, write) -> bool:
+        trail = crumb(MAIN, "Watch", "Runner", kind)
+        # Every one of these runs on a client of its own: `run` connects with a
+        # detached copy of the authorization so the menu keeps its own session,
+        # and the other three open nothing at all.
+        args = _namespace(command="watch", watch_kind=kind)
+        result = await _act(args, session=session, runner=runner, read=read, write=write, trail=trail, rows=(RUN_AGAIN,), connect=False)
+        return _leave(result)
+
+    return flow
+
+
+RUNNER_ROWS = (
+    ("Run the runner here (foreground; Ctrl-C stops it)", _flow_runner_verb("run")),
+    ("Runner status (lock, rules, last tick, cursors, schedules)", _flow_runner_verb("status")),
+    ("Stop the running runner", _flow_runner_verb("stop")),
+    ("Reload its rules", _flow_runner_verb("reload")),
+)
+
+
+async def _flow_schedule_list(*, session, runner, read, write) -> bool:
+    """What is scheduled. Without a chat only this runner's own: Telegram holds them per chat."""
+    trail = crumb(MAIN, "Watch", "Scheduled", "List")
+    while True:
+        choice = choose(
+            ["This runner's own only (offline)", "Also what Telegram holds for one chat"],
+            title=trail,
+            read=read,
+            write=write,
+        )
+        if choice is BACK:
+            return True
+        reference = None
+        if choice == 1:
+            picked = await _pick_chat(session=session, read=read, write=write, trail=crumb(trail, "Chat"))
+            if picked is BACK:
+                continue
+            reference = picked.reference
+        args = _namespace(command="schedule", schedule_kind="list", chat=reference)
+        result = await _act(args, session=session, runner=runner, read=read, write=write, trail=trail, rows=((STAY, "List again"),), connect=reference is not None)
+        if result is not STAY:
+            return _leave(result)
+
+
+async def _flow_schedule_post(*, session, runner, read, write) -> bool:
+    """A message this runner will post: pick the chat and topic, then when and what."""
+    trail = crumb(MAIN, "Watch", "Scheduled", "Post")
+    while True:
+        picked = await _pick_chat(session=session, read=read, write=write, trail=trail)
+        if picked is BACK:
+            return True
+        chosen = await _ask_send_topic(picked, session=session, read=read, write=write, trail=crumb(trail, picked.title))
+        if chosen is BACK:
+            return True
+        topic = None if chosen is CLEAR else chosen
+
+        async def run_it(staged: dict) -> Any:
+            if bool(staged["at"]) == bool(staged["every"]):
+                write("Fill in exactly one of: once at a moment, or a repeat.")
+                return STAY
+            args = _namespace(
+                command="schedule",
+                schedule_kind="post",
+                chat=picked.reference,
+                topic=None if topic is None else topic.id,
+                text=staged["text"],
+                at=staged["at"] or None,
+                every=staged["every"] or None,
+            )
+            return await _act(args, session=session, runner=runner, read=read, write=write, trail=crumb(trail, picked.title), rows=(RUN_AGAIN, (STAY, "Another")))
+
+        result = await _run_form(SCHEDULE_POST_FIELDS, ("text",), title=crumb(trail, picked.title), read=read, write=write, run_it=run_it)
+        if result is not BACK:
+            return _leave(result)
+
+
+async def _flow_schedule_cancel(*, session, runner, read, write) -> bool:
+    """Cancel one: this runner's own by id, or one Telegram is holding, which needs its chat."""
+    trail = crumb(MAIN, "Watch", "Scheduled", "Cancel")
+    while True:
+        choice = choose(
+            ["One this runner holds (id only)", "One Telegram holds (a chat and a message id)"],
+            title=trail,
+            read=read,
+            write=write,
+        )
+        if choice is BACK:
+            return True
+        reference = None
+        if choice == 1:
+            picked = await _pick_chat(session=session, read=read, write=write, trail=crumb(trail, "Chat"))
+            if picked is BACK:
+                continue
+            reference = picked.reference
+        answer = ask_text("The id `schedule list` printed", read=read, write=write)
+        if answer is BACK or answer is CLEAR or not answer:
+            continue
+        args = _namespace(command="schedule", schedule_kind="cancel", schedule_id=answer, chat=reference)
+        result = await _act(args, session=session, runner=runner, read=read, write=write, trail=trail, rows=((STAY, "Cancel another"),), connect=reference is not None)
+        if result is not STAY:
+            return _leave(result)
+
+
+SCHEDULE_ROWS = (
+    ("What is scheduled (each row says which guarantee it has)", _flow_schedule_list),
+    ("Schedule a message this runner posts (runner-held)", _flow_schedule_post),
+    ("Cancel one", _flow_schedule_cancel),
+)
+
+
+def _flow_watch_group(title: str, rows):
+    """One of the four Watch screens: its rows, and nothing else."""
+
+    async def flow(*, session, runner, read, write) -> bool:
+        trail = crumb(MAIN, "Watch", title)
+        while True:
+            choice = choose([label for label, _flow in rows], title=trail, read=read, write=write)
+            if choice is BACK:
+                return True
+            outcome = await _group(rows[choice][1], session=session, runner=runner, read=read, write=write)
+            if outcome is not True:
+                return outcome
+
+    return flow
+
+
+# Row 7's four screens, in the order a person meets them: the rules first,
+# because nothing fires without one; then the runner that fires them; then what
+# is waiting to be posted; then the queue a rule can fill but never empty.
+WATCH_ROWS = (
+    ("Rules (list, add, edit, enable, disable, remove, test)", _flow_watch_group("Rules", RULES_ROWS)),
+    ("Runner (run, status, stop, reload)", _flow_watch_group("Runner", RUNNER_ROWS)),
+    ("Scheduled messages (list, post, cancel)", _flow_watch_group("Scheduled", SCHEDULE_ROWS)),
+    ("Review queue (approve, accept, reject, retry, status)", _flow_watch_group("Review queue", REVIEW_ROWS)),
+)
+
+
 async def _flow_watch(*, session, runner, read, write) -> bool:
-    """Row 7. The review queue; rules and the runner join it in a later version."""
+    """Row 7. The rules, the runner that fires them, what is scheduled, and the review queue."""
     trail = crumb(MAIN, "Watch")
     while True:
         choice = choose([label for label, _flow in WATCH_ROWS], title=trail, read=read, write=write)

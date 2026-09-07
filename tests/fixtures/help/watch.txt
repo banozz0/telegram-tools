@@ -1,0 +1,16 @@
+usage: telegram-tools watch [-h] {run,status,stop,reload,rules} ...
+
+positional arguments:
+  {run,status,stop,reload,rules}
+    run                 Run the runner here, in the foreground: replay, then
+                        live events and schedules
+    status              The runner's lock and holder, rules loaded, last tick,
+                        cursors and schedules
+    stop                Ask the running runner to exit, and wait for its lock
+                        to clear
+    reload              Ask the running runner to re-read its rules
+    rules               The rules on this machine: list, add, edit, remove,
+                        enable, disable, test
+
+options:
+  -h, --help            show this help message and exit

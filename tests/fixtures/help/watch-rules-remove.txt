@@ -1,0 +1,5 @@
+usage: telegram-tools watch rules remove [-h] --name NAME
+
+options:
+  -h, --help   show this help message and exit
+  --name NAME  The rule's name

@@ -1,0 +1,6 @@
+usage: telegram-tools schedule list [-h] [--chat CHAT]
+
+options:
+  -h, --help   show this help message and exit
+  --chat CHAT  Also read what Telegram is holding for this chat (server-held);
+               without it, only this runner's own

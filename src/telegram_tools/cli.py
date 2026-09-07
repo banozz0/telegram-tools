@@ -11,11 +11,14 @@ from typing import Sequence
 
 from telegram_tools._core import export as _export
 from telegram_tools._core import rid as _rid
+from telegram_tools._core import rules as _rules
+from telegram_tools._core import runner as _runner
 from telegram_tools._core.audit import AuditLog
 from telegram_tools._core.contract import CodedError, exit_code, utc_now
 from telegram_tools._core.identity import Identity, Target
 from telegram_tools._core.plan import Evidence, Mutation
 from telegram_tools._core.redaction import redact_text
+from telethon.tl.functions.messages import DeleteScheduledMessagesRequest, GetScheduledHistoryRequest
 from telethon.tl.types import InputUserSelf
 from telegram_tools import archive as archive_store
 from telegram_tools import login
@@ -39,7 +42,7 @@ from telegram_tools.bots import (
     resolve_bot,
     right_names,
 )
-from telegram_tools.client import _disconnect_quietly, create_client, start_client, tighten_session
+from telegram_tools.client import _disconnect_quietly, create_client, create_detached_client, start_client, tighten_session
 from telegram_tools.config import ConfigError, bot_id_from_token, load_config, lookup_bot_token, resolve_bot_token
 from telegram_tools.create import confirm_create, create_channel, create_group, create_topic, format_create_preview
 from telegram_tools.delete import (
@@ -60,6 +63,8 @@ from telegram_tools.prompts import BACK, pick_many
 from telegram_tools import review as review_ops
 from telegram_tools import structure as structure_ops
 from telegram_tools import manage as manage_ops
+from telegram_tools import watch as watch_ops
+from telegram_tools.adapters import events as watch_events
 from telegram_tools.adapters.manage import TelegramManagePort
 from telegram_tools._core import blueprint as _blueprint
 from telegram_tools.adapters.blueprint import TelegramBlueprintPort, chat_kind
@@ -96,6 +101,14 @@ ARCHIVE_WRITES = ("sync", "retention", "forget")
 # The review commands that write: a queue state, quarantine bytes, the media
 # store. `list` and `status` read the archive and two directories.
 REVIEW_WRITES = ("approve", "accept", "reject", "retry")
+# The watch commands that write on this machine: `run` takes the lock and
+# appends to the log, and the five rule verbs write files under `rules/`.
+# `status`, `stop`, `reload`, `rules list` and `rules test` only read or signal.
+WATCH_WRITES = watch_ops.WATCH_WRITES
+RULES_WRITES = watch_ops.RULES_WRITES
+# `post` stores a schedule row and `cancel` removes one (or a message Telegram
+# is holding); `list` reads.
+SCHEDULE_WRITES = watch_ops.SCHEDULE_WRITES
 
 # What `--as-bot` may run. Section 5.2: a bot has no dialog list, no history and
 # no search (Telegram marks those user-only), owns nothing it could delete, and
@@ -108,7 +121,10 @@ REVIEW_WRITES = ("approve", "accept", "reject", "retry")
 # refuse here too.
 # The administration groups (section 13) run as a bot too, where the bot is an
 # admin holding the right: `_run_manage` refuses a bot that is not an admin.
-BOT_MODE_COMMANDS = ("send", "create", "message", *manage_ops.GROUPS)
+# `watch` is here because a bot receives updates for the chats it is in, which
+# is exactly what a rule watches; `schedule` is not, because `schedule_date` is
+# user-only (section 5.2) and a bot cannot hold a message for Telegram to post.
+BOT_MODE_COMMANDS = ("send", "create", "message", "watch", *manage_ops.GROUPS)
 BOT_MODE_CREATE_KINDS = ("topic",)
 
 
@@ -354,6 +370,65 @@ def build_parser() -> argparse.ArgumentParser:
     settings_set.add_argument("--chat", required=True, help=chat_help)
     settings_set.add_argument("--slow-mode", dest="slow_mode", type=int, required=True, metavar="SECONDS", help="Seconds between one member's messages: 0 (off), 10, 30, 60, 300, 900 or 3600")
 
+    # -- watch and scheduling (section 10): the runner, its rules, the two guarantees ---
+    rid_help = "A rid: tg:chat:ID, or tg:topic:ID:TOPIC for one forum topic"
+
+    watch_parser = subparsers.add_parser("watch", help="Rules over live Telegram events, and the runner that fires them")
+    watch_kinds = watch_parser.add_subparsers(dest="watch_kind")
+
+    watch_kinds.add_parser("run", help="Run the runner here, in the foreground: replay, then live events and schedules")
+    watch_kinds.add_parser("status", help="The runner's lock and holder, rules loaded, last tick, cursors and schedules")
+    watch_kinds.add_parser("stop", help="Ask the running runner to exit, and wait for its lock to clear")
+    watch_kinds.add_parser("reload", help="Ask the running runner to re-read its rules")
+
+    rules_parser = watch_kinds.add_parser("rules", help="The rules on this machine: list, add, edit, remove, enable, disable, test")
+    rules_kinds = rules_parser.add_subparsers(dest="rules_verb")
+    rules_kinds.add_parser("list", help="Every rule loaded, what it watches and what it does")
+    rules_add = rules_kinds.add_parser("add", help="Write a new rule file (the file is JSON and stays editable by hand)")
+    rules_edit = rules_kinds.add_parser("edit", help="Change a rule: the flags you pass replace those fields, the rest stay")
+    for rule_parser in (rules_add, rules_edit):
+        rule_parser.add_argument("--name", required=True, help="The rule's name, which is also its file name")
+        rule_parser.add_argument("--on", action="append", metavar="KIND", help="An event kind to trigger on; repeatable. One of: " + ", ".join(_rules.EVENT_KINDS))
+        rule_parser.add_argument("--scope", action="append", metavar="RID", help=f"Only events in this scope; repeatable, `none` clears. {rid_help}")
+        rule_parser.add_argument("--sender", action="append", metavar="RID", help="Only events from this sender (tg:user:ID); repeatable, `none` clears")
+        rule_parser.add_argument("--identity", action="append", metavar="RID", help="Only while acting as this identity (tg:user:ID); repeatable, `none` clears")
+        rule_parser.add_argument("--domain", action="append", metavar="HOST", help="Only messages linking to this domain; repeatable, `none` clears")
+        rule_parser.add_argument("--keyword", action="append", metavar="WORD", help="Only messages containing this word; repeatable, `none` clears")
+        rule_parser.add_argument("--regex", metavar="PATTERN", help="Only messages whose text matches this Python regex; `none` clears")
+        rule_parser.add_argument("--media-type", dest="media_type", action="append", metavar="TYPE", help="Only files of this MIME type (image/* allowed); repeatable, `none` clears")
+        rule_parser.add_argument("--min-bytes", dest="min_bytes", type=int, metavar="N", help="Only files at least this large; -1 clears")
+        rule_parser.add_argument("--max-bytes", dest="max_bytes", type=int, metavar="N", help="Only files at most this large; -1 clears")
+        rule_parser.add_argument("--alert-to", dest="alert_to", action="append", metavar="RID", help=f"Alert this chat or topic; repeatable. The destination must be in TELEGRAM_SEND_ALLOWLIST. {rid_help}")
+        rule_parser.add_argument("--alert-command", dest="alert_command", action="append", metavar="CMD", help="Alert by running this command with the text on stdin; repeatable. It must be on PATH when the rule loads")
+        rule_parser.add_argument("--tag", action="append", metavar="LABEL", help="Tag the message in the archive; repeatable")
+        rule_parser.add_argument("--bookmark", action="store_true", help="Note the message as a bookmark in the archive")
+        rule_parser.add_argument("--capture-metadata", dest="capture_metadata", action="store_true", help="Record what the platform delivered with the event; never a fetch")
+        rule_parser.add_argument("--archive-scope", dest="archive_scope", action="store_true", help="Sync the event's scope into the archive, within the disk budget")
+        rule_parser.add_argument("--queue-review", dest="queue_review", action="store_true", help="Put the message's links and files in the review queue, where a person approves")
+        rule_parser.add_argument("--cooldown", type=int, metavar="SECONDS", help="Fold further alerts to one destination into a summary for this long")
+        rule_parser.add_argument("--dedup-window", dest="dedup_window", type=int, metavar="SECONDS", help="How long a fired event stays remembered so a replay fires nothing twice")
+    for verb, text in (("remove", "Delete a rule file (y/N)"), ("enable", "Turn a rule on"), ("disable", "Turn a rule off, keeping the file")):
+        named = rules_kinds.add_parser(verb, help=text)
+        named.add_argument("--name", required=True, help="The rule's name")
+    rules_test = rules_kinds.add_parser("test", help="Say what a recorded event would do, firing nothing and asking no host")
+    rules_test.add_argument("--event", required=True, metavar="FILE", help="A JSON file holding one recorded event")
+    rules_test.add_argument("--name", help="Only this rule; without it, every loaded rule")
+
+    schedule_parser = subparsers.add_parser("schedule", help="Messages waiting to be posted: list, post (this runner holds it), cancel")
+    schedule_kinds = schedule_parser.add_subparsers(dest="schedule_kind")
+    schedule_list = schedule_kinds.add_parser("list", help="What is scheduled, each row saying which of the two guarantees it has")
+    schedule_list.add_argument("--chat", help="Also read what Telegram is holding for this chat (server-held); without it, only this runner's own")
+    schedule_post = schedule_kinds.add_parser("post", help="Store a message for this runner to post later (runner-held: it fires only while `watch run` is up)")
+    schedule_post.add_argument("--chat", required=True, help="Chat/channel username, link, or ID")
+    schedule_post.add_argument("--topic", type=positive_int, help="Topic ID to post into; omit for the chat itself")
+    schedule_post.add_argument("--text", required=True, help="The message, or - to read it from stdin")
+    schedule_when = schedule_post.add_mutually_exclusive_group(required=True)
+    schedule_when.add_argument("--at", metavar="TIME", help="One ISO 8601 moment; a time with no offset is this machine's local time")
+    schedule_when.add_argument("--every", metavar="REPEAT", help="Repeating: an interval like 15m, 2h, 1d, or a five-field cron expression")
+    schedule_cancel = schedule_kinds.add_parser("cancel", help="Cancel one scheduled message (y/N)")
+    schedule_cancel.add_argument("--id", dest="schedule_id", required=True, metavar="ID", help="The id `schedule list` printed")
+    schedule_cancel.add_argument("--chat", help="The chat it is in, for one Telegram is holding; omit for one of this runner's own")
+
     bots_parser = subparsers.add_parser("bots", help="List the bots you own and edit their BotFather settings")
     bots_parser.add_argument("--bot", help="Bot nickname from TELEGRAM_BOT_TOKENS, @username, or numeric ID")
     bots_parser.add_argument("--json", dest="json_output", nargs="?", action=JsonOutput, help="Write bot output to this JSON file")
@@ -382,6 +457,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Skip the preview and send; the destination must be in TELEGRAM_SEND_ALLOWLIST",
     )
     send_parser.add_argument("--reply-to", dest="reply_to", type=positive_int, metavar="MSG", help="Post it as a reply to this message id")
+    send_parser.add_argument("--at", metavar="TIME", help="Hand it to Telegram to post at this ISO 8601 moment; Telegram holds it and posts it with this machine off")
 
     message_parser = subparsers.add_parser("message", help="Act on messages: reply, edit, delete, forward, copy, react, pin, poll, read, bookmark, draft")
     verbs = message_parser.add_subparsers(dest="message_verb")
@@ -1257,13 +1333,20 @@ async def _run_send(client, args, config, *, report: Reporter | None = None) -> 
     report.set_target(destination)
     report.show_banner()
     reply_to = getattr(args, "reply_to", None)
-    target = SendTarget(chat_id=resolved.id, chat_title=chat.title, topic=topic, reply_to=reply_to)
+    # Section 10.6: `--at` hands the message to Telegram, which holds it and
+    # posts it with this machine off. The moment is parsed before anything is
+    # asked, so a bad time refuses at the same place a bad chat does.
+    raw_at = getattr(args, "at", None)
+    at = None if raw_at is None else watch_ops.require_future(watch_ops.parse_when(raw_at))
+    target = SendTarget(chat_id=resolved.id, chat_title=chat.title, topic=topic, reply_to=reply_to, at=at)
 
     rights = await _rights(client, report, peer)
     identity = await _acting(client, report)
     mutation_params = {"files": len(files), "text": bool(text)}
     if reply_to is not None:
         mutation_params["reply_to"] = int(reply_to)
+    if at is not None:
+        mutation_params["at"] = at.isoformat()
     plan, warnings = build_plan(
         identity=identity,
         command="send",
@@ -1320,13 +1403,31 @@ async def _run_send(client, args, config, *, report: Reporter | None = None) -> 
     status = "cancelled" if result.cancelled else "ok"
     if status == "ok":
         evidence = await read_back(
-            "the sent message",
-            lambda: _sent_message(client, peer, destination, result.message_id),
+            "the scheduled message" if at is not None else "the sent message",
+            (lambda: _scheduled_message(client, peer, destination, result.message_id, at))
+            if at is not None
+            else (lambda: _sent_message(client, peer, destination, result.message_id)),
         )
         report.set_evidence(evidence)
         report.audit(plan, status=status, evidence=evidence)
-    report.printed_result(result.to_dict(), status=status)
+    payload = result.to_dict()
+    if at is not None and not result.cancelled and not report.machine:
+        print(watch_ops.format_schedule_created({**payload, "rid": destination.rid, "at": at.isoformat(), "guarantee": watch_ops.SERVER_HELD, "next": at.isoformat()}))
+    report.printed_result(payload, status=status)
     return 1 if result.cancelled else 0
+
+
+async def _scheduled_message(client, peer, destination, message_id, at) -> str:
+    """A `--at` send reads back from what Telegram is holding, not from history.
+
+    A scheduled message is not in the chat yet, so `get_messages` would never
+    find it; `GetScheduledHistory` is where it actually is until it posts.
+    """
+    history = await client(GetScheduledHistoryRequest(peer=peer, hash=0))
+    ids = [int(getattr(message, "id")) for message in getattr(history, "messages", None) or ()]
+    if int(message_id) not in ids:
+        raise LookupError("Telegram is not holding that message id")
+    return f"message {int(message_id)} is scheduled in {destination.display} for {at.isoformat()} ({watch_ops.SERVER_HELD})"
 
 
 async def _sent_message(client, peer, destination, message_id) -> str:
@@ -2654,6 +2755,475 @@ async def _run_manage_read(port, op, args, resolved, target: Target, kind: str, 
 # -- bot mode --------------------------------------------------------------
 
 
+# -- watch: the runner, its rules, and the two guarantees ---------------------
+
+
+def _watch_plan(identity: Identity, command: str, op: str, params: dict, *, approval: str = "prompt_y", targets=()):
+    """The plan a watch write carries.
+
+    A rule file and a runner-held schedule live on this machine, not at
+    Telegram's end, so there is no right to preflight and the preflight is
+    empty by construction rather than by omission. The other three steps are
+    the same as every other write here: the plan is built before anything is
+    asked, the result is read back, and one redacted line goes to the audit
+    log. The mutation's rid is the identity's own, because a rule belongs to
+    the login that wrote it.
+    """
+    plan, _warnings = build_plan(
+        identity=identity,
+        command=command,
+        targets=list(targets),
+        mutations=[Mutation(op, targets[0].rid if targets else identity.id, params)],
+        approval=approval,
+        rights=Rights(frozenset(), frozenset()),
+        required=(),
+    )
+    return plan
+
+
+def _rules_set(which=None):
+    """The rules directory as a reloadable set. A bad file refuses the whole load."""
+    kwargs = {} if which is None else {"which": which}
+    return _rules.RuleSet(archive_store.paths_for().rules, **kwargs)
+
+
+def _refuse_unrunnable(paths) -> None:
+    """The two things that stop a runner before it connects: no fcntl, and a live holder."""
+    if _runner.fcntl is None:
+        raise CommandError(
+            "The runner needs an exclusive file lock, which this platform does not provide.",
+            code="PLATFORM_UNSUPPORTED",
+            hint="watch run supports macOS and Linux; every one-shot command still works here",
+        )
+    holder = _runner.read_lock(paths.runner_lock)
+    if holder is not None and holder.alive:
+        raise CommandError(
+            f"A runner already holds {paths.runner_lock.name}: pid {holder.pid} since {holder.started_at}.",
+            code="RUNNER_LOCKED",
+            hint="`watch status` shows the holder; `watch stop` asks it to exit",
+        )
+
+
+def _own_identity_rids() -> list[str]:
+    """Every profile's rid on this machine: an event any of them sent is dropped (section 10.3)."""
+    return [str(_rid.make(PREFIX, "user", profile.user_id)) for profile in profile_store.listing() if profile.user_id]
+
+
+def _archive_sync_callback(client, identity: Identity, loop):
+    """What a rule's `archive` action calls: one scope synced, within the store's budgets.
+
+    The walk runs on the client's own thread, with an archive connection made
+    there: SQLite binds a connection to the thread that opened it, and the
+    runner's own connection belongs to the thread the engine runs on.
+    """
+
+    def fulfil(request):
+        async def work():
+            with archive_store.open_archive() as scoped:
+                source = TelegramArchiveSource(client, only=[request.rid])
+                result = await scoped.sync(source, identity)
+                return {"status": result.status, "rid": request.rid, "scopes": len(result.scopes)}
+
+        return loop.call(work())
+
+    return fulfil
+
+
+async def _run_watch_run(args, config, *, report: Reporter) -> int:
+    """`watch run`: replay what the last run missed, then live events and schedules, in the foreground.
+
+    The client is a detached one (`client.detached_session`): it holds a copy
+    of the profile's authorization in memory and never opens the session file,
+    so `telegram-tools send` in another terminal keeps working while this runs.
+    The runner installs no service and prints none: it is started by a person,
+    and stopped by Ctrl-C or `watch stop`.
+    """
+    paths = archive_store.paths_for()
+    _refuse_unrunnable(paths)
+    identity = await _offline_identity(config, report)
+    report.show_banner()
+    mode = "bot" if _in_bot_mode(report) else "account"
+    rules = _rules_set()
+    report.info(f"{len(rules)} rule(s) loaded from {paths.rules}")
+
+    client = create_detached_client(config)
+    loop = watch_events.ClientLoop(client)
+    loop.start()
+    try:
+        if not loop.call(client.is_user_authorized()):
+            raise login.LoginRequired(getattr(config, "profile", profile_store.DEFAULT_PROFILE))
+        source = watch_events.TelegramEventSource(client, loop, mode=mode)
+        source.register()
+        sender = watch_events.TelegramMessageSender(client, loop, config.send_allowlist)
+        with archive_store.open_archive() as archive:
+            runner = _runner.Runner(
+                archive,
+                identity,
+                rules,
+                paths,
+                sender=sender,
+                sync=_archive_sync_callback(client, identity, loop),
+                queue=review_ops.queue_for(archive),
+                own_identities=_own_identity_rids(),
+                tz=watch_ops.local_zone(),
+            )
+            report.info("Running. Ctrl-C stops it, and so does `telegram-tools watch stop`.")
+            counts = runner.run(source)
+            status = runner.status()
+        source.close()
+    finally:
+        loop.stop()
+    report.result({**counts, "dropped_events": source.dropped, "rules": len(rules), "status": status}, status="ok")
+    return 0
+
+
+async def _run_watch_status(args, config, *, report: Reporter) -> int:
+    """`watch status`: the lock and its holder, the rules loaded, the last tick, cursors and schedules."""
+    await _offline_identity(config, report)
+    report.show_banner()
+    paths = archive_store.paths_for()
+    try:
+        loaded = len(_rules_set())
+    except CodedError as exc:
+        # A rule the runner would refuse to start on is what `status` is for.
+        report.warn(f"the rules do not load: {exc.error.message}")
+        loaded = 0
+    with archive_store.open_archive() as archive:
+        status = _runner.report(paths, archive)
+    status["rules"] = loaded
+    if not report.machine:
+        print(watch_ops.format_status(status, rules=loaded))
+    report.result(status, status="ok" if status["running"] else "empty")
+    return 0
+
+
+async def _run_watch_signal(args, config, *, report: Reporter) -> int:
+    """`watch stop` and `watch reload`: a signal to the holder, and what it answered."""
+    await _offline_identity(config, report)
+    report.show_banner()
+    paths = archive_store.paths_for()
+    kind = args.watch_kind
+    result = _runner.stop(paths) if kind == "stop" else _runner.reload(paths)
+    report.info(
+        f"Runner pid {result['pid']}: "
+        + ("asked to exit" if kind == "stop" else "asked to re-read its rules")
+        + (f", waited {result['waited_s']}s" if "waited_s" in result else "")
+    )
+    if result["status"] != "ok":
+        report.warn(result.get("error") or "the runner has not answered yet")
+    report.result(result, status=result["status"])
+    return 1 if result["status"] != "ok" else 0
+
+
+async def _run_watch_rules(args, config, *, report: Reporter) -> int:
+    """The rule files on this machine. Nothing here connects: a rule is local configuration."""
+    verb = getattr(args, "rules_verb", None)
+    if verb is None:
+        raise ValueError("watch rules needs one of: " + ", ".join(watch_ops.RULES_VERBS) + ".")
+    identity = await _offline_identity(config, report)
+    report.show_banner()
+    paths = archive_store.paths_for()
+
+    if verb == "list":
+        loaded = _rules_set()
+        rows = [rule.to_dict() for rule in loaded]
+        for row in rows:
+            report.record(row)
+        if not report.machine:
+            print(watch_ops.format_rules(list(loaded), paths.rules))
+        report.result({"count": len(rows), "rules": rows, "directory": str(paths.rules)}, status="ok" if rows else "empty")
+        return 0
+
+    if verb == "test":
+        loaded = _rules_set()
+        event = _rules.load_event(args.event)
+        wanted = getattr(args, "name", None)
+        chosen = [loaded.get(wanted)] if wanted else list(loaded)
+        explained = _rules.explain(chosen, event, identity, own_identities=_own_identity_rids())
+        if not report.machine:
+            print(watch_ops.format_test(explained))
+        report.result(explained, status="ok")
+        return 0
+
+    name = args.name
+    path = paths.rule(name)
+    if verb in ("add", "edit"):
+        base = watch_ops.read_rule_file(path) if verb == "edit" else None
+        if verb == "add" and path.exists():
+            raise watch_ops.WatchError(
+                f"a rule named {name!r} is already there",
+                hint=f"telegram-tools watch rules edit --name {name}",
+            )
+        data = watch_ops.rule_from(args, base)
+        # The core validates before anything is written: an unknown action kind,
+        # a regex that does not compile and a command that is not on PATH are
+        # all refused here, at rule load, not when the rule would fire.
+        rule = _rules.load_rule(data, source=f"{name}.json")
+        plan = _watch_plan(identity, f"watch rules {verb}", f"rule.{verb}", {"name": name, "actions": [action.kind for action in rule.actions]})
+        report.set_plan(plan)
+        _rules.write_rule(paths, rule)
+        written = _rules.load_file(path)
+        evidence = Evidence.verified(f"{path.name} holds rule {written.name} with {len(written.actions)} action(s)")
+        report.set_evidence(evidence)
+        report.audit(plan, status="ok", evidence=evidence)
+        if not report.machine:
+            print(watch_ops.format_rules([written], paths.rules))
+            print(f"Written to {path}. It is JSON: edit it by hand whenever the flags are the long way round.")
+        report.result({**plan.describe(), "rule": written.to_dict(), "path": str(path)}, status="ok")
+        return 0
+
+    if verb in ("enable", "disable"):
+        stored = watch_ops.read_rule_file(path)
+        stored["enabled"] = verb == "enable"
+        rule = _rules.load_rule(stored, source=path.name)
+        plan = _watch_plan(identity, f"watch rules {verb}", f"rule.{verb}", {"name": name})
+        report.set_plan(plan)
+        _rules.write_rule(paths, rule)
+        written = _rules.load_file(path)
+        evidence = Evidence.verified(f"{written.name} is {'enabled' if written.enabled else 'disabled'}")
+        report.set_evidence(evidence)
+        report.audit(plan, status="ok", evidence=evidence)
+        report.info(f"{written.name} is now {'enabled' if written.enabled else 'disabled'}.")
+        report.result({**plan.describe(), "rule": written.to_dict()}, status="ok")
+        return 0
+
+    # remove: it deletes a file the user wrote, so it asks first.
+    stored = watch_ops.read_rule_file(path)
+    plan = _watch_plan(identity, "watch rules remove", "rule.remove", {"name": name})
+    report.set_plan(plan)
+    preview = watch_ops.format_rules([_rules.load_rule(stored, source=path.name)], paths.rules)
+    if not watch_ops.confirm(preview, f"Delete {path.name}?", **report.confirm_io()):
+        report.result({**plan.describe(), "removed": None, "cancelled": True}, status="cancelled")
+        return 1
+    path.unlink()
+    evidence = (
+        Evidence.verified(f"{path.name} is gone") if not path.exists() else Evidence.unverified(f"{path.name} is still there")
+    )
+    report.set_evidence(evidence)
+    report.audit(plan, status="ok", evidence=evidence)
+    report.info(f"{path.name} removed.")
+    report.result({**plan.describe(), "removed": name}, status="ok")
+    return 0
+
+
+async def _run_watch(args, config, *, report: Reporter) -> int:
+    kind = getattr(args, "watch_kind", None)
+    if kind is None:
+        raise ValueError("watch needs one of: " + ", ".join(watch_ops.WATCH_VERBS) + ".")
+    if kind == "rules":
+        return await _run_watch_rules(args, config, report=report)
+    if kind == "run":
+        return await _run_watch_run(args, config, report=report)
+    if kind == "status":
+        return await _run_watch_status(args, config, report=report)
+    if kind in ("stop", "reload"):
+        return await _run_watch_signal(args, config, report=report)
+    raise ValueError(f"Unknown watch command: {kind}")
+
+
+# -- schedule: what Telegram holds, and what this runner holds ----------------
+
+
+async def _native_schedules(client, report: Reporter, reference: str) -> tuple[list, Any, Any]:
+    """The messages Telegram is holding for a chat, newest first, as `schedule list` rows."""
+    resolved = await _resolve(client, report, reference)
+    chat = ChatTargets.chat_target(resolved, reference)
+    history = await client(GetScheduledHistoryRequest(peer=resolved.input_entity, hash=0))
+    rows = []
+    for message in getattr(history, "messages", None) or ():
+        topic_id = watch_events.topic_of(message)
+        rows.append(
+            watch_ops.ScheduledMessage(
+                message_id=int(getattr(message, "id")),
+                rid=watch_ops.schedule_rid(resolved.id, topic_id),
+                at=_iso_date(getattr(message, "date", None)),
+                text=getattr(message, "message", "") or "",
+            ).to_dict()
+        )
+    return rows, resolved, chat
+
+
+def _iso_date(value) -> str | None:
+    return None if value is None else value.isoformat()
+
+
+async def _run_schedule(args, config, *, client=None, report: Reporter) -> int:
+    """`schedule list|post|cancel`. Every row says which of the two guarantees it has."""
+    kind = getattr(args, "schedule_kind", None)
+    if kind is None:
+        raise ValueError("schedule needs one of: " + ", ".join(watch_ops.SCHEDULE_VERBS) + ".")
+    reference = getattr(args, "chat", None)
+    # A client is opened only when Telegram itself has to answer: the runner's
+    # own schedules are rows in the local archive.
+    owns = client is None and (kind == "post" or reference is not None)
+    if owns:
+        client = await start_client(create_client(config), authorize=not report.machine)
+        if report.machine and not await client.is_user_authorized():
+            await _disconnect_quietly(client)
+            raise login.LoginRequired(getattr(config, "profile", profile_store.DEFAULT_PROFILE))
+    try:
+        if client is not None and reference is not None or kind == "post":
+            identity = await _acting(client, report)
+        else:
+            identity = await _offline_identity(config, report)
+        report.show_banner()
+        with archive_store.open_archive() as archive:
+            state = _runner.RunnerState(archive, identity)
+            schedules = _runner.Schedules(state, _runner.Clock(), watch_ops.local_zone())
+            if kind == "list":
+                return await _run_schedule_list(args, schedules, client=client, report=report, reference=reference)
+            if kind == "post":
+                return await _run_schedule_post(args, schedules, identity, client=client, report=report)
+            return await _run_schedule_cancel(args, schedules, identity, client=client, report=report, reference=reference)
+    finally:
+        if owns:
+            await client.disconnect()
+
+
+async def _run_schedule_list(args, schedules, *, client, report: Reporter, reference) -> int:
+    native: list = []
+    if reference is not None and client is not None:
+        native, _resolved, chat = await _native_schedules(client, report, reference)
+        report.set_target(chat)
+    local = [_runner.listing(schedule) for schedule in schedules.list()]
+    for row in (*native, *local):
+        report.record(row)
+    if not report.machine:
+        print(watch_ops.format_schedules(native, local))
+        if reference is None:
+            print("Only this runner's own are listed: Telegram holds scheduled messages per chat, so pass --chat to see those.")
+    report.result(
+        {"native": native, "local": local, "guarantees": list(_runner.GUARANTEES)},
+        status="ok" if native or local else "empty",
+    )
+    return 0
+
+
+async def _run_schedule_post(args, schedules, identity: Identity, *, client, report: Reporter) -> int:
+    """A message this runner will post. It says plainly that a runner that is down posts nothing."""
+    text = _message_text(args.text, has_files=False)
+    if not text:
+        raise ValueError("schedule post needs --text.")
+    destination, peer, _resolved = await _resolve_destination(client, report, args.chat, getattr(args, "topic", None))
+    report.set_target(destination)
+    when = None if args.at is None else watch_ops.require_future(watch_ops.parse_when(args.at))
+    every = None if args.every is None else watch_ops.check_every(args.every)
+    rights = await _rights(client, report, peer)
+    plan, warnings = build_plan(
+        identity=identity,
+        command="schedule post",
+        targets=[destination],
+        mutations=[Mutation("schedule.post", destination.rid, {"at": None if when is None else when.isoformat(), "every": every})],
+        approval="prompt_y",
+        rights=rights,
+        required=SEND_RIGHTS,
+    )
+    report.set_plan(plan)
+    for warning in warnings:
+        report.warn(warning)
+    # The right is checked now, even though the send is later: a schedule that
+    # could never post is worth refusing while somebody is here to read why.
+    require_rights(plan, rights, SEND_RIGHTS)
+    preview = "\n".join(
+        [
+            f"Scheduling into {destination.display}",
+            watch_ops.RULE,
+            f"When    {when.isoformat() if when else 'every ' + str(every)}",
+            f"Guarantee {watch_ops.RUNNER_HELD}",
+            watch_ops.RULE,
+            text,
+            watch_ops.RULE,
+        ]
+    )
+    if not watch_ops.confirm(preview, "Schedule it?", **report.confirm_io()):
+        report.result({**plan.describe(), "scheduled": None, "cancelled": True}, status="cancelled")
+        return 1
+    try:
+        schedule = schedules.add(destination.rid, text, at=None if when is None else when.isoformat(), every=every)
+    except _runner.RunnerError as exc:
+        raise watch_ops.WatchError(str(exc), code="INVALID_ARGUMENT") from exc
+    stored = schedules.get(schedule.id)
+    evidence = Evidence.verified(f"schedule {stored.id} is stored, next {_runner._iso(stored.next_wall)}, {stored.guarantee}")
+    report.set_evidence(evidence)
+    report.audit(plan, status="ok", evidence=evidence)
+    row = _runner.listing(stored)
+    if not report.machine:
+        print(watch_ops.format_schedule_created(row))
+    report.result({**plan.describe(), "schedule": row}, status="ok")
+    return 0
+
+
+async def _run_schedule_cancel(args, schedules, identity: Identity, *, client, report: Reporter, reference) -> int:
+    """Cancel one: with `--chat` it is a message Telegram is holding, without it one of this runner's."""
+    schedule_id = args.schedule_id
+    if reference is not None:
+        if client is None:
+            raise ValueError("schedule cancel --chat needs a connection.")
+        native, resolved, chat = await _native_schedules(client, report, reference)
+        report.set_target(chat)
+        row = next((item for item in native if item["id"] == str(schedule_id)), None)
+        if row is None:
+            raise CommandError(
+                f"Telegram is holding no scheduled message {schedule_id!r} in {chat.title}.",
+                code="TARGET_NOT_FOUND",
+                hint=f"telegram-tools schedule list --chat {reference}",
+            )
+        rights = await _rights(client, report, resolved.input_entity)
+        plan, warnings = build_plan(
+            identity=identity,
+            command="schedule cancel",
+            targets=[chat],
+            mutations=[Mutation("schedule.cancel", row["rid"], {"message_id": int(schedule_id), "guarantee": row["guarantee"]})],
+            approval="prompt_y",
+            rights=rights,
+            required=SEND_RIGHTS,
+        )
+        report.set_plan(plan)
+        for warning in warnings:
+            report.warn(warning)
+        preview = watch_ops.format_schedules([row], [])
+        if not watch_ops.confirm(preview, f"Cancel scheduled message {schedule_id}?", **report.confirm_io()):
+            report.result({**plan.describe(), "cancelled_schedule": None, "cancelled": True}, status="cancelled")
+            return 1
+        await client(DeleteScheduledMessagesRequest(peer=resolved.input_entity, id=[int(schedule_id)]))
+        again, _resolved, _chat = await _native_schedules(client, report, reference)
+        gone = not any(item["id"] == str(schedule_id) for item in again)
+        evidence = Evidence.verified(f"Telegram no longer holds {schedule_id}") if gone else Evidence.unverified(f"{schedule_id} is still scheduled")
+        report.set_evidence(evidence)
+        report.audit(plan, status="ok", evidence=evidence)
+        report.info(f"Scheduled message {schedule_id} cancelled.")
+        report.result({**plan.describe(), "cancelled_schedule": row}, status="ok")
+        return 0
+
+    try:
+        stored = schedules.get(schedule_id)
+    except _runner.RunnerError as exc:
+        raise CommandError(
+            str(exc),
+            code="TARGET_NOT_FOUND",
+            hint="`schedule list` shows this runner's own; a message Telegram holds needs --chat too",
+        ) from exc
+    row = _runner.listing(stored)
+    plan = _watch_plan(
+        identity,
+        "schedule cancel",
+        "schedule.cancel",
+        {"schedule": stored.id, "guarantee": stored.guarantee},
+    )
+    report.set_plan(plan)
+    if not watch_ops.confirm(watch_ops.format_schedules([], [row]), f"Cancel schedule {stored.id}?", **report.confirm_io()):
+        report.result({**plan.describe(), "cancelled_schedule": None, "cancelled": True}, status="cancelled")
+        return 1
+    schedules.cancel(stored.id)
+    still_there = any(item.id == stored.id for item in schedules.list())
+    evidence = Evidence.verified(f"schedule {stored.id} is gone") if not still_there else Evidence.unverified(f"{stored.id} is still stored")
+    report.set_evidence(evidence)
+    report.audit(plan, status="ok", evidence=evidence)
+    report.info(f"Schedule {stored.id} cancelled.")
+    report.result({**plan.describe(), "cancelled_schedule": row}, status="ok")
+    return 0
+
+
 def require_bot_mode_supports(args, report: Reporter) -> None:
     """Refuse an account-only command under --as-bot, before anything connects.
 
@@ -2666,10 +3236,18 @@ def require_bot_mode_supports(args, report: Reporter) -> None:
     supported = command in BOT_MODE_COMMANDS and (command != "create" or kind in BOT_MODE_CREATE_KINDS)
     if command == "message" and verb not in message_ops.BOT_VERBS:
         supported = False
+    # Section 10.6: `schedule_date` is user-only, so a bot may send now and
+    # never later. The rest of `send` is unchanged under --as-bot.
+    if command == "send" and getattr(args, "at", None):
+        supported = False
     if supported:
         return
-    what = command_name(args)
-    if command == "message":
+    what = command_name(args) + (" --at" if command == "send" else "")
+    if command == "send":
+        why = "Telegram lets only an account hand it a message to post later"
+    elif command == "schedule":
+        why = "Telegram's scheduled messages are user-only, and a repeat is held by the runner the account started"
+    elif command == "message":
         why = "a bot has no dialog of its own to mark, no Saved Messages and no drafts"
     elif command == "review":
         why = "the review queue is the account's archive, and a bot reads no history"
@@ -2742,6 +3320,8 @@ async def run_as_bot(args, config, *, report: Reporter) -> int:
             return await _run_message(bot, args, config, report=report)
         if args.command in manage_ops.GROUPS:
             return await _run_manage(bot, args, report=report)
+        if args.command == "watch":
+            return await _run_watch(args, config, report=report)
         raise ValueError(f"Unknown command: {args.command}")
 
 
@@ -2799,6 +3379,9 @@ async def run(args, *, client=None, config=None, report: Reporter | None = None)
         or (args.command == "review" and getattr(args, "review_kind", None) in REVIEW_WRITES)
         or (args.command == "structure" and getattr(args, "structure_kind", None) in STRUCTURE_WRITES)
         or (args.command in manage_ops.GROUPS and (args.command, getattr(args, manage_ops.VERB_DESTS[args.command], None)) in MANAGE_WRITES)
+        or (args.command == "watch" and getattr(args, "watch_kind", None) in WATCH_WRITES)
+        or (args.command == "watch" and getattr(args, "watch_kind", None) == "rules" and getattr(args, "rules_verb", None) in RULES_WRITES)
+        or (args.command == "schedule" and getattr(args, "schedule_kind", None) in SCHEDULE_WRITES)
     ):
         require_tight_modes()
 
@@ -2832,6 +3415,13 @@ async def run(args, *, client=None, config=None, report: Reporter | None = None)
     # `structure remap` reads the archive's remap rows and opens no connection.
     if args.command == "structure" and getattr(args, "structure_kind", None) == "remap":
         return await _run_structure_remap(args, config, report=report)
+    # `watch` opens its own client when it needs one -- `run` a detached one on a
+    # thread of its own -- and none at all for the rules, the status and the two
+    # signals. `schedule` connects only when Telegram itself has to answer.
+    if args.command == "watch":
+        return await _run_watch(args, config, report=report)
+    if args.command == "schedule":
+        return await _run_schedule(args, config, client=client, report=report)
 
     owns_client = client is None
     if owns_client:
@@ -2887,7 +3477,14 @@ def command_name(args) -> str:
         or getattr(args, "join_kind", None)
         or getattr(args, "invite_kind", None)
         or getattr(args, "settings_kind", None)
+        or getattr(args, "watch_kind", None)
+        or getattr(args, "schedule_kind", None)
     )
+    # `watch rules <verb>` is the one command three words deep, and the envelope
+    # names all three: `watch rules add` and `watch rules test` are not one command.
+    verb = getattr(args, "rules_verb", None)
+    if kind == "rules" and verb:
+        kind = f"rules {verb}"
     return f"{args.command} {kind}" if kind else str(args.command or "")
 
 

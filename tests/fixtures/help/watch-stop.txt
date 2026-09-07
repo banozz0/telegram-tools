@@ -1,0 +1,4 @@
+usage: telegram-tools watch stop [-h]
+
+options:
+  -h, --help  show this help message and exit

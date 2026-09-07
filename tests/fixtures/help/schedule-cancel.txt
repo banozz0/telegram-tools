@@ -1,0 +1,7 @@
+usage: telegram-tools schedule cancel [-h] --id ID [--chat CHAT]
+
+options:
+  -h, --help   show this help message and exit
+  --id ID      The id `schedule list` printed
+  --chat CHAT  The chat it is in, for one Telegram is holding; omit for one of
+               this runner's own

@@ -1,0 +1,12 @@
+usage: telegram-tools schedule [-h] {list,post,cancel} ...
+
+positional arguments:
+  {list,post,cancel}
+    list              What is scheduled, each row saying which of the two
+                      guarantees it has
+    post              Store a message for this runner to post later (runner-
+                      held: it fires only while `watch run` is up)
+    cancel            Cancel one scheduled message (y/N)
+
+options:
+  -h, --help          show this help message and exit

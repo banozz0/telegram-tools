@@ -8,10 +8,14 @@ never see a changelog.
 
 Two relaxations, both deliberate:
 
-* `ALLOWED_ADDITIONS` lists, verbatim, the additions this card was allowed to
+* `ALLOWED_ADDITIONS` lists, verbatim, the additions each card was allowed to
   make -- the global `--json`/`--jsonl` on the root parser, and the optional
   path on the per-command `--json`. They are removed from the live text before
-  it is compared. Anything else that moved fails here.
+  it is compared. Anything else that moved fails here. The list is keyed by the
+  parser it applies to: a global list would also delete the same words where
+  another parser happens to spell them (`--on` names the event kind `message`,
+  and `message,` is the root's own subcommand entry), which is a hole the
+  frozen surface cannot afford.
 * Whitespace is squeezed to single spaces on both sides. `--json [JSON_OUTPUT]`
   is two characters wider than `--json JSON_OUTPUT`, and argparse widens the
   whole help column of that parser to match, so a byte comparison would fail on
@@ -111,12 +115,30 @@ COMMANDS = {
     "settings": ("settings",),
     "settings-show": ("settings", "show"),
     "settings-set": ("settings", "set"),
+    "watch": ("watch",),
+    "watch-run": ("watch", "run"),
+    "watch-status": ("watch", "status"),
+    "watch-stop": ("watch", "stop"),
+    "watch-reload": ("watch", "reload"),
+    "watch-rules": ("watch", "rules"),
+    "watch-rules-list": ("watch", "rules", "list"),
+    "watch-rules-add": ("watch", "rules", "add"),
+    "watch-rules-edit": ("watch", "rules", "edit"),
+    "watch-rules-remove": ("watch", "rules", "remove"),
+    "watch-rules-enable": ("watch", "rules", "enable"),
+    "watch-rules-disable": ("watch", "rules", "disable"),
+    "watch-rules-test": ("watch", "rules", "test"),
+    "schedule": ("schedule",),
+    "schedule-list": ("schedule", "list"),
+    "schedule-post": ("schedule", "post"),
+    "schedule-cancel": ("schedule", "cancel"),
 }
 
-# The only text this card was allowed to add, spelled exactly as the help spells
-# it (whitespace-squeezed, the way both sides are compared). Removed from the
-# live help before the comparison; everything left over has to match the fixture.
-ALLOWED_ADDITIONS = (
+# The only text these cards were allowed to add, spelled exactly as the help
+# spells it (whitespace-squeezed, the way both sides are compared), keyed by the
+# parser it belongs to. Removed from that parser's live help before the
+# comparison; everything left over has to match the fixture.
+_ROOT_ADDITIONS = (
     "[--json] [--jsonl]",
     "--json Emit one machine-readable envelope on stdout instead of the human output",
     "--jsonl Stream one JSON line per record, then the envelope as the last line",
@@ -143,15 +165,10 @@ ALLOWED_ADDITIONS = (
     # search`. The subcommand name appears twice, as `auth,profiles,` does.
     "archive,",
     "archive Sync, search and export the local archive",
-    "[--archive]",
-    "--archive Search the local archive instead of Telegram (the same as `archive search`)",
-    # The message-ops card (agent-bo-95421945): one new subcommand group, and
-    # on `send` the one flag section 15 gives it here, `--reply-to`. Both
+    # The message-ops card (agent-bo-95421945): one new subcommand group. Both
     # spellings the subcommand name takes, as `archive,` does.
     "message,",
     "message Act on messages: reply, edit, delete, forward, copy, react, pin, poll, read, bookmark, draft",
-    "[--reply-to MSG]",
-    "--reply-to MSG Post it as a reply to this message id",
     # The review-queue card (agent-bo-95421943): one new subcommand group, the
     # links and files a sync noted, fetched only after a human approves. No
     # existing command gained or lost a flag. Both spellings of the name.
@@ -173,7 +190,31 @@ ALLOWED_ADDITIONS = (
     "join-requests People waiting to join a chat that needs approval: list, approve, decline",
     "invite Invite links: list, create, revoke (links are shown by list and create only)",
     "settings A chat's settings: show, set --slow-mode",
+    # The watch card (agent-bo-95421957): two new subcommand groups -- the rules
+    # and the runner, and the messages waiting to be posted. Both spellings of
+    # the names.
+    "watch,schedule,",
+    "watch Rules over live Telegram events, and the runner that fires them",
+    "schedule Messages waiting to be posted: list, post (this runner holds it), cancel",
 )
+
+ALLOWED_ADDITIONS = {
+    "root": _ROOT_ADDITIONS,
+    # The archive card gave the live `search` a switch that is the documented
+    # alias of `archive search`.
+    "search": (
+        "[--archive]",
+        "--archive Search the local archive instead of Telegram (the same as `archive search`)",
+    ),
+    # `send` gained one flag on the message-ops card and one on the watch card:
+    # a reply target, and the moment Telegram is to hold the message until.
+    "send": (
+        "[--reply-to MSG]",
+        "--reply-to MSG Post it as a reply to this message id",
+        "[--at TIME]",
+        "--at TIME Hand it to Telegram to post at this ISO 8601 moment; Telegram holds it and posts it with this machine off",
+    ),
+}
 
 # A choice list that grew. The help line is the same words; the braces name
 # more formats. Section 15: `--format` gains jsonl, markdown and html, and
@@ -213,7 +254,7 @@ def _eighty_columns(monkeypatch):
 @pytest.mark.parametrize("name", sorted(COMMANDS))
 def test_help_text_is_the_captured_one(name):
     live = normalise(render(COMMANDS[name]))
-    for addition in ALLOWED_ADDITIONS:
+    for addition in ALLOWED_ADDITIONS.get(name, ()):
         live = live.replace(normalise(addition), "")
     if name == "search":
         for wide, narrow in ALLOWED_REWRITES:

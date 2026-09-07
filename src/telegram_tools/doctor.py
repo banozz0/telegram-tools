@@ -13,6 +13,8 @@ from telegram_tools import profiles, proxy
 from telegram_tools._core.archive import fts5_report
 from telegram_tools._core.config import human_bytes
 from telegram_tools._core.review import directory_bytes
+from telegram_tools._core import rules as _rules
+from telegram_tools._core import runner as _runner
 from telegram_tools._core.scanner import ClamAVAdapter
 from telegram_tools.config import ConfigError, config_dir, parse_bot_tokens, parse_send_allowlist
 
@@ -213,6 +215,33 @@ def check_quarantine(home: Path | None = None) -> DoctorCheck:
     )
 
 
+def check_runner(home: Path | None = None) -> DoctorCheck:
+    """The runner: whether one holds the lock, when it last did something, and how many rules load.
+
+    Section 10.5. A runner that is down is not a failure -- it is started by a
+    person and stopped by one -- but a rules directory that will not load is,
+    because `watch run` would refuse to start on it and this is where that is
+    findable without starting one. On a platform without `fcntl` the line says
+    so, which is the one place `PLATFORM_UNSUPPORTED` is explained rather than
+    raised.
+    """
+    paths = profiles.paths_for(home)
+    try:
+        loaded = len(_rules.load_directory(paths.rules))
+        rules = f"{loaded} rule(s) load"
+    except Exception as exc:  # noqa: BLE001 - any refusal to load is the same answer here
+        message = getattr(getattr(exc, "error", None), "message", None) or str(exc)
+        return DoctorCheck("FAIL", f"Runner: the rules in {paths.rules} do not load ({message}); `watch run` would refuse to start")
+    if _runner.fcntl is None:
+        return DoctorCheck("WARN", f"Runner: this platform has no file lock, so `watch run` refuses here; {rules} and every one-shot command works")
+    holder = _runner.read_lock(paths.runner_lock)
+    last = _runner.tail(paths.runner_log, 1)
+    tick = f"; last log line {last[0].get('at')} ({last[0].get('event')})" if last else "; nothing logged yet"
+    if holder is None or not holder.alive:
+        return DoctorCheck("OK", f"Runner: not running{tick}; {rules} (`telegram-tools watch run` starts one)")
+    return DoctorCheck("OK", f"Runner: pid {holder.pid} since {holder.started_at}{tick}; {rules}")
+
+
 def _effective_env(root: Path, env: Mapping[str, str], home: Path | None = None) -> dict[str, str]:
     merged: dict[str, str] = {}
     for path in (config_dir(home) / ".env", root / ".env"):
@@ -296,6 +325,7 @@ def run_doctor(
         check_archive(home),
         check_quarantine(home),
         check_scanner(),
+        check_runner(home),
     ]
 
     for check in checks:

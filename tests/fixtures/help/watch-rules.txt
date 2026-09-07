@@ -1,0 +1,18 @@
+usage: telegram-tools watch rules [-h]
+                                  {list,add,edit,remove,enable,disable,test} ...
+
+positional arguments:
+  {list,add,edit,remove,enable,disable,test}
+    list                Every rule loaded, what it watches and what it does
+    add                 Write a new rule file (the file is JSON and stays
+                        editable by hand)
+    edit                Change a rule: the flags you pass replace those
+                        fields, the rest stay
+    remove              Delete a rule file (y/N)
+    enable              Turn a rule on
+    disable             Turn a rule off, keeping the file
+    test                Say what a recorded event would do, firing nothing and
+                        asking no host
+
+options:
+  -h, --help            show this help message and exit

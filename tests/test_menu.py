@@ -1551,28 +1551,48 @@ def test_join_requests_and_invites_and_settings_build_their_flags():
 
 
 WATCH_ROWS = (
-    "1. Review queue (what is waiting; fetches nothing)",
+    "1. Rules (list, add, edit, enable, disable, remove, test)",
+    "2. Runner (run, status, stop, reload)",
+    "3. Scheduled messages (list, post, cancel)",
+    "4. Review queue (approve, accept, reject, retry, status)",
+)
+REVIEW_ROWS = (
+    "1. The queue (what is waiting; fetches nothing)",
     "2. Approve downloads (pick, y/N, then the fetch runs into quarantine)",
     "3. Accept a quarantined download (shows the verdict, then y/N)",
     "4. Reject a candidate (deletes its quarantined bytes, after y/N)",
     "5. Retry a failed download (from where it stopped)",
     "6. Review status (counts, quarantine, scanner)",
 )
-REVIEW_LIST = ("7", "1")
-REVIEW_APPROVE = ("7", "2")
-REVIEW_ACCEPT = ("7", "3")
-REVIEW_REJECT = ("7", "4")
-REVIEW_RETRY = ("7", "5")
-REVIEW_STATUS = ("7", "6")
+REVIEW = ("7", "4")
+REVIEW_LIST = (*REVIEW, "1")
+REVIEW_APPROVE = (*REVIEW, "2")
+REVIEW_ACCEPT = (*REVIEW, "3")
+REVIEW_REJECT = (*REVIEW, "4")
+REVIEW_RETRY = (*REVIEW, "5")
+REVIEW_STATUS = (*REVIEW, "6")
+RULES = ("7", "1")
+RUNNER = ("7", "2")
+SCHEDULED = ("7", "3")
 
 
-def test_watch_lists_the_review_rows_and_runs_nothing_by_itself():
+def test_watch_lists_its_four_screens_and_runs_nothing_by_itself():
     _code, calls, output = run_menu([WATCH, "0", "0"])
 
     text = screens(output)
     assert calls == []
-    assert "Main › Watch\n" in text
+    assert "Main \u203a Watch\n" in text
     for row in WATCH_ROWS:
+        assert row in text, row
+
+
+def test_the_review_queue_keeps_its_six_rows_one_screen_deeper():
+    _code, calls, output = run_menu([*REVIEW, "0", "0", "0"])
+
+    text = screens(output)
+    assert calls == []
+    assert "Main \u203a Watch \u203a Review queue\n" in text
+    for row in REVIEW_ROWS:
         assert row in text, row
 
 
@@ -1584,7 +1604,7 @@ def test_review_list_stages_a_kind_and_a_state_then_runs_offline():
     assert (args.command, args.review_kind, args.kind, args.state) == ("review", "list", "link", "queued")
     text = screens(output)
     assert "Kind   [link]" in text and "State  [queued]" in text
-    assert "Main › Watch › Review queue › Kind\n" in text
+    assert "Main › Watch › Review queue › The queue › Kind\n" in text
 
 
 def test_review_approve_passes_no_ids_and_no_answer_so_the_cli_asks():
@@ -1610,7 +1630,7 @@ def test_accept_reject_and_retry_tick_candidates_from_the_queue_and_never_answer
     assert (args.command, args.review_kind, args.ids) == ("review", "accept", ["aaaa000000000001"])
     assert not getattr(args, "yes", False)
     assert session.review_states[-1] == ("quarantined",)
-    assert "Main › Watch › Accept\n" in screens(output)
+    assert "Main › Watch › Review queue › Accept\n" in screens(output)
 
     code, calls, _output = run_menu([REVIEW_REJECT, "2", "4", "", "0", "0"], session=session)
     (args,) = calls
@@ -1628,7 +1648,7 @@ def test_accept_reject_and_retry_tick_candidates_from_the_queue_and_never_answer
 def test_a_review_move_with_nothing_to_pick_says_so_and_comes_back():
     session = FakeSession()
     session._review = []
-    _code, calls, output = run_menu([REVIEW_ACCEPT, "", "0", "0"], session=session)
+    _code, calls, output = run_menu([REVIEW_ACCEPT, "", "0", "0", "0"], session=session)
     assert calls == []
     assert "No candidate is quarantined." in screens(output)
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -9,6 +10,8 @@ from telegram_tools.mentions import mentions_line
 from telegram_tools.models import TopicInfo
 
 RULE = "--------------------------------------------"
+# Section 10.6: what a `--at` send has, said in the one spelling core owns.
+SERVER_HELD = "server-held"
 
 
 class SendNotAllowedError(PermissionError):
@@ -27,6 +30,10 @@ class SendTarget:
     # A message id to post this as a reply to. Telegram threads the reply into
     # that message's topic itself, so it stands in for the topic as `reply_to`.
     reply_to: int | None = None
+    # `--at`: hand the message to Telegram to post later. Telegram holds it and
+    # posts it with this machine off, which is the `server-held` guarantee of
+    # section 10.6; without one the send happens now.
+    at: datetime | None = None
 
     @property
     def topic_id(self) -> int | None:
@@ -45,9 +52,11 @@ class SendResult:
     message_id: int | None
     cancelled: bool = False
     files: int = 0
+    scheduled_at: str | None = None
+    guarantee: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        out: dict[str, Any] = {
             "chat_id": self.chat_id,
             "topic_id": self.topic_id,
             "message_id": self.message_id,
@@ -55,6 +64,13 @@ class SendResult:
             "sent": not self.cancelled and self.message_id is not None,
             "cancelled": self.cancelled,
         }
+        if self.scheduled_at is not None:
+            # Section 10.6: a scheduled send says when, and which of the two
+            # guarantees it has, in the envelope as well as on the screen.
+            out["scheduled_at"] = self.scheduled_at
+            out["guarantee"] = self.guarantee
+            out["sent"] = False
+        return out
 
 
 def format_size(size: int) -> str:
@@ -79,6 +95,10 @@ def format_send_preview(
     ]
     if target.reply_to is not None:
         lines.append(f"Reply to message {target.reply_to}")
+    if target.at is not None:
+        # The moment is echoed with its offset applied, so a bare local time in
+        # the flag reads back as the absolute moment Telegram was given.
+        lines.append(f"At      {target.at.isoformat()} (Telegram holds it: server-held)")
     for index, raw in enumerate(files):
         path = Path(raw)
         # Sizes come off disk, not from the argument: naming a file that is not the
@@ -154,13 +174,16 @@ async def send_message(
     if recheck is not None:
         await recheck()
 
+    # Telethon takes the moment straight through as `schedule_date`; Telegram
+    # holds the message and posts it itself, so nothing here waits for it.
+    when = {"schedule_date": target.at} if target.at is not None else {}
     if files:
         # Always a list, even for one file: Telethon groups a list into a single
         # album, which is what several attachments in one send should look like.
-        sent = await client.send_file(peer, files, caption=text or None, reply_to=target.threaded_to)
+        sent = await client.send_file(peer, files, caption=text or None, reply_to=target.threaded_to, **when)
         first = sent[0] if isinstance(sent, list) else sent
     else:
-        first = await client.send_message(peer, text, reply_to=target.threaded_to)
+        first = await client.send_message(peer, text, reply_to=target.threaded_to, **when)
 
     return SendResult(
         chat_id=target.chat_id,
@@ -168,4 +191,6 @@ async def send_message(
         message_id=int(getattr(first, "id")),
         cancelled=False,
         files=len(files),
+        scheduled_at=None if target.at is None else target.at.isoformat(),
+        guarantee=None if target.at is None else SERVER_HELD,
     )

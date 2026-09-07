@@ -1,0 +1,53 @@
+usage: telegram-tools watch rules add [-h] --name NAME [--on KIND]
+                                      [--scope RID] [--sender RID]
+                                      [--identity RID] [--domain HOST]
+                                      [--keyword WORD] [--regex PATTERN]
+                                      [--media-type TYPE] [--min-bytes N]
+                                      [--max-bytes N] [--alert-to RID]
+                                      [--alert-command CMD] [--tag LABEL]
+                                      [--bookmark] [--capture-metadata]
+                                      [--archive-scope] [--queue-review]
+                                      [--cooldown SECONDS]
+                                      [--dedup-window SECONDS]
+
+options:
+  -h, --help            show this help message and exit
+  --name NAME           The rule's name, which is also its file name
+  --on KIND             An event kind to trigger on; repeatable. One of:
+                        message, edit, reaction, member_join, member_leave,
+                        link, media
+  --scope RID           Only events in this scope; repeatable, `none` clears.
+                        A rid: tg:chat:ID, or tg:topic:ID:TOPIC for one forum
+                        topic
+  --sender RID          Only events from this sender (tg:user:ID); repeatable,
+                        `none` clears
+  --identity RID        Only while acting as this identity (tg:user:ID);
+                        repeatable, `none` clears
+  --domain HOST         Only messages linking to this domain; repeatable,
+                        `none` clears
+  --keyword WORD        Only messages containing this word; repeatable, `none`
+                        clears
+  --regex PATTERN       Only messages whose text matches this Python regex;
+                        `none` clears
+  --media-type TYPE     Only files of this MIME type (image/* allowed);
+                        repeatable, `none` clears
+  --min-bytes N         Only files at least this large; -1 clears
+  --max-bytes N         Only files at most this large; -1 clears
+  --alert-to RID        Alert this chat or topic; repeatable. The destination
+                        must be in TELEGRAM_SEND_ALLOWLIST. A rid: tg:chat:ID,
+                        or tg:topic:ID:TOPIC for one forum topic
+  --alert-command CMD   Alert by running this command with the text on stdin;
+                        repeatable. It must be on PATH when the rule loads
+  --tag LABEL           Tag the message in the archive; repeatable
+  --bookmark            Note the message as a bookmark in the archive
+  --capture-metadata    Record what the platform delivered with the event;
+                        never a fetch
+  --archive-scope       Sync the event's scope into the archive, within the
+                        disk budget
+  --queue-review        Put the message's links and files in the review queue,
+                        where a person approves
+  --cooldown SECONDS    Fold further alerts to one destination into a summary
+                        for this long
+  --dedup-window SECONDS
+                        How long a fired event stays remembered so a replay
+                        fires nothing twice
