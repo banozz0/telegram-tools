@@ -221,8 +221,13 @@ def labels_match(typed: str, member: Member) -> bool:
 # -- what the flags say ------------------------------------------------------
 
 
-def parse_rights(text: str | None, *, universe: Sequence[str], what: str) -> tuple[str, ...]:
-    """A comma-separated list of right names, or `none`; a name Telegram does not spell is a usage error."""
+def parse_rights(text: str | None, *, universe: Sequence[str], what: str, noun: str = "right") -> tuple[str, ...]:
+    """A comma-separated list of names from `universe`, or `none`; anything else is a usage error.
+
+    `noun` is what the refusal calls them, because the same shape reads the
+    admin and banned rights and the folder categories, and "unknown folder
+    right" would name the wrong thing.
+    """
     if text is None:
         return ()
     names = [name.strip() for name in str(text).replace(";", ",").split(",") if name.strip()]
@@ -230,9 +235,9 @@ def parse_rights(text: str | None, *, universe: Sequence[str], what: str) -> tup
         return ()
     unknown = sorted(set(names) - set(universe))
     if unknown:
-        raise ValueError(f"Unknown {what} right(s): {', '.join(unknown)}. Valid names: {', '.join(universe)}.")
+        raise ValueError(f"Unknown {what} {noun}(s): {', '.join(unknown)}. Valid names: {', '.join(universe)}.")
     if not names:
-        raise ValueError(f"--rights names at least one {what} right, or `none`.")
+        raise ValueError(f"names at least one {what} {noun}, or `none`.")
     return tuple(sorted(set(names)))
 
 

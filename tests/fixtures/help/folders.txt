@@ -1,0 +1,14 @@
+usage: telegram-tools folders [-h] {list,create,edit,delete} ...
+
+positional arguments:
+  {list,create,edit,delete}
+    list                Every folder on this account, with its chats and
+                        categories
+    create              Make a folder (y/N)
+    edit                Change a folder; a field no flag names is left alone
+                        (y/N)
+    delete              Delete a folder (dry-run by default; --execute asks
+                        for its exact title)
+
+options:
+  -h, --help            show this help message and exit

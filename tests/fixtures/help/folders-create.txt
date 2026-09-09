@@ -1,0 +1,16 @@
+usage: telegram-tools folders create [-h] --title TITLE [--emoji EMOJI]
+                                     [--include CHAT] [--exclude CHAT]
+                                     [--types TYPES]
+
+options:
+  -h, --help      show this help message and exit
+  --title TITLE   The folder's name
+  --emoji EMOJI   The folder's emoji; empty removes it
+  --include CHAT  A chat the folder holds; repeatable, and it replaces the
+                  list. The chat: numeric ID, @username, or link. `none`
+                  empties it
+  --exclude CHAT  A chat the folder leaves out; repeatable, replaces the list,
+                  `none` empties it
+  --types TYPES   Comma-separated categories the folder holds, or none. Valid
+                  names: bots, broadcasts, contacts, exclude_archived,
+                  exclude_muted, exclude_read, groups, non_contacts

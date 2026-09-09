@@ -1463,7 +1463,7 @@ def test_the_root_shows_all_nine_rows_including_the_two_a_later_version_fills():
     assert "7. Watch (rules, runner, review queue)" in text
 
 
-def test_manage_holds_the_five_administration_groups():
+def test_manage_holds_the_administration_groups_and_folders():
     _code, calls, output = run_menu([MANAGE, "0", "0"])
 
     text = screens(output)
@@ -1473,6 +1473,7 @@ def test_manage_holds_the_five_administration_groups():
     assert "3. Join requests: list, approve, decline" in text
     assert "4. Invite links: list, create, revoke" in text
     assert "5. Chat and topic settings: show, set" in text
+    assert "6. Folders: list, create, edit, delete (this account's own)" in text
 
 
 MANAGE_ADMINS = ("6", "1")

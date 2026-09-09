@@ -118,6 +118,11 @@ COMMANDS = {
     "invite-list": ("invite", "list"),
     "invite-create": ("invite", "create"),
     "invite-revoke": ("invite", "revoke"),
+    "folders": ("folders",),
+    "folders-list": ("folders", "list"),
+    "folders-create": ("folders", "create"),
+    "folders-edit": ("folders", "edit"),
+    "folders-delete": ("folders", "delete"),
     "settings": ("settings",),
     "settings-show": ("settings", "show"),
     "settings-set": ("settings", "set"),
@@ -198,6 +203,11 @@ _ROOT_ADDITIONS = (
     # The folders-and-settings card (agent-bo-95421954) reworded this one line:
     # `settings` now reaches a topic as well as a chat, and more than slow mode.
     "settings A chat's or topic's settings: show, set",
+    # The folders-and-settings card (agent-bo-95421954): one new subcommand
+    # group, the account's own shelves over its chat list. Both spellings of
+    # the name, as `archive,` has.
+    "folders,",
+    "folders Your chat folders: list, create, edit, delete (the account only; a bot has no chat list)",
     # The watch card (agent-bo-95421957): two new subcommand groups -- the rules
     # and the runner, and the messages waiting to be posted. Both spellings of
     # the names.

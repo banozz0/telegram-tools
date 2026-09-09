@@ -63,9 +63,11 @@ from telegram_tools import messages as message_ops
 from telegram_tools.prompts import BACK, pick_many
 from telegram_tools import review as review_ops
 from telegram_tools import structure as structure_ops
+from telegram_tools import folders as folders_ops
 from telegram_tools import manage as manage_ops
 from telegram_tools import watch as watch_ops
 from telegram_tools.adapters import events as watch_events
+from telegram_tools.adapters.folders import TelegramFoldersPort
 from telegram_tools.adapters.manage import TelegramManagePort
 from telegram_tools._core import blueprint as _blueprint
 from telegram_tools.adapters.blueprint import TelegramBlueprintPort, chat_kind
@@ -96,6 +98,8 @@ WRITES = ("send", "message", "create", "delete", "clear-messages", "bots", "auth
 STRUCTURE_WRITES = ("apply",)
 # The administration verbs that change something; `list` and `show` only read.
 MANAGE_WRITES = tuple(op for op, spec in manage_ops.OPS.items() if spec.writes)
+# The three `folders` verbs that change the account's chat list; `list` reads.
+FOLDERS_WRITES = tuple(verb for verb in folders_ops.VERBS if verb != "list")
 # The archive commands that write the local store. `status`, `search` and
 # `export` read it, and a read is left alone for the same reason `doctor` is.
 ARCHIVE_WRITES = ("sync", "retention", "forget")
@@ -387,6 +391,23 @@ def build_parser() -> argparse.ArgumentParser:
     settings_set.add_argument("--closed", type=manage_ops.on_off, metavar="ON|OFF", help="Whether only admins may post in the topic")
     settings_set.add_argument("--hidden", type=manage_ops.on_off, metavar="ON|OFF", help="Whether the topic is hidden; Telegram allows this on the General topic only")
     settings_set.add_argument("--execute", action="store_true", help="Actually switch topics off, after typing the chat's exact title (no other setting needs it)")
+
+    folders_parser = subparsers.add_parser("folders", help="Your chat folders: list, create, edit, delete (the account only; a bot has no chat list)")
+    folders_kinds = folders_parser.add_subparsers(dest="folders_kind")
+    folders_kinds.add_parser("list", help="Every folder on this account, with its chats and categories")
+    types_help = "Comma-separated categories the folder holds, or none. Valid names: " + ", ".join(folders_ops.TYPE_NAMES)
+    folders_create = folders_kinds.add_parser("create", help="Make a folder (y/N)")
+    folders_edit = folders_kinds.add_parser("edit", help="Change a folder; a field no flag names is left alone (y/N)")
+    folders_edit.add_argument("--id", dest="folder_id", required=True, type=positive_int, help="The folder id `folders list` prints")
+    for folder_parser in (folders_create, folders_edit):
+        folder_parser.add_argument("--title", required=folder_parser is folders_create, help="The folder's name")
+        folder_parser.add_argument("--emoji", help="The folder's emoji; empty removes it")
+        folder_parser.add_argument("--include", action="append", metavar="CHAT", help=f"A chat the folder holds; repeatable, and it replaces the list. {chat_help}. `none` empties it")
+        folder_parser.add_argument("--exclude", action="append", metavar="CHAT", help="A chat the folder leaves out; repeatable, replaces the list, `none` empties it")
+        folder_parser.add_argument("--types", help=types_help)
+    folders_delete = folders_kinds.add_parser("delete", help="Delete a folder (dry-run by default; --execute asks for its exact title)")
+    folders_delete.add_argument("--id", dest="folder_id", required=True, type=positive_int, help="The folder id `folders list` prints")
+    folders_delete.add_argument("--execute", action="store_true", help="Actually delete it after typing its exact title")
 
     # -- watch and scheduling (section 10): the runner, its rules, the two guarantees ---
     rid_help = "A rid: tg:chat:ID, or tg:topic:ID:TOPIC for one forum topic"
@@ -2485,6 +2506,180 @@ def _run_migrate(profile, *, report: Reporter, read, write, home: Path | None) -
     return 0
 
 
+# -- folders (section 13, the account's own shelf over its chat list) ----------
+
+
+async def _run_folders(client, args, *, report: Reporter) -> int:
+    """One `folders` verb, behind the steps every write here takes.
+
+    A folder is not a chat, so there is no chat to probe and no right to ask
+    for: the preflight is empty and the plan says so. Everything else is the
+    same shape -- a plan, the gate section 7 assigns, a re-derivation after it,
+    the call, a readback and one audit line. `delete` takes `delete`'s gate,
+    because a folder is a container.
+    """
+    verb = getattr(args, "folders_kind", None)
+    if verb is None:
+        raise ValueError("folders needs one of: " + ", ".join(folders_ops.VERBS) + ".")
+    port = TelegramFoldersPort(client)
+    report.show_banner()
+    existing = await port.read()
+
+    if verb == "list":
+        rows = [folder.to_dict() for folder in existing]
+        for row in rows:
+            report.record(row)
+        if not report.machine:
+            print(folders_ops.format_folders(existing))
+        report.result({"count": len(rows), "folders": rows}, status="ok" if rows else "empty")
+        return 0
+
+    identity = await _acting(client, report)
+    me = report.me or await client.get_me()
+    execute = bool(getattr(args, "execute", False))
+    # Nothing to probe: the account's own folders are not a chat's rights.
+    rights = Rights(frozenset(), frozenset())
+    base = folders_ops.find(existing, args.folder_id) if verb in ("edit", "delete") else None
+    if base is not None:
+        folders_ops.require_editable(base, verb)
+
+    # -- what changes -----------------------------------------------------------
+    fields: dict = {}
+    peers: dict = {"include": (), "exclude": ()}
+    labels: dict = {"include": (), "exclude": ()}
+    if verb in ("create", "edit"):
+        fields = folders_ops.wanted(args, base)
+        for key in ("include", "exclude"):
+            if key in fields:
+                resolved = [await _resolve(client, report, reference) for reference in fields[key]]
+                targets = [ChatTargets.chat_target(chat, reference) for chat, reference in zip(resolved, fields[key])]
+                peers[key] = tuple(chat.input_entity for chat in resolved)
+                labels[key] = tuple(chat.title for chat in targets)
+                # The rid comes from the resolution, not from the peer: the
+                # resolver already knows the marked id, and reading it back off
+                # an input peer would be a second way of spelling the same thing.
+                fields[key] = tuple(chat.rid for chat in targets)
+            elif base is not None:
+                peers[key] = tuple(base.peers.get(key, ()))
+                labels[key] = tuple(base.peers.get(key, ()))
+        folders_ops.require_matches_something(
+            fields.get("types", base.types if base else ()),
+            fields.get("include", base.include if base else ()),
+        )
+
+    folder_id = base.id if base is not None else folders_ops.next_id(existing)
+    shown = base if base is not None else folders_ops.Folder(id=folder_id, title=str(fields.get("title", "")))
+    target = Target(
+        rid=folders_ops.folder_rid(folder_id),
+        kind="folder",
+        title=shown.title,
+        path=(shown.title,),
+        platform=PLATFORM,
+        ids={"folder": str(folder_id)},
+    )
+    report.set_target(target)
+
+    params = {"folder_id": folder_id, **{key: list(value) if isinstance(value, tuple) else value for key, value in fields.items()}}
+    approval = folders_ops.APPROVALS[verb]
+    typed = verb == "delete"
+
+    def build(on_target: Target):
+        return build_plan(
+            identity=identity,
+            command=f"folders {verb}",
+            targets=[on_target],
+            mutations=[Mutation(folders_ops.MUTATIONS[verb], on_target.rid, params)],
+            approval=approval,
+            rights=rights,
+            required=(),
+        )
+
+    plan, warnings = build(target)
+    report.set_plan(plan)
+    for warning in warnings:
+        report.warn(warning)
+
+    details = folders_ops.format_fields(fields, include=labels["include"], exclude=labels["exclude"]) if verb != "delete" else (
+        f"Chats       {len(base.include)} included, {len(base.exclude)} excluded, {len(base.pinned)} pinned",
+        "The chats stay; only the folder they were shelved in goes.",
+    )
+    preview = folders_ops.format_preview(
+        verb, actor=_entity_title(me, "you"), folder=base, details=details, execute=execute if typed else None
+    )
+
+    # -- the gate ---------------------------------------------------------------
+    if typed and not execute:
+        report.info(preview)
+        report.printed_result({"command": f"folders {verb}", "folder": shown.to_dict(), "dry_run": True, "executed": False}, status="dry_run")
+        return 0
+    if typed:
+        # A container: a terminal in either mode, as `delete` has.
+        if not manage_ops.terminal_present():
+            raise ApprovalRequired(report.human_command)
+        answered = folders_ops.confirm_typed_title(preview, base, **report.confirm_io())
+        if not answered:
+            report.info("That is not the title; nothing was changed.")
+    else:
+        answered = message_ops.confirm_prompt_y(preview, **report.confirm_io())
+    if not answered:
+        report.printed_result({"command": f"folders {verb}", "folder": shown.to_dict(), "dry_run": False, "executed": False, "cancelled": True}, status="cancelled")
+        return 1
+
+    # -- re-derivation: the folder is still the one that was shown --------------
+    async def rebuild():
+        again = await port.read()
+        fresh = folders_ops.find(again, folder_id) if base is not None else None
+        fresh_title = fresh.title if fresh is not None else shown.title
+        return build(Target(rid=target.rid, kind="folder", title=fresh_title, path=(fresh_title,), platform=PLATFORM, ids=dict(target.ids)))[0]
+
+    await recheck_for(plan, rebuild)()
+
+    # -- the call ---------------------------------------------------------------
+    if verb == "delete":
+        await port.remove(folder_id)
+    else:
+        await port.write(
+            folder_id,
+            port.build(
+                folder_id,
+                title=fields.get("title", base.title if base else ""),
+                emoticon=fields.get("emoticon", base.emoticon if base else None),
+                types=fields.get("types", base.types if base else ()),
+                include=peers["include"],
+                exclude=peers["exclude"],
+                pinned=tuple(base.peers.get("pinned", ())) if base else (),
+            ),
+        )
+
+    # -- readback ---------------------------------------------------------------
+    after: folders_ops.Folder | None = None
+
+    async def folder_now() -> str:
+        nonlocal after
+        again = await port.read()
+        after = next((folder for folder in again if folder.id == folder_id), None)
+        if verb == "delete":
+            return f"folder {folder_id} is gone" if after is None else f"folder {folder_id} is still there"
+        if after is None:
+            return f"folder {folder_id} is not there after the write"
+        return f"{after.title}: " + (folders_ops.diff(base, after) if base is not None else "made")
+
+    evidence = await read_back("the folder", folder_now)
+    report.set_evidence(evidence)
+    report.audit(plan, status="ok", evidence=evidence)
+    payload = {
+        "command": f"folders {verb}",
+        "folder": (after or shown).to_dict(),
+        "dry_run": False,
+        "executed": True,
+        "cancelled": False,
+    }
+    if not report.machine and after is not None and verb != "delete":
+        print(folders_ops.format_folder(after))
+    report.printed_result(payload, status="ok")
+    return 0
+
+
 # -- administration (section 13) --------------------------------------------
 
 
@@ -3341,6 +3536,8 @@ def require_bot_mode_supports(args, report: Reporter) -> None:
         why = "the review queue is the account's archive, and a bot reads no history"
     elif command == "structure":
         why = "a blueprint is read and applied through the account that administers the chat, and a bot creates no chat"
+    elif command == "folders":
+        why = "a folder is a shelf over an account's own chat list, and a bot has no chat list to shelve"
     else:
         why = "a bot has no dialog list, no history and nothing of its own to delete or set up"
     raise CommandError(
@@ -3470,6 +3667,7 @@ async def run(args, *, client=None, config=None, report: Reporter | None = None)
         or (args.command == "watch" and getattr(args, "watch_kind", None) in WATCH_WRITES)
         or (args.command == "watch" and getattr(args, "watch_kind", None) == "rules" and getattr(args, "rules_verb", None) in RULES_WRITES)
         or (args.command == "schedule" and getattr(args, "schedule_kind", None) in SCHEDULE_WRITES)
+        or (args.command == "folders" and getattr(args, "folders_kind", None) in FOLDERS_WRITES)
     ):
         require_tight_modes()
 
@@ -3545,6 +3743,8 @@ async def run(args, *, client=None, config=None, report: Reporter | None = None)
             return await _run_structure(client, args, config, report=report)
         if args.command in manage_ops.GROUPS:
             return await _run_manage(client, args, report=report)
+        if args.command == "folders":
+            return await _run_folders(client, args, report=report)
         raise ValueError(f"Unknown command: {args.command}")
     finally:
         if owns_client:
@@ -3565,6 +3765,7 @@ def command_name(args) -> str:
         or getattr(args, "join_kind", None)
         or getattr(args, "invite_kind", None)
         or getattr(args, "settings_kind", None)
+        or getattr(args, "folders_kind", None)
         or getattr(args, "watch_kind", None)
         or getattr(args, "schedule_kind", None)
     )

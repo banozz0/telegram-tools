@@ -50,6 +50,9 @@ ROOT_ITEMS = (
     "Write (send, reply, message tools)",
     "Build (create, delete, structure)",
     "Clear messages",
+    # Spec section 14's own words, and gate G6's: the root screen's nine rows
+    # are a promise, so Folders arrives as a screen inside Manage rather than a
+    # word in this line.
     "Manage (admins, members, invites, settings)",
     "Watch (rules, runner, review queue)",
     "Identity (profiles, my bots)",
@@ -2590,11 +2593,123 @@ def _flow_manage_group(group: str):
     return flow
 
 
-MANAGE_FLOWS = tuple((label, _flow_manage_group(key)) for key, _name, label in MANAGE_GROUPS)
+# Row 6's sixth screen. Folders are the one Manage family that is not about a
+# chat -- they belong to the account -- so this flow picks no chat and stages
+# its own form rather than going through `_flow_manage_verb`.
+FOLDERS_FORMS = {
+    "list": (),
+    "create": (
+        ("title", "Name", "text"),
+        ("emoji", "Emoji", "text"),
+        ("include", "Chats it holds (comma-separated, or none)", "text"),
+        ("exclude", "Chats it leaves out (comma-separated, or none)", "text"),
+        ("types", "Categories (comma-separated, or none)", "text"),
+    ),
+    "edit": (
+        ("folder_id", "Folder id", "int"),
+        ("title", "Name", "text"),
+        ("emoji", "Emoji", "text"),
+        ("include", "Chats it holds (comma-separated, or none)", "text"),
+        ("exclude", "Chats it leaves out (comma-separated, or none)", "text"),
+        ("types", "Categories (comma-separated, or none)", "text"),
+    ),
+    "delete": (("folder_id", "Folder id", "int"),),
+}
+FOLDERS_REQUIRED = {"create": ("title",), "edit": ("folder_id",), "delete": ("folder_id",)}
+FOLDERS_ROWS = (
+    ("list", "List your folders, with their chats and categories"),
+    ("create", "Make a folder"),
+    ("edit", "Change a folder"),
+    ("delete", "Delete a folder (dry-run first, then its exact title)"),
+)
+# `--include` and `--exclude` are repeatable on the command line; one comma-
+# separated row is the same list without five presses.
+FOLDERS_LISTS = ("include", "exclude")
+
+
+def _folders_namespace(verb: str, values: dict) -> argparse.Namespace:
+    staged = dict(values)
+    for key in FOLDERS_LISTS:
+        text = staged.get(key)
+        staged[key] = [part.strip() for part in str(text).split(",") if part.strip()] if text else None
+    return _namespace(command="folders", folders_kind=verb, **staged)
+
+
+def _flow_folders_verb(verb: str, title: str):
+    """One folders verb: stage its fields, run it behind its own gate."""
+    fields = FOLDERS_FORMS[verb]
+    required = FOLDERS_REQUIRED.get(verb, ())
+    typed = verb == "delete"
+
+    async def run_it(values: dict, *, session, runner, read, write, form: str) -> Any:
+        if not typed:
+            return await _act(_folders_namespace(verb, values), session=session, runner=runner, read=read, write=write, trail=form, rows=(RUN_AGAIN,))
+        dry_run = _folders_namespace(verb, {**values, "execute": False})
+        if await _call(dry_run, session=session, runner=runner, write=write) is None:
+            return _leave_action(after_action(read=read, write=write))
+        choice = choose(
+            ["Do it for real - the next screen asks for the folder's exact title"],
+            title=crumb(form, "Dry-run done"),
+            read=read,
+            write=write,
+            back_label="Back to the form",
+        )
+        if choice is BACK:
+            return STAY
+        for_real = _namespace(**{**vars(dry_run), "execute": True})
+        return await _act(for_real, session=session, runner=runner, read=read, write=write, trail=form, rows=())
+
+    async def flow(*, session, runner, read, write) -> bool:
+        form = crumb(MAIN, "Manage", "Folders", title)
+        if not fields:
+            return _leave(await run_it({}, session=session, runner=runner, read=read, write=write, form=form))
+        staged: dict[str, Any] = {key: None for key, _label, _kind in fields}
+        while True:
+            rows = [(key, f"{label:<44} [{_staged_label(kind, staged[key])}]") for key, label, kind in fields]
+            rows.append(("run", "Run it (dry-run first)" if typed else "Do it (shows the preview, then asks)"))
+            choice = choose([label for _key, label in rows], title=form, read=read, write=write, back_label="Back (discards)")
+            if choice is BACK:
+                return True
+            key = rows[choice][0]
+            if key != "run":
+                _key, label, kind = fields[choice]
+                answer = ask_int(label, read=read, write=write, current=staged[key]) if kind == "int" else ask_text(label, read=read, write=write, current=staged[key] or None)
+                if answer is not BACK:
+                    staged[key] = None if answer is CLEAR else answer
+                continue
+            missing = [label for key, label, _kind in fields if key in required and staged[key] in (None, "")]
+            if missing:
+                write("Fill in first: " + ", ".join(missing) + ".")
+                continue
+            result = await run_it(dict(staged), session=session, runner=runner, read=read, write=write, form=form)
+            if result is STAY:
+                continue
+            return _leave(result)
+
+    return flow
+
+
+async def _flow_folders(*, session, runner, read, write) -> bool:
+    """Manage's sixth screen: the account's own shelves over its chat list."""
+    rows = tuple((label, _flow_folders_verb(verb, label)) for verb, label in FOLDERS_ROWS)
+    trail = crumb(MAIN, "Manage", "Folders")
+    while True:
+        choice = choose([label for label, _flow in rows], title=trail, read=read, write=write)
+        if choice is BACK:
+            return True
+        outcome = await _group(rows[choice][1], session=session, runner=runner, read=read, write=write)
+        if outcome is not True:
+            return outcome
+
+
+MANAGE_FLOWS = (
+    *((label, _flow_manage_group(key)) for key, _name, label in MANAGE_GROUPS),
+    ("Folders: list, create, edit, delete (this account's own)", _flow_folders),
+)
 
 
 async def _flow_manage(*, session, runner, read, write) -> bool:
-    """Row 6. Admins, members, join requests, invite links and a chat's settings."""
+    """Row 6. Admins, members, join requests, invite links, settings and folders."""
     trail = crumb(MAIN, "Manage")
     while True:
         choice = choose([label for label, _flow in MANAGE_FLOWS], title=trail, read=read, write=write)

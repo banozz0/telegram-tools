@@ -20,17 +20,19 @@ Built on [Telethon](https://github.com/LonamiWebs/Telethon). Everything runs on 
 - **`create`** — makes a supergroup (optionally with topics already on), a broadcast channel, or a topic inside a forum group, and prints the new ID.
 - **`delete`** — removes a supergroup, a broadcast channel, or a forum topic: the thing itself, not just its messages. Dry-run by default; deleting requires `--execute` *and* typing the target's exact title at a prompt. It deletes exactly what `create` can make, so nothing this tool removes is beyond making again.
 - **`structure`** — a chat's shape as a file: `structure export` writes a blueprint (kind, title, description, topics, default rights, slow mode, join approval — never members, admins, messages, history or invite links), `structure diff` says what another chat would need to match it, `structure apply` makes the missing topics and settings behind the same typed-title gate `delete` has and never deletes anything on the target, and `structure remap` prints the id table an apply wrote. See [Structure blueprints](#structure-blueprints).
-- **`admin`, `member`, `join-requests`, `invite`, `settings`** — running a group or channel: list, promote, change and demote admins; list, ban, unban, mute, unmute and restrict members; approve or decline join requests; list, create and revoke invite links; show a chat's settings and set slow mode. Every write names the right it needs before it starts, and banning or demoting someone asks for their exact label at a terminal. See [Admins and members](#admins-and-members).
+- **`admin`, `member`, `join-requests`, `invite`, `settings`** — running a group or channel: list, promote, change and demote admins; list, ban, unban, mute, unmute and restrict members; approve or decline join requests; list, create and revoke invite links; show and change a chat's title, description, topics flag and slow mode, or one topic's title, icon, closed and hidden. Every write names the right it needs before it starts, and banning or demoting someone — or switching a group's topics off — asks for their exact label or the chat's exact title at a terminal. See [Admins and members](#admins-and-members).
+- **`folders`** — your own chat folders, the shelves Telegram draws above your chat list: `folders list` shows them with their chats and categories, `folders create` and `folders edit` build one out of named chats and whole categories (`groups`, `bots`, `contacts`, …), and `folders delete` removes one behind the same typed-title gate `delete` has. A folder belongs to an account, so `--as-bot folders` refuses. See [Folders](#folders).
 - **`watch`** — rules over live Telegram events and the runner that fires them: `watch rules add` writes a rule (what to watch, what to alert about, what to tag, bookmark, archive or queue for review), `watch run` keeps one process up that receives updates, replays what it missed and fires those rules, and `watch status`, `stop` and `reload` operate it. A rule can never download or change anything. See [Watching and scheduling](#watching-and-scheduling).
 - **`schedule`** and **`send --at`** — messages posted later, and the tool says plainly which of them survives this machine being off: `send --at` hands the message to Telegram (**server-held**), `schedule post` stores one this runner posts (**runner-held**). `schedule list` shows both with their guarantee, `schedule cancel` cancels either. See [Watching and scheduling](#watching-and-scheduling).
 - **`bots`** — lists the bots you own with their numeric IDs, and edits what @BotFather edits: display name, bio, description, commands, profile photo, and default admin rights.
 - **`doctor`** — checks your local setup without printing any secrets.
-- **`--as-bot NICK`** — runs `send`, `create topic`, a message verb or an administration command as one of your own bots instead of as you, naming both on every screen. See [Acting as a bot](#acting-as-a-bot).
+- **`--as-bot NICK`** — runs `send`, `create topic`, a message verb or an administration command as one of your own bots instead of as you, naming both on every screen. Folders are not on that list: a bot has no chat list to shelve. See [Acting as a bot](#acting-as-a-bot).
 - **`--json`** — any command, machine-readable: one object on stdout carrying the result, the target, the gate and the error code. For agents and scripts; see [For scripts and agents](#for-scripts-and-agents).
 
 ## What it doesn't do (on purpose)
 
-- No renaming forum topics — `clear-messages` leaves topic IDs untouched, and `delete topic` is the only way a topic goes.
+- No deleting a topic by renaming it — `settings set --topic` changes a topic's title, icon, closed and hidden flags and nothing else; `clear-messages` leaves topic IDs untouched, and `delete topic` is still the only way a topic goes.
+- No reordering. `folders edit` never touches the chats you pinned inside a folder, and a blueprint lists topics by title because Telegram gives them no order a client can set.
 - No unattended downloads, and no download at all outside the review queue. `archive sync` notes every link and file it walks past and fetches none of them; `message copy` links to an attachment rather than fetching it. A byte reaches your disk only after you approved that candidate at a terminal, it sat in quarantine through every check, and you accepted it with the verdict in front of you. No rule, schedule or sync can approve, and no `--yes` exists for either step.
 - No cloud scanning. The one scanner is a local ClamAV, if you have one; without it every verdict is `UNSCANNED`, said plainly, never "clean".
 - No perfect clones. A blueprint carries a chat's structure — kind, title, description, topics, default rights, slow mode, join approval — and nothing that belongs to people or to time: no members, no admins, no messages, no history, no invite links, no linked discussion group. `structure export` says so every time it runs, and the file lists it too.
@@ -483,8 +485,12 @@ telegram-tools join-requests approve --chat @teamhermes --user @newbie          
 telegram-tools invite list --chat @teamhermes                                   # the links, in full
 telegram-tools invite create --chat @teamhermes --title night --expires 7d --usage-limit 5 --request-needed
 telegram-tools invite revoke --chat @teamhermes --link https://t.me/+…
-telegram-tools settings show --chat @teamhermes
+telegram-tools settings show --chat @teamhermes                                 # --topic 217 shows that topic's own
 telegram-tools settings set --chat @teamhermes --slow-mode 60                   # 0, 10, 30, 60, 300, 900 or 3600
+telegram-tools settings set --chat @teamhermes --title "Team Hermes" --about "the agency's room"
+telegram-tools settings set --chat @teamhermes --topic 217 --title Help --closed on
+telegram-tools settings set --chat @agency --forum on                           # topics on for a group that has none
+telegram-tools settings set --chat @agency --forum off --execute                # asks for the chat's exact title
 ```
 
 Every write shows who acts, on whom, in which chat, and what changes, then asks. Two of them are `delete`'s gate, because they take something away from a person rather than adding to a chat: `member ban` and `admin demote` dry-run by default, take `--execute`, ask you to type the person's exact label (`@harry`, or their name when they have no username), refuse without a terminal in either mode, and have no `--yes`. Everything else asks `y/N` and has no `--yes` either — no allowlist exists for an admin action, so nothing here ever runs unattended.
@@ -495,7 +501,31 @@ Telegram stores no reason beside a ban. `--reason` is kept in the plan, the read
 
 Invite links are credentials to a chat, so they appear only where you asked for them: `invite list` and `invite create` print them and carry them in `result`. Every other screen, envelope field and audit line goes through the same redaction pass as a token, which blanks a link — including the one you handed to `invite revoke`.
 
+`settings` reaches a chat and, with `--topic`, one topic in it. A chat takes `--title`, `--about`, `--forum` and `--slow-mode` and needs `change_info`; a topic takes `--title`, `--icon-emoji-id`, `--closed` and `--hidden` and needs `manage_topics`. Both are named before anything is sent, a flag from the wrong scope is a usage error naming it rather than a call Telegram refuses, and the General topic takes only the title and `hidden` Telegram lets it take. A flag you leave out leaves its field alone, and every `set` reads the fields back afterwards and reports what actually moved, so a change the platform accepted and did not apply reads as `no field changed` rather than as a success.
+
+`--forum off` is the one setting behind `delete`'s gate. Switching topics off puts every topic's messages into one stream and its topics stop existing, so it dry-runs by default, needs `--execute` plus the chat's exact title typed at a terminal, refuses without one in either mode, and has no `--yes`. `--forum on` is one `y/N`, like every other setting.
+
 Under `--as-bot` all five groups run as the bot, where the bot is an admin of the chat; a bot that is a plain member refuses with `IDENTITY_MODE_UNSUPPORTED` before any preview, and a bot admin without the specific right is refused by name like the account would be. A basic group is refused (`PLATFORM_UNSUPPORTED`): every call here is a supergroup call, and Telegram itself upgrades a basic group the moment you change a setting on it in the app.
+
+## Folders
+
+A folder is Telegram's own shelf over your chat list — the tabs above it in the app — and it belongs to your account rather than to any chat:
+
+```bash
+telegram-tools folders list
+telegram-tools folders create --title Ops --emoji 🛠 --include @teamhermes --include @agency --types groups
+telegram-tools folders edit --id 2 --title "Ops and alerts" --include @teamhermes --include @agencyalerts
+telegram-tools folders edit --id 2 --types none                                 # keeps its chats, drops the categories
+telegram-tools folders delete --id 2 --execute                                  # asks for the folder's exact title
+```
+
+A folder holds the chats you name (`--include`, repeatable) and whole categories Telegram matches for you (`--types`, from `bots`, `broadcasts`, `contacts`, `groups`, `non_contacts`, plus `exclude_archived`, `exclude_muted` and `exclude_read`), minus the chats you leave out (`--exclude`). Both chat lists **replace**: `--include a --include b` is what the folder holds afterwards, and `--include none` empties it. A field no flag names is left alone, and that includes the chats you pinned inside the folder — this tool never reorders them. A folder with no chats and no matching category would match nothing, which Telegram refuses, so this refuses it first and says which flag to add.
+
+`create` and `edit` show what changes and ask `y/N`; neither has a `--yes`, because nothing unattended should reshape your chat list. `delete` is `delete`'s gate: dry-run by default, `--execute` plus the folder's exact title typed at a terminal, no `--yes` either. Deleting a folder removes the shelf and none of the chats on it.
+
+Two folders you will see and not be able to change here. The **All chats** row Telegram always sends is not a folder anyone made, so it is not listed. A folder that arrived through a **chatlist invite** is listed with `shared`, and `edit` and `delete` refuse it by name (`PLATFORM_UNSUPPORTED`): Telegram gives a shared folder no exclude list and no categories, so the folder this tool would write back is not the folder that is there. Change or leave those in the app.
+
+Folders are account-only. `--as-bot folders …` exits 2 with `IDENTITY_MODE_UNSUPPORTED` before anything connects, because a bot has no chat list to shelve.
 
 ## Watching and scheduling
 
@@ -583,7 +613,10 @@ the chat from your live chats and staging the verb's fields; Send's form has a *
 row, and Delete's *Delete for real* toggle is its `--execute`. *Build* opens six rows: create,
 delete, then export a blueprint, diff one against a chat, apply one — the dry-run runs first,
 and the exact title is typed at the CLI's own prompt — and show an apply's remap table.
-*Manage* opens the five administration groups, a row per verb. *Watch* opens four screens:
+*Manage* opens six screens: the five administration groups, a row per verb — the settings
+form stages every field of a chat and of a topic, and its `--forum off` row runs the
+dry-run first and asks for the chat's exact title at the CLI's own prompt — and *Folders*,
+which is the one Manage screen that picks no chat, because a folder belongs to the account. *Watch* opens four screens:
 *Rules* (list, add, edit, enable, disable, remove, test — the add form has a row for every
 flag the command takes, and the file it writes stays editable by hand), *Runner* (run it
 here in the foreground, its status, stop, reload), *Scheduled* (what is scheduled with its
@@ -600,7 +633,8 @@ The safety gates are the same as the flags', not looser: clearing topic messages
 dry-runs first and still asks you to type `DELETE`, deleting a group, channel or topic
 dry-runs first and still asks you to type its exact title, pruning or forgetting part
 of the archive dry-runs first and asks for the scope's title too, deleting messages
-dry-runs first and still asks for `DELETE`, sending or any other message verb shows
+dry-runs first and still asks for `DELETE`, deleting a folder or switching a group's topics
+off dry-runs first and asks for its exact title, sending or any other message verb shows
 the whole thing and asks `y/N`, scheduling a message shows it with its guarantee and asks,
 removing a rule asks, and bot edits still print a diff and ask before writing. The
 menu has no equivalent of `--yes` at all. With no terminal attached it prints this help instead.
@@ -723,9 +757,12 @@ for a code or a password. Relay the refusal and let the person run it.
 | `send --at`, `schedule post` | Outward-facing, later — `--at` hands the message to Telegram (`server-held`), `schedule post` stores one this runner posts (`runner-held`, and it says so). Both behind the same preview and `y/N` as `send`, both preflighted for the right to post, and both account-only |
 | `schedule cancel` | Visible to nobody until it would have posted — cancels a message Telegram is holding (`--chat`) or one of this runner's, after a `y/N`; there is no `--yes` |
 | `structure export`, `structure diff`, `structure remap` | No — export and diff read one chat and write a local file or a screen; remap reads the local archive and never connects |
-| `admin list`, `member list`, `join-requests list`, `invite list`, `settings show` | No — read the chat's people, requests, links or settings; `invite list` shows the links you asked for |
-| `admin promote`, `admin rights`, `member unban`, `member mute`, `member unmute`, `member restrict`, `join-requests approve/decline`, `invite create`, `invite revoke`, `settings set` | Visible to the chat — each shows who acts, on whom and what changes, then asks `y/N`; there is no `--yes`. A missing right, or a right the account cannot grant, refuses by name before the call; mutes and restrictions need `--until`, a minute to a year |
+| `admin list`, `member list`, `join-requests list`, `invite list`, `settings show`, `folders list` | No — read the chat's people, requests, links or settings, one topic's own settings, or this account's folders; `invite list` shows the links you asked for |
+| `admin promote`, `admin rights`, `member unban`, `member mute`, `member unmute`, `member restrict`, `join-requests approve/decline`, `invite create`, `invite revoke`, `settings set` (except `--forum off`) | Visible to the chat — each shows who acts, on whom and what changes, then asks `y/N`; there is no `--yes`. A missing right, or a right the account cannot grant, refuses by name before the call; mutes and restrictions need `--until`, a minute to a year. `settings set` needs `change_info` on a chat and `manage_topics` on a topic, and reads the fields back as a diff |
+| `folders create`, `folders edit` | Visible only to you — reshape this account's own chat folders; each shows what changes and asks `y/N`, and there is no `--yes`. No chat is touched: a folder holds references to chats, never the chats themselves |
 | `member ban`, `admin demote` | Yes — a person's membership or a person's rights, for everyone. Dry-run by default; only with `--execute` **and** the person's exact label typed at a terminal, in either mode; there is no `--yes`. A ban's `--reason` is kept in the local audit line, because Telegram stores none |
+| `settings set --forum off` | Yes — every topic in the group stops existing and its messages become one stream, for everyone. Dry-run by default; only with `--execute` **and** the chat's exact title typed at a terminal, in either mode; there is no `--yes`. `--forum on` is an ordinary `y/N` |
+| `folders delete` | Yes, for this account's chat list only — the shelf goes, none of the chats on it do. Dry-run by default; only with `--execute` **and** the folder's exact title typed at a terminal, in either mode; there is no `--yes`. A shared folder from a chatlist invite is refused by name |
 | `structure apply` | Additive on the target — makes topics and sets the chat's settings, never deletes a topic, a setting or the chat. Dry-run by default; executing needs `--execute` **and** the target's exact title typed at a terminal, in either mode; there is no `--yes`. `--create` makes a new chat of the blueprint's kind first |
 | `archive retention`, `archive forget` | Local only — prune or remove rows of the local archive, never anything on Telegram. Dry-run by default; executing needs `--execute` **and** the scope's exact title typed back; there is no `--yes` |
 | `auth` | Local only — writes or removes this machine's login. `--logout` needs the profile's name typed back, `--migrate` a `y/N`; there is no `--yes`, and it cannot run unattended. Nothing it asks for is stored: a two-step-verification password goes straight into the sign-in call |
@@ -741,7 +778,7 @@ for a code or a password. Relay the refusal and let the person run it.
 
 `bots` refuses to edit a bot you do not own, and it never fetches or exports a bot token from Telegram — the three token-only edits simply fail with a message naming the fields they need one for.
 
-Every write — sending, a message verb, creating, clearing, deleting, applying a blueprint, an admin or member change, a rule file, a schedule, editing a bot — now also
+Every write — sending, a message verb, creating, clearing, deleting, applying a blueprint, an admin, member, setting or folder change, a rule file, a schedule, editing a bot — now also
 asks Telegram what rights your account actually holds in that chat before it
 does anything, and refuses by name when one it needs is missing. Once you have
 answered the gate, the target is resolved a second time and compared with the
