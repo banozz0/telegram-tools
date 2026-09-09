@@ -1,13 +1,13 @@
 ---
 name: telegram-tools
-description: "Use when you need the real numeric ID of a Telegram chat, channel, group or forum topic — 'what's the ID of that topic?', 'which chat is -100…?', 'where do I send this?' — when the user wants their own Telegram messages searched or exported (JSON, CSV, JSONL, Markdown, HTML), when a history question can be answered from the local archive instead of a fresh fetch, when a message must be posted to a chat or topic the user has allowlisted, when a message the user named should get a reply, a reaction, a pin, or be forwarded, copied or bookmarked, when the user asks who the admins of a chat are, who is waiting to join, which invite links exist, or what a chat's slow mode is, or when they want a message posted at a set time or a rule that alerts them when something happens in a chat."
-version: 1.12.0
+description: "Use when you need the real numeric ID of a Telegram chat, channel, group or forum topic — 'what's the ID of that topic?', 'which chat is -100…?', 'where do I send this?' — when the user wants their own Telegram messages searched or exported (JSON, CSV, JSONL, Markdown, HTML), when a history question can be answered from the local archive instead of a fresh fetch, when a message must be posted to a chat or topic the user has allowlisted, when a message the user named should get a reply, a reaction, a pin, or be forwarded, copied or bookmarked, when the user asks who the admins of a chat are, who is waiting to join, which invite links exist, what a chat's or a topic's settings are, or which chat folders they have, or when they want a message posted at a set time or a rule that alerts them when something happens in a chat."
+version: 1.13.0
 author: banozz0
 license: MIT
 platforms: [macos]
 metadata:
   hermes:
-    tags: [telegram, chat-ids, topic-ids, forum, search, archive, export, send, reply, react, message, review, structure, blueprint, admin, member, invite, watch, rules, schedule, cli]
+    tags: [telegram, chat-ids, topic-ids, forum, search, archive, export, send, reply, react, message, review, structure, blueprint, admin, member, invite, settings, folders, watch, rules, schedule, cli]
 ---
 
 # telegram-tools
@@ -62,8 +62,13 @@ govern them — read those before running any. It still does not run bots.
 
 It can also run a chat: **`admin`**, **`member`**, **`join-requests`**, **`invite`**
 and **`settings`** list and change who administers a group, who is in it, who is
-waiting at its door, which links open it and how fast people may post. The reads are
-yours; rule 13 below says which of the writes are, and which two never are.
+waiting at its door, which links open it, and what the chat or one of its topics is
+called and how it behaves. The reads are yours; rule 13 below says which of the writes
+are, and which three never are.
+
+It also knows the user's own **`folders`** — the shelves above their chat list. Reading
+them is yours (`folders list`); making, changing or deleting one is theirs, and rule 15
+says why. A folder belongs to an account, so `--as-bot folders` refuses.
 
 It can **watch** live events and **schedule** a message for later. `watch rules`
 writes the rules and `watch run` is the process that fires them; `send --at` hands a
@@ -182,17 +187,36 @@ not drive either through the menu, a pty, or a piped answer; hand the user the c
 and relay the dry-run (no `--execute`), which is safe to run and shows who would be
 affected. The other administration writes — `admin promote`, `admin rights`, `member
 unban`, `mute`, `unmute`, `restrict`, `join-requests approve` and `decline`, `invite
-create` and `revoke`, `settings set` — ask `y/N` and have no `--yes`, so from an agent
+create` and `revoke`, `settings set` (except `--forum off`) — ask `y/N` and have no `--yes`, so from an agent
 session they block; run one only when the user asked for that exact change of that
 exact person or link in this conversation, and expect to hand it over rather than
 answer for them. Never add `--reason` on the user's behalf, never pick an `--until`
 the user did not give, and never guess a person: `member list` and `admin list` show
 ids and usernames. The reads — `admin list`, `member list`, `join-requests list`,
-`invite list`, `settings show` — are yours to run. `invite list` prints real invite
+`invite list`, `settings show` (with or without `--topic`) — are yours to run. `invite list` prints real invite
 links: they are credentials to the chat, so quote one back only to the user who asked
 for it and never paste one anywhere else. `HIERARCHY_DENIED` means the account holds
 the right but cannot use it on that person (it lacks a right it would grant, or the
 person holds more than it does); relay both rights sets from the message and stop.
+`settings set` takes a chat's `--title`, `--about`, `--forum` and `--slow-mode`, or one
+topic's `--title`, `--icon-emoji-id`, `--closed` and `--hidden` behind `--topic ID`; a
+flag of the wrong scope is a usage error, so read `settings show` first and hand over
+the exact command. **Never run `settings set --forum off --execute`**: switching a
+group's topics off makes every topic stop existing and puts its messages in one stream,
+and its gate is `delete`'s — `--execute` plus the chat's exact title typed at a
+terminal, refused without one in either mode, no `--yes`. Its dry-run (no `--execute`)
+is safe and shows what would go.
+
+**15. Folders are the user's chat list, and reshaping it is theirs.** `folders list` is
+yours to run and answers "which folders do I have, and what's in each"; the rids it
+prints (`tg:folder:2`) are what `--id` takes. `folders create`, `edit` and `delete`
+change what the user sees every time they open Telegram, and none of the three has a
+`--yes`, so from an agent session they block — propose the exact command and hand it
+over. Two things to say accurately rather than guess: `--include`, `--exclude` and
+`--types` **replace** the folder's lists rather than adding to them, so an edit that
+names one chat leaves the folder holding that one chat; and a folder listed as `shared`
+came from a chatlist invite and refuses `edit` and `delete` by name — that one is
+changed in the app, not here. Never invent a folder's contents: read it first.
 
 **14. A rule and a runner are the user's to set up, and a schedule's guarantee is
 never yours to paraphrase.** `watch rules add` and `edit` write a file that will act
@@ -311,12 +335,18 @@ names the files).
 | "who is waiting to join?" | `telegram-tools --json join-requests list --chat <id>` — reads only |
 | "what invite links does that chat have?" | `telegram-tools --json invite list --chat <id>` — reads only; the links are real, quote them to the user only |
 | "what's the slow mode / do people need approval to join?" | `telegram-tools --json settings show --chat <id>` — reads only |
+| "what is that topic called / is it closed?" | `telegram-tools --json settings show --chat <id> --topic <topic-id>` — reads only |
+| "which folders do I have?" / "what's in that folder?" | `telegram-tools --json folders list` — reads only |
 | "make X an admin" / "let X pin things" (they named the person and the rights) | hand them `telegram-tools admin promote --chat <id> --user <@x> --rights pin_messages` — rule 13, it asks y/N |
 | "ban X" / "remove X as admin" | hand them `telegram-tools member ban --chat <id> --user <@x> --execute` or `admin demote … --execute` — rule 13, they type the label; the dry-run without `--execute` is yours to show |
 | "mute X for an hour" / "let X back in" | hand them `telegram-tools member mute --chat <id> --user <@x> --until 1h` / `member unmute …` — rule 13 |
 | "let X in" / "turn X down" (a join request) | hand them `telegram-tools join-requests approve --chat <id> --user <@x>` or `… decline …` — rule 13 |
 | "make an invite link" / "kill that link" | hand them `telegram-tools invite create --chat <id> --expires 7d` or `invite revoke --chat <id> --link <link>` — rule 13 |
 | "set slow mode to a minute" | hand them `telegram-tools settings set --chat <id> --slow-mode 60` — rule 13 |
+| "rename that topic / close it" | hand them `telegram-tools settings set --chat <id> --topic <topic-id> --title "..." --closed on` — rule 13 |
+| "turn topics off for that group" | hand them `telegram-tools settings set --chat <id> --forum off --execute` — they type the chat's title; every topic goes. Rule 13 |
+| "make me a folder for X" / "change that folder" | hand them `telegram-tools folders create --title X --include <id> --types groups` or `folders edit --id <n> …` — rule 15; the lists replace |
+| "delete that folder" | hand them `telegram-tools folders delete --id <n> --execute` — they type its exact title, and the chats on it stay. Rule 15 |
 | "what am I watching for?" / "what rules do I have?" | `telegram-tools --json watch rules list` — offline |
 | "is the watcher running?" | `telegram-tools --json watch status` — offline; reports the holder, the last tick and the rules loaded |
 | "would this have fired?" | `telegram-tools --json watch rules test --event /path/event.json` — fires nothing, contacts nobody |
@@ -434,6 +464,14 @@ names the files).
   rights, for everyone, behind their exact label typed at a terminal, with no `--yes`.
   Rule 13. The dry-run (no `--execute`) and the five reads are fine to run; the other
   administration writes ask `y/N` and are the user's to answer.
+- **`settings set --forum off --execute`** — every topic in the group stops existing
+  and its messages become one stream, behind the chat's exact title typed at a
+  terminal, with no `--yes`. Rule 13. Its dry-run (no `--execute`) is fine to run;
+  `--forum on` and every other `settings set` asks `y/N` and is the user's to answer.
+- **`folders create`, `folders edit`, `folders delete`** — they reshape the chat list
+  the user sees every time they open Telegram, and none has a `--yes`, so from an
+  agent session they block. Rule 15. `folders list` is the read-only half and is fine
+  to run; a folder marked `shared` refuses the two writes by name.
 - **`watch rules add`, `edit`, `enable`, `disable`, `remove`, and `watch run`** — the
   first five write a file that acts on the user's account without them present, and
   `watch run` is a long-running process they start and stop (it blocks until they do).

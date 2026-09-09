@@ -280,20 +280,57 @@ The terms this codebase uses, and the boundaries they imply.
   `member list/ban/unban/mute/unmute/restrict`, `join-requests
   list/approve/decline`, `invite list/create/revoke`, `settings show/set`. Each
   `Op` names its approval kind (None for a read), the right its plan states,
-  the mutation op the plan records and whether it names a person. The calls
-  are `adapters/manage.py`; `cli._run_manage` is the one handler.
+  the mutation op the plan records and whether it names a person. `settings
+  set` is the one whose three are not fixed by the table -- a scope decides
+  them (`manage.settings_change`) -- and the calls are `adapters/manage.py`;
+  `cli._run_manage` is the one handler over all five groups.
+- **Setting scope** — which thing a `settings set` is about, and therefore
+  which right it needs and which flags it takes. A **chat** takes `--title`,
+  `--about`, `--forum` and `--slow-mode` and needs `change_info`; a **topic**,
+  named by `--topic`, takes `--title`, `--icon-emoji-id`, `--closed` and
+  `--hidden` and needs `manage_topics`. A flag of the other scope is a usage
+  error naming it, not a call Telegram refuses; a flag left out leaves its
+  field alone, which is why `--forum`, `--closed` and `--hidden` take `on` or
+  `off` rather than being switches (`manage.on_off`); and the General topic
+  (id 1) takes only the two fields Telegram lets it take.
+- **Settings diff** — what a `settings set` reports as evidence
+  (`manage.settings_diff`): the fields read before the call against the fields
+  read after it, `old -> new`, and only those that moved. A write the platform
+  accepted and did not apply reads as `no field changed` rather than as a
+  success, which is the whole reason the readback exists.
+- **Folder** — one of the account's own shelves over its chat list, which
+  Telegram calls a dialog filter (`folders.Folder`, `adapters/folders.py`):
+  an id from 2, a title, an emoji, the chats it holds and leaves out as rids,
+  the chats pinned inside it, and the categories Telegram matches for it
+  (`folders.TYPE_NAMES`, Telegram's own eight flag names). Its rid is
+  `tg:folder:2` -- one segment, because a folder belongs to the account and
+  not to any chat. Two rows in Telegram's list are not folders anyone made:
+  the **All chats** default row, which has no id and is dropped, and a
+  **shared** folder from a chatlist invite, which carries no exclude list and
+  no categories and so is listed but refused for `edit` and `delete`
+  (`folders.require_editable`). `cli._run_folders` is the one handler; the
+  whole surface is two calls, `messages.getDialogFilters` and
+  `messages.updateDialogFilter` (with no filter, that is a delete).
 - **Member** — one participant as the screens and the hierarchy rule see them
   (`manage.Member`): id, label, username, a status (`creator`, `admin`,
   `member`, `restricted`, `banned`, `left`, `none` for someone not in the
   chat), the rights that are on, a rank, an `until`. Read off the participant
   object Telegram returns (`adapters/manage.member_of`).
+- **Replacing list** — how `--include`, `--exclude` and `--types` behave on
+  `folders create` and `folders edit`, and `--rights` on `admin rights`: the
+  flag names what the field *is* afterwards, not what to add, and `none`
+  empties it. A field no flag names is left alone -- which is how an edit puts
+  back the chats pinned inside a folder without ever being asked about them.
 - **Typed label** — the gate `member ban` and `admin demote` share with
   `delete`: dry-run by default, `--execute`, and the person's exact label typed
   back — their `@username`, or their name when they have none, either with or
   without the `@`, case-insensitively. No `--yes`, and a terminal in either
   mode, because a person's membership or rights is a container's worth of
   consequence. The re-derivation after the gate compares the chat's title and
-  the person's status, so someone promoted in the window is `PLAN_DRIFT`.
+  the person's status, so someone promoted in the window is `PLAN_DRIFT`. Two
+  writes take the same gate on a *title* rather than a label: `folders delete`
+  asks for the folder's, and `settings set --forum off` for the chat's, because
+  switching topics off leaves no topic standing.
 - **Hierarchy** — section 7's second refusal, `HIERARCHY_DENIED`
   (`manage.require_hierarchy`): an admin gives only rights it holds, and edits
   only an admin holding no more than it does and whom Telegram marks editable
@@ -338,8 +375,10 @@ The terms this codebase uses, and the boundaries they imply.
   mode is decided once in `main` and the menu — which passes none — keeps the
   human default.
 - **rid** — the stable string key for a Telegram object: `tg:chat:-100…`,
-  `tg:topic:-100…:141`, `tg:user:…`, `tg:bot:…`. Two segments for a thing that
-  lives inside a container. Everything machine-readable names a target by rid.
+  `tg:topic:-100…:141`, `tg:folder:2`, `tg:user:…`, `tg:bot:…`. Two segments
+  for a thing that lives inside a container, one for everything else — a
+  folder is the account's and not a chat's, so it takes one. Everything
+  machine-readable names a target by rid.
 - **Identity** — who a run acts as: platform, mode (`account` or `bot`), a label
   screens print, a rid and the profile it came from, plus `via` when a bot acts
   through an account. Never a credential; the
@@ -397,9 +436,10 @@ The terms this codebase uses, and the boundaries they imply.
   re-derives it.
 - **Approval kind** — which gate a write needs, one of four: `prompt_y`,
   `typed_delete` (messages inside a container that survives), `typed_name` (the
-  container itself, or a person's membership or rights), `yes_allowlist` (the
-  unattended path, where an allowlist exists — only `send` and the message
-  verbs have one; no administration write does).
+  container itself, a folder, a person's membership or rights, or every topic
+  a chat has), `yes_allowlist` (the unattended path, where an allowlist exists
+  — only `send` and the message verbs have one; no administration or folder
+  write does).
 - **Preflight** — the rights a plan needs against the rights the account holds.
   The distinction that matters is between a right Telegram reports as absent,
   which refuses the write by name, and one it will not answer for at all — a
