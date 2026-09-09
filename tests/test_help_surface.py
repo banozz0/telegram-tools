@@ -16,6 +16,12 @@ Two relaxations, both deliberate:
   another parser happens to spell them (`--on` names the event kind `message`,
   and `message,` is the root's own subcommand entry), which is a hole the
   frozen surface cannot afford.
+* `ALLOWED_REWRITES` is the same idea for a phrase that changed rather than
+  appeared -- a choice list that grew, a required flag that became optional,
+  a help line a card reworded. Each entry says what the live help says now and
+  what the fixture says, keyed by the parser, and the substitution runs before
+  the comparison. It is the narrower relaxation on purpose: an addition can
+  only add, a rewrite can hide a removal, so every entry carries its reason.
 * Whitespace is squeezed to single spaces on both sides. `--json [JSON_OUTPUT]`
   is two characters wider than `--json JSON_OUTPUT`, and argparse widens the
   whole help column of that parser to match, so a byte comparison would fail on
@@ -189,7 +195,9 @@ _ROOT_ADDITIONS = (
     "member Members and restrictions: list, ban, unban, mute, unmute, restrict (ban asks for the person's exact label)",
     "join-requests People waiting to join a chat that needs approval: list, approve, decline",
     "invite Invite links: list, create, revoke (links are shown by list and create only)",
-    "settings A chat's settings: show, set --slow-mode",
+    # The folders-and-settings card (agent-bo-95421954) reworded this one line:
+    # `settings` now reaches a topic as well as a chat, and more than slow mode.
+    "settings A chat's or topic's settings: show, set",
     # The watch card (agent-bo-95421957): two new subcommand groups -- the rules
     # and the runner, and the messages waiting to be posted. Both spellings of
     # the names.
@@ -206,6 +214,29 @@ ALLOWED_ADDITIONS = {
         "[--archive]",
         "--archive Search the local archive instead of Telegram (the same as `archive search`)",
     ),
+    # The folders-and-settings card (agent-bo-95421954). `settings show` gained
+    # `--topic`, and `settings set` gained the fields of a chat and of a topic
+    # plus the `--execute` that `--forum off` needs; `--slow-mode` stopped being
+    # required, which is the one word of the old line that moved.
+    "settings-show": (
+        "[--topic TOPIC]",
+        "--topic TOPIC Show this topic's own settings instead of the chat's",
+    ),
+    "settings-set": (
+        "[--topic TOPIC]",
+        "[--title TITLE] [--about ABOUT]",
+        "[--forum ON|OFF]",
+        "[--icon-emoji-id ID] [--closed ON|OFF]",
+        "[--hidden ON|OFF] [--execute]",
+        "--topic TOPIC Change this topic instead of the chat",
+        "--title TITLE A new name, for the chat or for the topic named by --topic",
+        "--about ABOUT The chat's description; empty clears it",
+        "--forum ON|OFF Topics on or off for this group; off puts every topic's messages in one stream and its topics stop existing",
+        "--icon-emoji-id ID The topic's icon, as the custom-emoji document id `structure export` prints; 0 removes it",
+        "--closed ON|OFF Whether only admins may post in the topic",
+        "--hidden ON|OFF Whether the topic is hidden; Telegram allows this on the General topic only",
+        "--execute Actually switch topics off, after typing the chat's exact title (no other setting needs it)",
+    ),
     # `send` gained one flag on the message-ops card and one on the watch card:
     # a reply target, and the moment Telegram is to hold the message until.
     "send": (
@@ -216,12 +247,30 @@ ALLOWED_ADDITIONS = {
     ),
 }
 
-# A choice list that grew. The help line is the same words; the braces name
-# more formats. Section 15: `--format` gains jsonl, markdown and html, and
-# json and csv stay first so a script reading the usage line still finds them.
-ALLOWED_REWRITES = (
-    ("{json,csv,jsonl,markdown,html}", "{json,csv}"),
-)
+ALLOWED_REWRITES = {
+    # A choice list that grew. The help line is the same words; the braces name
+    # more formats. Section 15: `--format` gains jsonl, markdown and html, and
+    # json and csv stay first so a script reading the usage line still finds them.
+    "search": (("{json,csv,jsonl,markdown,html}", "{json,csv}"),),
+    # The folders-and-settings card (agent-bo-95421954). `settings set` used to
+    # change one thing, so `--slow-mode` was required; now it changes any of a
+    # chat's or a topic's fields and each is optional, which argparse spells
+    # with brackets. Nothing was removed: the flag and its help line are the
+    # same words.
+    "settings-set": (("[--slow-mode SECONDS]", "--slow-mode SECONDS"),),
+    # The same card reworded the two rows of the `settings` group's own help,
+    # because `show` reaches a topic and `set` reaches more than slow mode.
+    "settings": (
+        (
+            "show Title, description, topics, slow mode, join approval, default member rights, counts",
+            "show Slow mode, join approval, default member rights, counts",
+        ),
+        (
+            "set Change a setting (y/N; --forum off dry-runs and asks for the chat's exact title)",
+            "set Change a setting (y/N)",
+        ),
+    ),
+}
 
 # The per-command `--json` gained an optional path, which argparse spells with
 # brackets in both the usage line and the option list.
@@ -256,9 +305,8 @@ def test_help_text_is_the_captured_one(name):
     live = normalise(render(COMMANDS[name]))
     for addition in ALLOWED_ADDITIONS.get(name, ()):
         live = live.replace(normalise(addition), "")
-    if name == "search":
-        for wide, narrow in ALLOWED_REWRITES:
-            live = live.replace(wide, narrow)
+    for now, then in ALLOWED_REWRITES.get(name, ()):
+        live = live.replace(normalise(now), normalise(then))
     expected = normalise((FIXTURES / f"{name}.txt").read_text(encoding="utf-8"))
 
     assert squeeze(live) == expected, (

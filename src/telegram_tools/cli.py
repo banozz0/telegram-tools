@@ -7,6 +7,7 @@ import os
 import sys
 from functools import partial
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Sequence
 
 from telegram_tools._core import export as _export
@@ -132,6 +133,14 @@ def positive_int(value: str) -> int:
     parsed = int(value)
     if parsed < 1:
         raise argparse.ArgumentTypeError("must be at least 1")
+    return parsed
+
+
+def non_negative_int(value: str) -> int:
+    """An id or count where 0 is a real answer -- a topic icon of 0 is "no icon"."""
+    parsed = int(value)
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("cannot be negative")
     return parsed
 
 
@@ -362,13 +371,22 @@ def build_parser() -> argparse.ArgumentParser:
     invite_revoke.add_argument("--chat", required=True, help=chat_help)
     invite_revoke.add_argument("--link", required=True, help="The link to revoke, as `invite list` printed it")
 
-    settings_parser = subparsers.add_parser("settings", help="A chat's settings: show, set --slow-mode")
+    settings_parser = subparsers.add_parser("settings", help="A chat's or topic's settings: show, set")
     settings_kinds = settings_parser.add_subparsers(dest="settings_kind")
-    settings_show = settings_kinds.add_parser("show", help="Slow mode, join approval, default member rights, counts")
+    settings_show = settings_kinds.add_parser("show", help="Title, description, topics, slow mode, join approval, default member rights, counts")
     settings_show.add_argument("--chat", required=True, help=chat_help)
-    settings_set = settings_kinds.add_parser("set", help="Change a setting (y/N)")
+    settings_show.add_argument("--topic", type=positive_int, help="Show this topic's own settings instead of the chat's")
+    settings_set = settings_kinds.add_parser("set", help="Change a setting (y/N; --forum off dry-runs and asks for the chat's exact title)")
     settings_set.add_argument("--chat", required=True, help=chat_help)
-    settings_set.add_argument("--slow-mode", dest="slow_mode", type=int, required=True, metavar="SECONDS", help="Seconds between one member's messages: 0 (off), 10, 30, 60, 300, 900 or 3600")
+    settings_set.add_argument("--topic", type=positive_int, help="Change this topic instead of the chat")
+    settings_set.add_argument("--title", help="A new name, for the chat or for the topic named by --topic")
+    settings_set.add_argument("--about", help="The chat's description; empty clears it")
+    settings_set.add_argument("--forum", type=manage_ops.on_off, metavar="ON|OFF", help="Topics on or off for this group; off puts every topic's messages in one stream and its topics stop existing")
+    settings_set.add_argument("--slow-mode", dest="slow_mode", type=int, metavar="SECONDS", help="Seconds between one member's messages: 0 (off), 10, 30, 60, 300, 900 or 3600")
+    settings_set.add_argument("--icon-emoji-id", dest="icon_emoji_id", type=non_negative_int, metavar="ID", help="The topic's icon, as the custom-emoji document id `structure export` prints; 0 removes it")
+    settings_set.add_argument("--closed", type=manage_ops.on_off, metavar="ON|OFF", help="Whether only admins may post in the topic")
+    settings_set.add_argument("--hidden", type=manage_ops.on_off, metavar="ON|OFF", help="Whether the topic is hidden; Telegram allows this on the General topic only")
+    settings_set.add_argument("--execute", action="store_true", help="Actually switch topics off, after typing the chat's exact title (no other setting needs it)")
 
     # -- watch and scheduling (section 10): the runner, its rules, the two guarantees ---
     rid_help = "A rid: tg:chat:ID, or tg:topic:ID:TOPIC for one forum topic"
@@ -2526,6 +2544,14 @@ async def _run_manage(client, args, *, report: Reporter) -> int:
     identity = await _acting(client, report)
     me = report.me or await client.get_me()
     execute = bool(getattr(args, "execute", False))
+    # Every verb but `settings set` takes its rights, gate and mutation straight
+    # from the table. That one reads them off the flags, because a topic and a
+    # chat are different rights and switching topics off is a different gate.
+    required, approval, typed, mutation = op.required, op.approval, op.typed, op.mutation
+    typed_what = "the person's exact label"
+    change: manage_ops.SettingsChange | None = None
+    before: dict | None = None
+    plan_target = target
 
     # -- who, and what changes --------------------------------------------------
     member = user = input_user = None
@@ -2597,51 +2623,71 @@ async def _run_manage(client, args, *, report: Reporter) -> int:
         params = {"link": redact_text(args.link)}
         details.append(f"Link    {redact_text(args.link)}")
     elif op.verb == "set":
-        seconds = manage_ops.parse_slow_mode(args.slow_mode)
-        if kind == "channel":
-            raise CommandError(f"{target.title} is a broadcast channel, which has no slow mode.", code="PLATFORM_UNSUPPORTED")
-        params = {"slow_mode_seconds": seconds}
-        details.append(f"Slow mode  {'off' if not seconds else f'{seconds}s'}")
+        change = manage_ops.settings_change(args, kind=kind, topic_id=args.topic)
+        required, approval, typed, mutation = change.required, change.approval, change.typed, change.mutation
+        params = dict(change.fields)
+        details.extend(change.details)
+        if change.scope == "topic":
+            before = await port.topic_settings(peer, args.topic)
+            plan_target = ChatTargets.topic_target(target, SimpleNamespace(id=args.topic, title=before["title"]))
+            report.set_target(plan_target)
+        else:
+            before = await port.settings(resolved)
+        if change.typed:
+            typed_what = "the chat's exact title"
 
-    def build(chat_target: Target, person):
-        rid = person.rid if person is not None else chat_target.rid
+    def build(on_target: Target, person):
+        rid = person.rid if person is not None else on_target.rid
         fresh = dict(params)
         if person is not None and "status" in fresh:
             fresh["status"] = person.status
         return build_plan(
             identity=identity,
             command=op.command,
-            targets=[chat_target],
-            mutations=[Mutation(op.mutation, rid, fresh)],
-            approval=op.approval,
+            targets=[on_target],
+            mutations=[Mutation(mutation, rid, fresh)],
+            approval=approval,
             rights=rights,
-            required=op.required,
+            required=required,
         )
 
-    plan, warnings = build(target, member)
+    plan, warnings = build(plan_target, member)
     report.set_plan(plan)
     for warning in warnings:
         report.warn(warning)
-    require_rights(plan, rights, op.required)
+    require_rights(plan, rights, required)
 
     actor_label = f"{report.acting.label} (via {report.via_label})" if _in_bot_mode(report) else _entity_title(me, "you")
     preview = manage_ops.format_preview(
-        op, actor=actor_label, chat_title=target.title, chat_id=resolved.id, member=member, details=details, execute=execute if op.typed else None
+        op,
+        actor=actor_label,
+        chat_title=plan_target.display,
+        chat_id=resolved.id,
+        member=member,
+        details=details,
+        execute=execute if typed else None,
+        typed_what=typed_what,
     )
 
     # -- the gate ---------------------------------------------------------------
-    if op.typed and not execute:
+    if typed and not execute:
         report.info(preview)
         outcome = manage_ops.Outcome(op.command, resolved.id, member, dry_run=True)
         report.printed_result(outcome.to_dict(), status="dry_run")
         return 0
-    if op.typed:
-        # A person's membership or rights: a terminal in either mode, as `delete` has.
+    if typed:
+        # A person's membership or rights, or every topic a chat has: a terminal
+        # in either mode, as `delete` has.
         if not manage_ops.terminal_present():
             raise ApprovalRequired(report.human_command)
-        answered = manage_ops.confirm_typed_label(preview, member, **report.confirm_io())
-        if not answered:
-            report.info("That is not the label; nothing was changed.")
+        if member is not None:
+            answered = manage_ops.confirm_typed_label(preview, member, **report.confirm_io())
+            if not answered:
+                report.info("That is not the label; nothing was changed.")
+        else:
+            answered = archive_store.confirm_typed_name(preview, target.title, **report.confirm_io())
+            if not answered:
+                report.info("That is not the title; nothing was changed.")
     else:
         answered = message_ops.confirm_prompt_y(preview, **report.confirm_io())
     if not answered:
@@ -2653,6 +2699,9 @@ async def _run_manage(client, args, *, report: Reporter) -> int:
     async def rebuild():
         again = await _resolve(client, report, args.chat)
         fresh_target = ChatTargets.chat_target(again, args.chat)
+        if change is not None and change.scope == "topic":
+            fresh_topic = await port.topic_settings(again.input_entity, args.topic)
+            fresh_target = ChatTargets.topic_target(fresh_target, SimpleNamespace(id=args.topic, title=fresh_topic["title"]))
         fresh_member = member if member is None else await port.participant(again.input_entity, user, input_user)
         return build(fresh_target, fresh_member)[0]
 
@@ -2674,7 +2723,26 @@ async def _run_manage(client, args, *, report: Reporter) -> int:
     elif op.verb == "revoke":
         made = await port.revoke_invite(peer, args.link)
     elif op.verb == "set":
-        await port.set_slow_mode(peer, seconds)
+        if change.scope == "topic":
+            await port.set_topic(
+                peer,
+                args.topic,
+                title=change.fields.get("title"),
+                icon_emoji_id=change.fields.get("icon_emoji_id"),
+                closed=change.fields.get("closed"),
+                hidden=change.fields.get("hidden"),
+            )
+        else:
+            # One call per field Telegram spells separately, in the order a
+            # reader of the preview expects them.
+            if "title" in change.fields:
+                await port.set_title(peer, change.fields["title"])
+            if "about" in change.fields:
+                await port.set_about(peer, change.fields["about"])
+            if "forum" in change.fields:
+                await port.set_forum(peer, change.fields["forum"])
+            if "slow_mode_seconds" in change.fields:
+                await port.set_slow_mode(peer, change.fields["slow_mode_seconds"])
 
     # -- readback ---------------------------------------------------------------
     extra: dict = {}
@@ -2701,9 +2769,10 @@ async def _run_manage(client, args, *, report: Reporter) -> int:
         extra["invite"] = made
     else:
         async def settings_now() -> str:
-            now = await port.settings(resolved)
-            seconds_now = now.get("slow_mode_seconds", 0)
-            return f"slow mode in {target.title} is now {'off' if not seconds_now else f'{seconds_now}s'}"
+            now = await (port.topic_settings(peer, args.topic) if change.scope == "topic" else port.settings(resolved))
+            extra["settings"] = now
+            fields = manage_ops.TOPIC_FIELDS if change.scope == "topic" else manage_ops.CHAT_FIELDS
+            return f"{plan_target.display}: " + manage_ops.settings_diff(before, now, fields)
 
         evidence = await read_back("the settings", settings_now)
     if op.verb == "ban":
@@ -2745,6 +2814,12 @@ async def _run_manage_read(port, op, args, resolved, target: Target, kind: str, 
         report.info(manage_ops.format_invites(rows, chat_title=target.title))
         # The one envelope that carries links: this command asked for them.
         report.result({"invites": rows, "revoked": bool(args.revoked)}, status="ok" if rows else "empty", show_invites=True)
+    elif args.topic is not None:
+        # A topic's own four fields, so `settings set --topic` can be read
+        # before it is run and its diff means something.
+        settings = await port.topic_settings(peer, args.topic)
+        report.info(manage_ops.format_topic_settings(settings, chat_title=target.title))
+        report.result({"settings": settings, "topic": args.topic}, status="ok")
     else:
         settings = await port.settings(resolved)
         report.info(manage_ops.format_settings(settings, chat_title=target.title))

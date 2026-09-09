@@ -13,6 +13,11 @@ class TopicInfo:
     # The custom-emoji document behind `icon_emoji`, as Telegram keys it. A
     # blueprint carries this id, because the character is only its rendering.
     icon_emoji_id: int | None = None
+    # The two flags `settings set --topic` changes. Absent on a topic Telegram
+    # did not return, which is the same as off; `to_dict` leaves them out,
+    # because `discover`'s rows have never carried them.
+    closed: bool = False
+    hidden: bool = False
 
     @property
     def display_title(self) -> str:

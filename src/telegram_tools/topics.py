@@ -21,6 +21,8 @@ def topic_from_telethon(raw_topic, icons: dict[int, str] | None = None) -> Topic
         top_message=getattr(raw_topic, "top_message", topic_id),
         icon_emoji=(icons or {}).get(int(emoji_id)) if emoji_id else None,
         icon_emoji_id=int(emoji_id) if emoji_id else None,
+        closed=bool(getattr(raw_topic, "closed", False)),
+        hidden=bool(getattr(raw_topic, "hidden", False)),
     )
 
 
@@ -115,3 +117,18 @@ async def get_forum_topics_by_ids(client, peer, topic_ids: Iterable[int]) -> lis
     found = {topic.id for topic in topics}
     topics.extend(TopicInfo(id=topic_id, title=str(topic_id), top_message=topic_id) for topic_id in ids if topic_id not in found)
     return topics
+
+
+async def get_forum_topic(client, peer, topic_id: int) -> TopicInfo | None:
+    """One topic, or None when Telegram did not return it.
+
+    `get_forum_topics_by_ids` pads a missing id with a placeholder, because the
+    callers that clear messages want a row per id they asked for. A write that
+    names one topic wants the opposite: a topic that is not there is a refusal,
+    not a row whose title is its own number.
+    """
+    result = await client(GetForumTopicsByIDRequest(peer=peer, topics=[int(topic_id)]))
+    raw_topics = [raw for raw in getattr(result, "topics", []) or [] if int(getattr(raw, "id", 0)) == int(topic_id)]
+    if not raw_topics:
+        return None
+    return topic_from_telethon(raw_topics[0], await resolve_icon_emoji(client, raw_topics))

@@ -48,6 +48,7 @@ from telethon.tl.types import (
 from telegram_tools.adapters.blueprint import ADMIN_RIGHT_NAMES, TelegramBlueprintPort, banned_right_names, chat_kind
 from telegram_tools.envelope import CommandError
 from telegram_tools.manage import LIST_LIMIT, Member, until_text, user_label
+from telegram_tools.topics import get_forum_topic
 
 PAGE = 200
 
@@ -260,17 +261,55 @@ class TelegramManagePort:
         settings: dict[str, Any] = {
             "kind": kind,
             "title": str(getattr(channel, "title", "")),
+            "about": str(getattr(full_chat, "about", "") or ""),
             "join_request": bool(getattr(channel, "join_request", False)),
             "participants_count": getattr(full_chat, "participants_count", None),
             "admins_count": getattr(full_chat, "admins_count", None),
         }
         if kind != "channel":
+            # `forum` is the flag `settings set --forum` changes, so it is read
+            # here rather than inferred from `kind` by every caller in turn.
+            settings["forum"] = kind == "forum"
             settings["default_banned_rights"] = banned_right_names(getattr(channel, "default_banned_rights", None))
             settings["slow_mode_seconds"] = int(getattr(full_chat, "slowmode_seconds", 0) or 0)
         return settings
 
+    async def topic_settings(self, peer: Any, topic_id: int) -> dict[str, Any]:
+        """What `settings show --topic` prints and the diff compares: one topic's four editable fields.
+
+        A topic Telegram does not return is a refusal here rather than a row
+        with its own id for a title: the write that follows names one topic.
+        """
+        topic = await get_forum_topic(self.client, peer, int(topic_id))
+        if topic is None:
+            raise CommandError(
+                f"This chat has no topic {topic_id}.",
+                code="TARGET_NOT_FOUND",
+                hint="`discover` lists a forum's topics with their ids.",
+            )
+        return {
+            "id": topic.id,
+            "title": topic.title,
+            "icon_emoji_id": topic.icon_emoji_id,
+            "icon_emoji": topic.icon_emoji,
+            "closed": topic.closed,
+            "hidden": topic.hidden,
+        }
+
     async def set_slow_mode(self, channel: Any, seconds: int) -> None:
         await self.rights.set_slow_mode(channel, seconds)
+
+    async def set_title(self, channel: Any, title: str) -> None:
+        await self.rights.set_title(channel, title)
+
+    async def set_about(self, peer: Any, about: str) -> None:
+        await self.rights.set_about(peer, about)
+
+    async def set_forum(self, channel: Any, enabled: bool) -> None:
+        await self.rights.set_forum(channel, enabled)
+
+    async def set_topic(self, peer: Any, topic_id: int, **fields: Any) -> None:
+        await self.rights.set_topic(peer, topic_id, **fields)
 
 
 __all__ = ["TelegramManagePort", "admin_right_names", "invite_row", "member_of"]

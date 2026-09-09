@@ -27,13 +27,24 @@ from telegram_tools.adapters.account import RIGHT_NAMES
 from telegram_tools.adapters.manage import TelegramManagePort, member_of
 from telegram_tools.envelope import CommandError
 from test_archive_sync import ACCOUNT, home  # noqa: F401 - fixture
-from test_structure import FORUM_ID, CHANNEL_ID, BASIC_ID, FakeClient, World, envelope_of, run_cli  # noqa: F401 - fixture
+from test_structure import DOBBY_ICON, FORUM_ID, CHANNEL_ID, BASIC_ID, FakeClient, World, envelope_of, run_cli  # noqa: F401 - fixture
 
 FORUM = "@teamhermes"
 INVITE = "https://t.me/+AbCdEfGh12345"
 INVITE_TWO = "https://t.me/+ZyXwVuTs98765"
 
-MUTATING = ("EditAdminRequest", "EditBannedRequest", "HideChatJoinRequestRequest", "ExportChatInviteRequest", "EditExportedChatInviteRequest", "ToggleSlowModeRequest")
+MUTATING = (
+    "EditAdminRequest",
+    "EditBannedRequest",
+    "HideChatJoinRequestRequest",
+    "ExportChatInviteRequest",
+    "EditExportedChatInviteRequest",
+    "ToggleSlowModeRequest",
+    "EditTitleRequest",
+    "EditChatAboutRequest",
+    "ToggleForumRequest",
+    "EditForumTopicRequest",
+)
 
 
 def user(user_id: int, first: str, username: str | None = None, *, bot: bool = False) -> types.User:
@@ -563,7 +574,7 @@ def test_settings_set_slow_mode_toggles_it_and_reads_it_back(run_cli, capsys, ho
     code, out, _err, fake = run_cli(["--json", "settings", "set", "--chat", FORUM, "--slow-mode", "60"], client=PeopledClient(), capsys=capsys, isatty=True, answer="y")
     assert code == 0, out
     envelope = envelope_of(out)
-    assert envelope["evidence"]["readback"] == "slow mode in Team Hermes is now 60s"
+    assert envelope["evidence"]["readback"] == "Team Hermes: --slow-mode 30s -> 60s"
     assert mutations(fake) == ["ToggleSlowModeRequest"] and fake.world.chats[FORUM_ID]["slowmode_seconds"] == 60
     assert [line["command"] for line in audit_lines(home)] == ["settings set"]
     code, _out, err, _fake = run_cli(["settings", "set", "--chat", FORUM, "--slow-mode", "7"], client=PeopledClient(), capsys=capsys, isatty=True, answer="y")
@@ -577,6 +588,143 @@ def test_settings_set_without_change_info_is_named_before_the_gate(run_cli, caps
     code, out, _err, _fake = run_cli(["--json", "settings", "set", "--chat", FORUM, "--slow-mode", "60"], client=fake, capsys=capsys, isatty=True, answer="y")
     assert code == 2 and "change_info" in envelope_of(out)["error"]["message"]
     assert mutations(fake) == []
+
+
+def test_settings_show_carries_the_chat_fields_and_one_topics_own(run_cli, capsys):
+    code, out, _err, _fake = run_cli(["--json", "settings", "show", "--chat", FORUM], client=PeopledClient(), capsys=capsys)
+    assert code == 0
+    settings = envelope_of(out)["result"]["settings"]
+    assert (settings["title"], settings["about"], settings["forum"]) == ("Team Hermes", "the agency's room", True)
+    code, out, _err, fake = run_cli(["--json", "settings", "show", "--chat", FORUM, "--topic", "141"], client=PeopledClient(), capsys=capsys)
+    assert code == 0
+    topic = envelope_of(out)["result"]["settings"]
+    assert (topic["id"], topic["title"], topic["icon_emoji_id"], topic["closed"], topic["hidden"]) == (141, "Dobby", DOBBY_ICON, False, False)
+    assert mutations(fake) == []
+    # A topic that is not there is a refusal, never a row whose title is its id.
+    code, out, _err, _fake = run_cli(["--json", "settings", "show", "--chat", FORUM, "--topic", "9999"], client=PeopledClient(), capsys=capsys)
+    assert code == 2 and envelope_of(out)["error"]["code"] == "TARGET_NOT_FOUND"
+
+
+def test_settings_set_changes_a_chats_title_and_about_and_diffs_both(run_cli, capsys, home):
+    code, out, _err, fake = run_cli(
+        ["--json", "settings", "set", "--chat", FORUM, "--title", "Team Hermes 2", "--about", "the agency"],
+        client=PeopledClient(), capsys=capsys, isatty=True, answer="y",
+    )
+    assert code == 0, out
+    assert mutations(fake) == ["EditTitleRequest", "EditChatAboutRequest"]
+    readback = envelope_of(out)["evidence"]["readback"]
+    assert "--title 'Team Hermes' -> 'Team Hermes 2'" in readback
+    assert """--about "the agency's room" -> 'the agency'""" in readback
+    assert [line["command"] for line in audit_lines(home)] == ["settings set"]
+
+
+def test_settings_set_on_a_topic_needs_manage_topics_and_carries_the_flags(run_cli, capsys, home):
+    code, out, _err, fake = run_cli(
+        ["--json", "settings", "set", "--chat", FORUM, "--topic", "217", "--title", "Help", "--closed", "on"],
+        client=PeopledClient(), capsys=capsys, isatty=True, answer="y",
+    )
+    assert code == 0, out
+    envelope = envelope_of(out)
+    assert envelope["plan"]["preflight"]["required"] == ["manage_topics"]
+    assert envelope["target"]["rid"] == f"tg:topic:{FORUM_ID}:217"
+    sent = next(r for r in fake.world.requests if type(r).__name__ == "EditForumTopicRequest")
+    # The fields the flags did not name stay None: Telegram leaves those alone.
+    assert (sent.title, sent.closed, sent.icon_emoji_id, sent.hidden) == ("Help", True, None, None)
+    readback = envelope["evidence"]["readback"]
+    assert "--title 'Support' -> 'Help'" in readback and "--closed off -> on" in readback
+    assert [line["command"] for line in audit_lines(home)] == ["settings set"]
+
+
+def test_a_missing_manage_topics_is_named_before_any_topic_mutation(run_cli, capsys):
+    fake = PeopledClient(held=set(RIGHT_NAMES) - {"manage_topics", "is_creator"})
+    code, out, _err, _fake = run_cli(
+        ["--json", "settings", "set", "--chat", FORUM, "--topic", "217", "--closed", "on"],
+        client=fake, capsys=capsys, isatty=True, answer="y",
+    )
+    assert code == 2
+    error = envelope_of(out)["error"]
+    assert error["code"] == "PERMISSION_DENIED" and "manage_topics" in error["message"]
+    assert mutations(fake) == []
+
+
+def test_a_flag_of_the_wrong_scope_is_a_usage_error_naming_it(run_cli, capsys):
+    for argv, wanted in (
+        (["settings", "set", "--chat", FORUM, "--topic", "217", "--about", "no"], "--about changes a chat, not a topic"),
+        (["settings", "set", "--chat", FORUM, "--closed", "on"], "--closed changes a topic; add --topic ID"),
+        (["settings", "set", "--chat", FORUM], "settings set changes nothing"),
+    ):
+        code, _out, err, fake = run_cli(argv, client=PeopledClient(), capsys=capsys, isatty=True, answer="y")
+        assert code == 2 and wanted in err, (argv, err)
+        assert mutations(fake) == []
+
+
+def test_the_general_topic_takes_only_what_telegram_takes(run_cli, capsys):
+    code, out, _err, fake = run_cli(
+        ["--json", "settings", "set", "--chat", FORUM, "--topic", "1", "--closed", "on"],
+        client=PeopledClient(), capsys=capsys, isatty=True, answer="y",
+    )
+    assert code == 2 and envelope_of(out)["error"]["code"] == "PLATFORM_UNSUPPORTED"
+    assert mutations(fake) == []
+    # Its title and `hidden` it does take.
+    code, out, _err, fake = run_cli(
+        ["--json", "settings", "set", "--chat", FORUM, "--topic", "1", "--hidden", "on"],
+        client=PeopledClient(), capsys=capsys, isatty=True, answer="y",
+    )
+    assert code == 0, out
+    assert mutations(fake) == ["EditForumTopicRequest"]
+
+
+def test_a_topic_flag_on_a_chat_with_no_topics_is_refused(run_cli, capsys):
+    code, out, _err, fake = run_cli(
+        ["--json", "settings", "set", "--chat", "@agencyalerts", "--topic", "5", "--closed", "on"],
+        client=PeopledClient(), capsys=capsys, isatty=True, answer="y",
+    )
+    assert code == 2 and envelope_of(out)["error"]["code"] == "PLATFORM_UNSUPPORTED"
+    assert mutations(fake) == []
+
+
+def test_switching_topics_off_dry_runs_then_asks_for_the_chats_exact_title(run_cli, capsys, home):
+    # Dry-run by default: nothing is asked and nothing is sent.
+    code, out, _err, fake = run_cli(["--json", "settings", "set", "--chat", FORUM, "--forum", "off"], client=PeopledClient(), capsys=capsys, isatty=True)
+    assert code == 0 and envelope_of(out)["status"] == "dry_run"
+    assert mutations(fake) == [] and audit_lines(home) == []
+    # --execute with the wrong title changes nothing.
+    code, out, _err, fake = run_cli(
+        ["--json", "settings", "set", "--chat", FORUM, "--forum", "off", "--execute"],
+        client=PeopledClient(), capsys=capsys, isatty=True, answer="Team Hermes 2",
+    )
+    assert code == 1 and envelope_of(out)["status"] == "cancelled"
+    assert mutations(fake) == []
+    # And with the right one: one call, the topics gone, one audit line.
+    code, out, _err, fake = run_cli(
+        ["--json", "settings", "set", "--chat", FORUM, "--forum", "off", "--execute"],
+        client=PeopledClient(), capsys=capsys, isatty=True, answer="Team Hermes",
+    )
+    assert code == 0, out
+    assert mutations(fake) == ["ToggleForumRequest"] and fake.world.chats[FORUM_ID]["topics"] == []
+    assert "--forum on -> off" in envelope_of(out)["evidence"]["readback"]
+    assert [line["command"] for line in audit_lines(home)] == ["settings set"]
+
+
+def test_switching_topics_off_has_no_yes_and_needs_a_terminal(run_cli, capsys):
+    code, _out, err, fake = run_cli(["settings", "set", "--chat", FORUM, "--forum", "off", "--yes"], client=PeopledClient(), capsys=capsys, isatty=True)
+    assert code == 2 and "--yes" in err, err
+    code, out, _err, fake = run_cli(
+        ["--json", "settings", "set", "--chat", FORUM, "--forum", "off", "--execute"],
+        client=PeopledClient(), capsys=capsys, isatty=False,
+    )
+    assert code == 3 and envelope_of(out)["error"]["code"] == "APPROVAL_REQUIRED"
+    assert mutations(fake) == []
+
+
+def test_switching_topics_on_is_one_y_and_no_dry_run(run_cli, capsys):
+    code, out, _err, fake = run_cli(
+        ["--json", "settings", "set", "--chat", "-1001000000002", "--forum", "on"],
+        client=PeopledClient(), capsys=capsys, isatty=True, answer="y",
+    )
+    assert code == 0, out
+    assert mutations(fake) == ["ToggleForumRequest"]
+    assert "--forum off -> on" in envelope_of(out)["evidence"]["readback"]
 
 
 # -- bot mode -------------------------------------------------------------------------------

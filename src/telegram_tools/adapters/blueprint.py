@@ -36,6 +36,7 @@ from telethon.tl.functions.channels import (
     EditAdminRequest,
     EditTitleRequest,
     GetFullChannelRequest,
+    ToggleForumRequest,
     ToggleJoinRequestRequest,
     ToggleSlowModeRequest,
 )
@@ -232,7 +233,7 @@ class TelegramBlueprintPort:
             # Telegram takes 0 for "no icon"; None would mean "leave it".
             edits["icon_emoji_id"] = int(fields["icon_emoji_id"] or 0)
         if edits:
-            await self.client(EditForumTopicRequest(peer=resolved.input_entity, topic_id=topic_id, **edits))
+            await self.set_topic(resolved.input_entity, topic_id, **edits)
         return str(step["target_rid"])
 
     async def _apply_container(self, resolved: ResolvedChat, step: Mapping[str, Any]) -> str:
@@ -248,9 +249,9 @@ class TelegramBlueprintPort:
             raise BlueprintError(f"no call changes {', '.join(unknown)} on a chat")
         channel = resolved.input_entity
         if "name" in fields:
-            await self.client(EditTitleRequest(channel=channel, title=str(fields["name"])))
+            await self.set_title(channel, str(fields["name"]))
         if "about" in fields:
-            await self.client(EditChatAboutRequest(peer=channel, about=str(fields["about"] or "")))
+            await self.set_about(channel, str(fields["about"] or ""))
         if "default_banned_rights" in fields:
             await self.set_default_banned_rights(channel, fields["default_banned_rights"])
         if "slow_mode_seconds" in fields:
@@ -269,6 +270,43 @@ class TelegramBlueprintPort:
 
     async def set_join_request(self, channel: Any, enabled: bool) -> None:
         await self.client(ToggleJoinRequestRequest(channel=channel, enabled=bool(enabled)))
+
+    async def set_topic(
+        self,
+        peer: Any,
+        topic_id: int,
+        *,
+        title: str | None = None,
+        icon_emoji_id: int | None = None,
+        closed: bool | None = None,
+        hidden: bool | None = None,
+    ) -> None:
+        """One `messages.editForumTopic`. A field left None is left alone, which is what the flag absent means."""
+        await self.client(
+            EditForumTopicRequest(
+                peer=peer,
+                topic_id=int(topic_id),
+                title=title,
+                icon_emoji_id=icon_emoji_id,
+                closed=closed,
+                hidden=hidden,
+            )
+        )
+
+    async def set_forum(self, channel: Any, enabled: bool) -> None:
+        """`channels.toggleForum`: topics on or off for a supergroup.
+
+        `tabs` is Telegram's newer display mode for a forum; this tool does not
+        offer it and passes False, so a group it switches on reads as the topic
+        list every client has always drawn.
+        """
+        await self.client(ToggleForumRequest(channel=channel, enabled=bool(enabled), tabs=False))
+
+    async def set_title(self, channel: Any, title: str) -> None:
+        await self.client(EditTitleRequest(channel=channel, title=str(title)))
+
+    async def set_about(self, peer: Any, about: str) -> None:
+        await self.client(EditChatAboutRequest(peer=peer, about=str(about or "")))
 
     async def set_admin_rights(self, channel: Any, user: Any, names: Any, *, rank: str | None = None) -> None:
         """One person's admin rights set by name. Not reached by an apply: an admin is a

@@ -6,11 +6,17 @@ other write here has: a plan, a preflight that names the missing right, the
 gate section 7 assigns, a re-derivation after the gate, a readback and one
 audit line. What is specific to these commands is settled in this module:
 
-* **Which gate.** Removing someone's membership (`member ban`) or someone's
-  rights (`admin demote`) is `typed_name`: dry-run by default, `--execute`,
-  the person's exact label typed at a terminal, no `--yes`, and a terminal in
-  either mode. Everything else is `prompt_y` and has no `--yes` either,
-  because no allowlist exists for an admin action.
+* **Which gate.** Removing someone's membership (`member ban`), someone's
+  rights (`admin demote`) or every topic a chat has (`settings set --forum
+  off`) is `typed_name`: dry-run by default, `--execute`, the exact label or
+  title typed at a terminal, no `--yes`, and a terminal in either mode.
+  Everything else is `prompt_y` and has no `--yes` either, because no
+  allowlist exists for an admin action.
+* **A setting's scope decides its right.** `settings set` on a chat needs
+  `change_info`; on a topic it needs `manage_topics`, and the flags of one
+  scope are a usage error in the other. Every `set` reads the fields before
+  and after and reports what actually moved (`settings_diff`), so a call
+  Telegram accepted and did not apply reads as "no field changed".
 * **The hierarchy rule** (`HIERARCHY_DENIED`). An admin can give only rights
   it holds, and can edit only an admin with no more than it holds; the creator
   can do anything. Telegram enforces the same, after the call; this refuses
@@ -104,6 +110,10 @@ OPS: dict[tuple[str, str], Op] = {
         Op("invite", "create", "prompt_y", ("invite_users",), "invite.create"),
         Op("invite", "revoke", "prompt_y", ("invite_users",), "invite.revoke"),
         Op("settings", "show", None, ()),
+        # `settings set` is the one verb whose rights, gate and mutation are not
+        # fixed by the table: a topic needs manage_topics where a chat needs
+        # change_info, and switching topics off takes `delete`'s gate. What the
+        # flags actually ask for is `settings_change` below.
         Op("settings", "set", "prompt_y", ("change_info",), "settings.set"),
     )
 }
@@ -268,6 +278,160 @@ def parse_slow_mode(value: int) -> int:
     return int(value)
 
 
+def on_off(text: str) -> bool:
+    """A flag that has to say which way: `on` or `off`.
+
+    A `store_true` switch cannot turn something off, and a bare `--closed` that
+    meant "closed" would leave no spelling for "open". Absent still means
+    "leave it alone", which is the third state neither of those two carries.
+    """
+    wanted = str(text).strip().casefold()
+    if wanted in ("on", "true", "yes", "1"):
+        return True
+    if wanted in ("off", "false", "no", "0"):
+        return False
+    raise ValueError(f"{text!r} is neither on nor off.")
+
+
+# -- what `settings set` changes ----------------------------------------------
+
+# The fields of a chat and of a topic, each as the readback diff names it. The
+# same `--title` lands in both, which is why the scope decides the list.
+CHAT_FIELDS = ("title", "about", "forum", "slow_mode_seconds")
+TOPIC_FIELDS = ("title", "icon_emoji_id", "closed", "hidden")
+# Which flag spells each field, for the usage error that names the wrong one.
+FLAG_OF = {
+    "title": "--title",
+    "about": "--about",
+    "forum": "--forum",
+    "slow_mode_seconds": "--slow-mode",
+    "icon_emoji_id": "--icon-emoji-id",
+    "closed": "--closed",
+    "hidden": "--hidden",
+}
+# The General topic is the one a forum cannot be without: it has no service
+# message to remove, `delete topic` refuses it for that reason, and Telegram
+# accepts only its title and `hidden` here.
+GENERAL_TOPIC_ID = 1
+GENERAL_FIELDS = ("title", "hidden")
+
+
+@dataclass(frozen=True)
+class SettingsChange:
+    """What one `settings set` will do: the scope, the fields, and the gate that follows from them."""
+
+    scope: str  # chat or topic
+    fields: Mapping[str, Any]
+    required: tuple[str, ...]
+    approval: str
+    typed: bool
+    details: tuple[str, ...]
+
+    @property
+    def mutation(self) -> str:
+        return f"{self.scope}.settings"
+
+
+def settings_change(args: Any, *, kind: str, topic_id: int | None) -> SettingsChange:
+    """Read the `settings set` flags into the change they describe, or a usage error.
+
+    Three rules live here rather than in the handler. A flag belongs to one
+    scope, so `--about` with `--topic` is a usage error naming both rather than
+    a call Telegram refuses. A field Telegram cannot change on this chat --
+    slow mode on a broadcast channel, any topic on a chat with no topics -- is
+    `PLATFORM_UNSUPPORTED` before anything connects further. And switching
+    topics *off* takes `delete`'s gate: every topic stops existing and its
+    messages land in one stream, which is section 7's "removes a container",
+    not its "edits a setting".
+    """
+    given = {
+        "title": getattr(args, "title", None),
+        "about": getattr(args, "about", None),
+        "forum": getattr(args, "forum", None),
+        "slow_mode_seconds": getattr(args, "slow_mode", None),
+        "icon_emoji_id": getattr(args, "icon_emoji_id", None),
+        "closed": getattr(args, "closed", None),
+        "hidden": getattr(args, "hidden", None),
+    }
+    fields = {name: value for name, value in given.items() if value is not None}
+    if not fields:
+        raise ValueError("settings set changes nothing: name at least one of " + ", ".join(sorted(set(FLAG_OF.values()))) + ".")
+
+    scope = "topic" if topic_id is not None else "chat"
+    allowed = TOPIC_FIELDS if scope == "topic" else CHAT_FIELDS
+    stray = sorted(set(fields) - set(allowed))
+    if stray:
+        names = ", ".join(FLAG_OF[name] for name in stray)
+        raise ValueError(
+            f"{names} {'change' if len(stray) > 1 else 'changes'} a chat, not a topic; drop --topic to use {'them' if len(stray) > 1 else 'it'}."
+            if scope == "topic"
+            else f"{names} {'change' if len(stray) > 1 else 'changes'} a topic; add --topic ID to say which."
+        )
+
+    if scope == "topic":
+        if kind != "forum":
+            raise CommandError(
+                "This chat has no topics, so there is no topic to change.",
+                code="PLATFORM_UNSUPPORTED",
+                hint="`settings set --chat … --forum on` switches topics on first.",
+            )
+        if int(topic_id) == GENERAL_TOPIC_ID:
+            refused = sorted(set(fields) - set(GENERAL_FIELDS))
+            if refused:
+                raise CommandError(
+                    f"Telegram changes only {', '.join(FLAG_OF[name] for name in GENERAL_FIELDS)} on the General topic; "
+                    f"{', '.join(FLAG_OF[name] for name in refused)} it refuses.",
+                    code="PLATFORM_UNSUPPORTED",
+                )
+        details = tuple(f"{FLAG_OF[name]:<16} {_setting_text(name, fields[name])}" for name in TOPIC_FIELDS if name in fields)
+        return SettingsChange("topic", fields, ("manage_topics",), "prompt_y", False, details)
+
+    if "slow_mode_seconds" in fields:
+        parse_slow_mode(fields["slow_mode_seconds"])
+        if kind == "channel":
+            raise CommandError("A broadcast channel has no slow mode.", code="PLATFORM_UNSUPPORTED")
+    if "forum" in fields and kind == "channel":
+        raise CommandError("A broadcast channel has no topics.", code="PLATFORM_UNSUPPORTED")
+
+    details = [f"{FLAG_OF[name]:<16} {_setting_text(name, fields[name])}" for name in CHAT_FIELDS if name in fields]
+    off = fields.get("forum") is False
+    if off:
+        details.append("Switching topics off puts every topic's messages in one stream and its topics stop existing.")
+    return SettingsChange(
+        "chat",
+        fields,
+        ("change_info",),
+        "typed_name" if off else "prompt_y",
+        off,
+        tuple(details),
+    )
+
+
+def _setting_text(name: str, value: Any) -> str:
+    if name in ("forum", "closed", "hidden"):
+        return "on" if value else "off"
+    if name == "slow_mode_seconds":
+        return "off" if not value else f"{value}s"
+    if name == "icon_emoji_id":
+        return "(none)" if not int(value) else str(value)
+    return f"{value!r}"
+
+
+def settings_diff(before: Mapping[str, Any], after: Mapping[str, Any], fields: Sequence[str]) -> str:
+    """The readback: every named field that actually moved, `old -> new`.
+
+    A write Telegram accepted and then did not apply reads as "no field
+    changed" here rather than as a success, which is the whole point of
+    reading it back instead of reporting the call's own return.
+    """
+    moved = [
+        f"{FLAG_OF.get(name, name)} {_setting_text(name, before.get(name))} -> {_setting_text(name, after.get(name))}"
+        for name in fields
+        if before.get(name) != after.get(name)
+    ]
+    return "; ".join(moved) if moved else "no field changed"
+
+
 # -- the hierarchy rule ------------------------------------------------------
 
 
@@ -389,6 +553,10 @@ def format_invites(rows: Sequence[Mapping[str, Any]], *, chat_title: str) -> str
 
 def format_settings(settings: Mapping[str, Any], *, chat_title: str) -> str:
     lines = [f"{chat_title}", RULE, f"Kind          {settings.get('kind')}"]
+    lines.append(f"Title         {settings.get('title')}")
+    lines.append(f"About         {settings.get('about') or '(none)'}")
+    if "forum" in settings:
+        lines.append(f"Topics        {'on' if settings.get('forum') else 'off'}")
     if "slow_mode_seconds" in settings:
         seconds = settings["slow_mode_seconds"]
         lines.append(f"Slow mode     {'off' if not seconds else f'{seconds}s'}")
@@ -403,6 +571,20 @@ def format_settings(settings: Mapping[str, Any], *, chat_title: str) -> str:
     return "\n".join(lines)
 
 
+def format_topic_settings(settings: Mapping[str, Any], *, chat_title: str) -> str:
+    icon = settings.get("icon_emoji_id")
+    drawn = f" ({settings['icon_emoji']})" if settings.get("icon_emoji") else ""
+    return "\n".join(
+        [
+            f"{chat_title} > {settings.get('title')} (topic {settings.get('id')})",
+            RULE,
+            f"Icon          {icon if icon else '(none)'}{drawn}",
+            f"Closed        {'yes' if settings.get('closed') else 'no'}",
+            f"Hidden        {'yes' if settings.get('hidden') else 'no'}",
+        ]
+    )
+
+
 def format_preview(
     op: Op,
     *,
@@ -412,6 +594,7 @@ def format_preview(
     member: Member | None,
     details: Sequence[str],
     execute: bool | None,
+    typed_what: str = "the person's exact label",
 ) -> str:
     """What a person reads before the gate: who acts, on whom, in which chat, and what changes."""
     lines = [f"{op.command}: {chat_title} ({chat_id})", RULE, f"As      {actor}"]
@@ -424,9 +607,9 @@ def format_preview(
     if execute is None:
         lines.append("Nothing has happened yet.")
     elif execute:
-        lines.append("Executing: the next prompt asks for the person's exact label.")
+        lines.append(f"Executing: the next prompt asks for {typed_what}.")
     else:
-        lines.append("Dry-run. Add --execute to do it; the exact label is asked for then.")
+        lines.append(f"Dry-run. Add --execute to do it; {typed_what} is asked for then.")
     return "\n".join(lines)
 
 
@@ -460,6 +643,9 @@ __all__ = [
     "ADMIN_RIGHT_NAMES",
     "BANNED_RIGHT_NAMES",
     "BAN_RIGHTS",
+    "CHAT_FIELDS",
+    "FLAG_OF",
+    "GENERAL_TOPIC_ID",
     "GROUPS",
     "LIST_LIMIT",
     "MUTE_RIGHTS",
@@ -468,6 +654,8 @@ __all__ = [
     "Member",
     "Op",
     "Outcome",
+    "SettingsChange",
+    "TOPIC_FIELDS",
     "approval_for",
     "confirm_typed_label",
     "format_invites",
@@ -475,11 +663,15 @@ __all__ = [
     "format_preview",
     "format_requests",
     "format_settings",
+    "format_topic_settings",
     "labels_match",
+    "on_off",
     "op_for",
     "parse_rights",
     "parse_slow_mode",
     "parse_until",
+    "settings_change",
+    "settings_diff",
     "require_hierarchy",
     "terminal_present",
     "until_text",

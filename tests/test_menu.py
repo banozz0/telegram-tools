@@ -1472,7 +1472,7 @@ def test_manage_holds_the_five_administration_groups():
     assert "2. Members: list, ban, unban, mute, unmute, restrict" in text
     assert "3. Join requests: list, approve, decline" in text
     assert "4. Invite links: list, create, revoke" in text
-    assert "5. Chat settings: show, set slow mode" in text
+    assert "5. Chat and topic settings: show, set" in text
 
 
 MANAGE_ADMINS = ("6", "1")
@@ -1545,9 +1545,11 @@ def test_join_requests_and_invites_and_settings_build_their_flags():
     _code, calls, _output = run_menu([MANAGE_INVITES, "3", "1", "1", "1", "https://t.me/+abc", "2", "", "0"])
     (args,) = calls
     assert (args.invite_kind, args.link) == ("revoke", "https://t.me/+abc")
-    _code, calls, _output = run_menu([MANAGE_SETTINGS, "2", "1", "1", "1", "60", "2", "", "0"])
+    # settings set: eight rows now, so slow mode is row 5 and "Do it" is row 9.
+    _code, calls, _output = run_menu([MANAGE_SETTINGS, "2", "1", "1", "5", "60", "9", "", "0"])
     (args,) = calls
     assert (args.command, args.settings_kind, args.slow_mode) == ("settings", "set", 60)
+    assert (args.topic, args.title, args.about, args.forum, args.closed, args.hidden) == (None, None, None, None, None, None)
 
 
 WATCH_ROWS = (

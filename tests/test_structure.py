@@ -53,6 +53,7 @@ MUTATING = (
     "EditChatDefaultBannedRightsRequest",
     "ToggleSlowModeRequest",
     "ToggleJoinRequestRequest",
+    "ToggleForumRequest",
 )
 DELETES = ("DeleteChannelRequest", "DeleteTopicHistoryRequest", "DeleteHistoryRequest", "DeleteMessagesRequest")
 
@@ -102,7 +103,10 @@ class World:
             "slowmode_seconds": slowmode_seconds,
             "linked_chat_id": linked_chat_id,
             "participants_count": 12,
-            "topics": [SimpleNamespace(id=topic_id, title=title, icon_emoji_id=icon, top_message=topic_id, date=None) for topic_id, title, icon in topics],
+            "topics": [
+                SimpleNamespace(id=topic_id, title=title, icon_emoji_id=icon, top_message=topic_id, date=None, closed=False, hidden=False)
+                for topic_id, title, icon in topics
+            ],
         }
 
     def marked_for(self, bare: int) -> int:
@@ -193,12 +197,17 @@ class FakeClient:
         if name == "GetForumTopicsRequest":
             _marked, chat = self.world.by_peer(request.peer)
             return SimpleNamespace(topics=list(chat["topics"]), count=len(chat["topics"]))
+        if name == "GetForumTopicsByIDRequest":
+            _marked, chat = self.world.by_peer(request.peer)
+            wanted = [int(topic_id) for topic_id in request.topics]
+            found = [topic for topic in chat["topics"] if topic.id in wanted]
+            return SimpleNamespace(topics=found, count=len(found))
         if name == "GetCustomEmojiDocumentsRequest":
             return []
         if name == "CreateForumTopicRequest":
             marked, chat = self.world.by_peer(request.peer)
             new_id = max([topic.id for topic in chat["topics"]] + [1]) + 100
-            chat["topics"].append(SimpleNamespace(id=new_id, title=request.title, icon_emoji_id=request.icon_emoji_id or None, top_message=new_id, date=None))
+            chat["topics"].append(SimpleNamespace(id=new_id, title=request.title, icon_emoji_id=request.icon_emoji_id or None, top_message=new_id, date=None, closed=False, hidden=False))
             return SimpleNamespace(chats=[], updates=[SimpleNamespace(message=SimpleNamespace(id=new_id))])
         if name == "EditForumTopicRequest":
             _marked, chat = self.world.by_peer(request.peer)
@@ -207,6 +216,18 @@ class FakeClient:
                 topic.title = request.title
             if request.icon_emoji_id is not None:
                 topic.icon_emoji_id = request.icon_emoji_id or None
+            if request.closed is not None:
+                topic.closed = bool(request.closed)
+            if request.hidden is not None:
+                topic.hidden = bool(request.hidden)
+            return SimpleNamespace(updates=[])
+        if name == "ToggleForumRequest":
+            _marked, chat = self.world.by_peer(request.channel)
+            chat["entity"].forum = bool(request.enabled)
+            if not request.enabled:
+                # What Telegram does: the topics stop existing and their
+                # messages become one stream.
+                chat["topics"] = []
             return SimpleNamespace(updates=[])
         if name == "EditTitleRequest":
             _marked, chat = self.world.by_peer(request.channel)

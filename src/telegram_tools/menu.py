@@ -811,6 +811,9 @@ MESSAGE_TITLES = {
 def _staged_label(kind: str, value: Any) -> str:
     if kind == "toggle":
         return "yes" if value else "no"
+    if kind == "onoff":
+        # Three states, not two: a flag left alone is not a flag set to off.
+        return "leave alone" if value is None else ("on" if value else "off")
     if value in (None, "", [], ()):
         return "(none)" if kind not in ("topic",) else "(the chat itself)"
     if kind == "lines":
@@ -2413,8 +2416,17 @@ MANAGE_FORMS = {
         ("request_needed", "Joining needs an admin's approval", "toggle"),
     ),
     ("invite", "revoke"): (("link", "Link, as invite list printed it", "text"),),
-    ("settings", "show"): (),
-    ("settings", "set"): (("slow_mode", "Slow mode seconds (0, 10, 30, 60, 300, 900, 3600)", "int"),),
+    ("settings", "show"): (("topic", "One topic's own settings (id; blank = the chat)", "int"),),
+    ("settings", "set"): (
+        ("topic", "Change this topic instead of the chat (id)", "int"),
+        ("title", "New name (the chat's, or the topic's)", "text"),
+        ("about", "Description (the chat only)", "text"),
+        ("forum", "Topics on this group (off removes every topic)", "onoff"),
+        ("slow_mode", "Slow mode seconds (0, 10, 30, 60, 300, 900, 3600)", "count"),
+        ("icon_emoji_id", "Topic icon: custom-emoji document id, 0 removes it", "count"),
+        ("closed", "Topic closed (only admins may post)", "onoff"),
+        ("hidden", "Topic hidden (the General topic only)", "onoff"),
+    ),
 }
 MANAGE_REQUIRED = {
     ("admin", "promote"): ("user", "rights"),
@@ -2428,12 +2440,24 @@ MANAGE_REQUIRED = {
     ("join-requests", "approve"): ("user",),
     ("join-requests", "decline"): ("user",),
     ("invite", "revoke"): ("link",),
-    ("settings", "set"): ("slow_mode",),
 }
 # The two typed_name verbs: the dry-run runs first, and the exact label is typed
 # at the CLI's own prompt on the run that follows. The menu never sets execute
 # on the first run.
 MANAGE_TYPED = {("admin", "demote"), ("member", "ban")}
+
+
+def _typed_here(group: str, verb: str, values: dict) -> bool:
+    """Which gate this run takes. `settings set` is the one that depends on what was staged.
+
+    Switching topics off removes every topic, so it takes `delete`'s gate --
+    a dry-run first, then the chat's exact title -- while every other setting
+    is one y/N. The menu asks the CLI for neither: it just never takes the
+    shorter path.
+    """
+    if (group, verb) in MANAGE_TYPED:
+        return True
+    return (group, verb) == ("settings", "set") and values.get("forum") is False
 MANAGE_ROWS = {
     "admin": (
         ("list", "List the creator and admins, with their rights"),
@@ -2451,14 +2475,17 @@ MANAGE_ROWS = {
     ),
     "join-requests": (("list", "Who is waiting to join"), ("approve", "Let a person in"), ("decline", "Turn a request down")),
     "invite": (("list", "List invite links (shown in full)"), ("create", "Make a new invite link"), ("revoke", "Revoke an invite link")),
-    "settings": (("show", "Show slow mode, join approval, default rights"), ("set", "Set slow mode")),
+    "settings": (
+        ("show", "Show a chat's settings, or one topic's"),
+        ("set", "Change a chat's or a topic's settings"),
+    ),
 }
 MANAGE_GROUPS = (
     ("admin", "Admins", "Admins: list, promote, change rights, demote"),
     ("member", "Members", "Members: list, ban, unban, mute, unmute, restrict"),
     ("join-requests", "Join requests", "Join requests: list, approve, decline"),
     ("invite", "Invite links", "Invite links: list, create, revoke"),
-    ("settings", "Chat settings", "Chat settings: show, set slow mode"),
+    ("settings", "Chat and topic settings", "Chat and topic settings: show, set"),
 )
 _MANAGE_ANOTHER = (STAY, "Another chat")
 
@@ -2471,18 +2498,18 @@ def _flow_manage_verb(group: str, verb: str, title: str):
     """One administration verb: pick the chat, stage its fields, run it behind its own gate."""
     fields = MANAGE_FORMS[(group, verb)]
     required = MANAGE_REQUIRED.get((group, verb), ())
-    typed = (group, verb) in MANAGE_TYPED
     group_title = next(name for key, name, _label in MANAGE_GROUPS if key == group)
 
     async def run_it(values: dict, *, picked, session, runner, read, write, form: str) -> Any:
-        if not typed:
+        if not _typed_here(group, verb, values):
             args = _manage_namespace(group, verb, picked.reference, **values)
             return await _act(args, session=session, runner=runner, read=read, write=write, trail=form, rows=(RUN_AGAIN, _MANAGE_ANOTHER))
+        what = "the chat's exact title" if group == "settings" else "the person's exact label"
         dry_run = _manage_namespace(group, verb, picked.reference, execute=False, **values)
         if await _call(dry_run, session=session, runner=runner, write=write) is None:
             return _leave_action(after_action(read=read, write=write))
         choice = choose(
-            ["Do it for real - the next screen asks for the person's exact label"],
+            [f"Do it for real - the next screen asks for {what}"],
             title=crumb(form, "Dry-run done"),
             read=read,
             write=write,
@@ -2510,7 +2537,7 @@ def _flow_manage_verb(group: str, verb: str, title: str):
                 staged["limit"] = manage_ops.LIST_LIMIT
             while True:
                 rows = [(key, f"{label:<44} [{_staged_label(kind, staged[key])}]") for key, label, kind in fields]
-                rows.append(("run", "Run it (dry-run first)" if typed else "Do it (shows the preview, then asks)"))
+                rows.append(("run", "Run it (dry-run first)" if _typed_here(group, verb, staged) else "Do it (shows the preview, then asks)"))
                 choice = choose([label for _key, label in rows], title=form, read=read, write=write, back_label="Back (discards)")
                 if choice is BACK:
                     break
@@ -2520,8 +2547,13 @@ def _flow_manage_verb(group: str, verb: str, title: str):
                     if kind == "toggle":
                         staged[key] = not staged[key]
                         continue
-                    if kind == "int":
-                        answer = ask_int(label, read=read, write=write, current=staged[key])
+                    if kind == "onoff":
+                        # Pressing it walks the three states rather than the two
+                        # a toggle has: leave alone, on, off.
+                        staged[key] = {None: True, True: False, False: None}[staged[key]]
+                        continue
+                    if kind in ("int", "count"):
+                        answer = ask_int(label, read=read, write=write, current=staged[key], minimum=0 if kind == "count" else 1)
                     else:
                         answer = ask_text(label, read=read, write=write, current=staged[key] or None)
                     if answer is BACK:

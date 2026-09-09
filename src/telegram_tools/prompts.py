@@ -261,16 +261,21 @@ def ask_lines(label: str, *, read, write, current: str | None = None) -> Any:
     return "\n".join(lines) if lines else BACK
 
 
-def ask_int(label: str, *, read, write, current: int | None = None) -> Any:
-    """A positive whole number. Blank cancels."""
-    suffix = f" [{current}]" if current else ""
+def ask_int(label: str, *, read, write, current: int | None = None, minimum: int = 1) -> Any:
+    """A whole number of at least `minimum`. Blank cancels.
+
+    `minimum` is 0 where zero is an answer rather than an empty one: slow mode
+    off, a topic icon removed. Blank still cancels there, so "0" and "leave it"
+    stay two different presses.
+    """
+    suffix = f" [{current}]" if current is not None else ""
     while True:
         value = read(f"{label}{suffix} (blank cancels): ").strip()
         if not value:
             return BACK
-        if value.isdecimal() and int(value) >= 1:
+        if value.isdecimal() and int(value) >= minimum:
             return int(value)
-        write("Type a whole number of 1 or more.")
+        write(f"Type a whole number of {minimum} or more.")
 
 
 def edit_field(
