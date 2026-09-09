@@ -800,6 +800,6 @@ def test_the_port_lists_admins_creator_first():
     port = TelegramManagePort(fake)
     import asyncio
 
-    rows = asyncio.run(port.admins(SimpleNamespace(channel_id=1000000001, chat_id=FORUM_ID)))
+    rows = asyncio.run(port.admins(types.InputPeerChannel(channel_id=1000000001, access_hash=0)))
     assert [row.status for row in rows][:2] == ["creator", "admin"]
     assert rows[0].label == "Sven (@sven)"

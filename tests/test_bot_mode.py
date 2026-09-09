@@ -171,6 +171,9 @@ def record_account(home, *, label="Sven (@sven)", user_id=42):
         ["delete", "topic", "--chat", str(CHAT_ID), "--topic", "5"],
         ["create", "group", "--title", "Nope"],
         ["create", "channel", "--title", "Nope"],
+        # A folder is a shelf over an account's chat list, and a bot has none.
+        ["folders", "list"],
+        ["folders", "create", "--title", "Nope", "--include", str(CHAT_ID)],
         ["auth"],
     ],
 )

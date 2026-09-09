@@ -17,6 +17,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from telethon import utils
 from telethon.tl import types
 from telethon.tl.types import ChatBannedRights
 
@@ -119,9 +120,7 @@ class World:
         return [(topic.title, topic.icon_emoji_id) for topic in self.chats[marked]["topics"]]
 
     def by_peer(self, peer) -> tuple[int, dict]:
-        marked = getattr(peer, "chat_id", None)
-        if marked is None:
-            marked = self.marked_for(int(getattr(peer, "channel_id")))
+        marked = utils.get_peer_id(peer)
         return marked, self.chats[marked]
 
 
@@ -147,7 +146,12 @@ class FakeClient:
 
     @staticmethod
     def _input(marked: int, entity):
-        return SimpleNamespace(channel_id=entity.id, chat_id=marked)
+        # A real input peer, not a stand-in: production code reads a peer's
+        # marked id back through `utils.get_peer_id`, and a namespace with the
+        # right attribute names would pass a test the real object would fail.
+        if isinstance(entity, types.Chat):
+            return types.InputPeerChat(chat_id=entity.id)
+        return types.InputPeerChannel(channel_id=entity.id, access_hash=0)
 
     async def iter_dialogs(self):
         for marked in list(self.world.chats):

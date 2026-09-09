@@ -187,7 +187,7 @@ def test_folders_create_takes_the_lowest_free_id_and_the_chats_named(run_cli, ca
     assert envelope["evidence"]["readback"] == "Ops: made"
     line = audit_lines(home)[0]
     assert (line["command"], line["approval"]) == ("folders create", "prompt_y")
-    assert line["targets"][0]["rid"] == "tg:folder:5"
+    assert line["targets"] == ["tg:folder:5"]
 
 
 def test_folders_create_refuses_a_folder_that_would_match_nothing(run_cli, capsys):
@@ -327,4 +327,4 @@ def test_the_plan_names_the_folder_and_needs_no_chat_right(run_cli, capsys):
     plan = envelope_of(out)["plan"]
     assert plan["preflight"]["required"] == [], "a folder is the account's, not a chat's"
     assert plan["approval"] == "prompt_y"
-    assert plan["targets"][0]["kind"] == "folder"
+    assert envelope_of(out)["target"]["kind"] == "folder"
