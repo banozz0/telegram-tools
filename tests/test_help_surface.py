@@ -27,6 +27,10 @@ Two relaxations, both deliberate:
   import, so a Telethon release that adds a right would fail the freeze with no
   flag having moved (1.45.0 did exactly that). `RIGHTS_LISTS` replaces the live
   spelling with a marker, and the fixtures carry the marker.
+* Two flags sharing a metavar are spelled `--keyword, --contains KEYWORD` from
+  Python 3.13 and `--keyword KEYWORD, --contains KEYWORD` before it. The
+  fixtures hold the 3.13 spelling; `SHARED_METAVAR` rewrites the older one to
+  it, so the same fixture holds on every interpreter CI runs.
 * Whitespace is squeezed to single spaces on both sides. `--json [JSON_OUTPUT]`
   is two characters wider than `--json JSON_OUTPUT`, and argparse widens the
   whole help column of that parser to match, so a byte comparison would fail on
@@ -340,6 +344,9 @@ ALLOWED_REWRITES = {
 # brackets in both the usage line and the option list.
 OPTIONAL_PATH = re.compile(r"\[([A-Z_]+)\]")
 
+# argparse before 3.13: `--a X, --b X`. From 3.13: `--a, --b X`.
+SHARED_METAVAR = re.compile(r"(--[\w-]+) ([A-Z_]+), (--[\w-]+) \2\b")
+
 # Telethon's rights, as each help text spells them after squeezing: `bots` in
 # signature order, the administration commands sorted. Each becomes its marker.
 RIGHTS_LISTS = (
@@ -363,8 +370,10 @@ def squeeze(text: str) -> str:
 
 def normalise(text: str) -> str:
     """The help as this test compares it: whitespace squeezed, an optional path
-    spelled plainly, Telethon's rights lists replaced by their markers."""
+    spelled plainly, a shared metavar spelled the 3.13 way, Telethon's rights
+    lists replaced by their markers."""
     text = OPTIONAL_PATH.sub(r"\1", squeeze(text))
+    text = SHARED_METAVAR.sub(r"\1, \3 \2", text)
     for spelling, marker in RIGHTS_LISTS:
         text = text.replace(spelling, marker)
     return text
