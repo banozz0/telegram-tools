@@ -5,10 +5,11 @@ from collections.abc import Callable, Iterable
 from typing import Any
 
 from telethon.errors import FloodWaitError
-from telethon.tl.functions.channels import DeleteChannelRequest
-from telethon.tl.functions.messages import DeleteTopicHistoryRequest
+from telethon.tl.functions.channels import DeleteChannelRequest, LeaveChannelRequest
+from telethon.tl.functions.messages import DeleteChatUserRequest, DeleteTopicHistoryRequest
+from telethon.tl.types import InputPeerChat, InputUserSelf
 
-from telegram_tools.models import ContainerDeleteResult, DeleteResult, TopicInfo
+from telegram_tools.models import ContainerDeleteResult, DeleteResult, LeaveResult, TopicInfo
 
 CLEAR_TOPIC_MESSAGES_WARNING = """\
 ====================================================
@@ -284,3 +285,121 @@ async def delete_topic(
     return ContainerDeleteResult(
         kind="topic", id=chat_id, topic_id=topic.id, title=topic.title, dry_run=False, deleted=True
     )
+
+
+# -- leaving a chat -----------------------------------------------------------
+#
+# The counterpart of the sibling tool's leave-server. Nothing is deleted: the
+# chat stays for everyone else, and what this account loses is its seat in it.
+# The gate is `delete`'s anyway, because a chat this account created and left
+# is a chat it may never get back into -- and, with no other admin, one nobody
+# can run.
+
+# Which `leave` noun owns each type `discover` prints. A user is absent on
+# purpose: a private chat is not left, and its history is deleted in Telegram.
+LEAVE_KIND_TYPES = {
+    "group": ("supergroup", "forum_group", "group"),
+    "channel": ("channel",),
+}
+
+LEAVE_CONSEQUENCES = """\
+OK:   The chat stays, for everyone else in it. Nothing is deleted.
+GONE: Your seat in it: its messages stop reaching you, and you stop
+      being able to post, read or administer it.
+NOTE: Getting back in takes an invite link, a public username, or
+      someone still inside adding you."""
+
+CREATOR_NOTE = """\
+NOTE: You created this chat. Leaving does not delete it and does not
+      hand it to anyone: it keeps running without an owner, and you
+      cannot come back as its creator. If it has no other admin, no
+      one can run it afterwards."""
+
+
+def leave_kind_for_type(type_name: str) -> str | None:
+    """Which `leave` noun owns a chat type, or None if this tool cannot leave it."""
+    for kind, types in LEAVE_KIND_TYPES.items():
+        if type_name in types:
+            return kind
+    return None
+
+
+def _leave_lines(kind: str, *, creator: bool) -> list[str]:
+    lines = [LEAVE_CONSEQUENCES]
+    if creator:
+        lines.append(CREATOR_NOTE)
+    return lines
+
+
+def format_leave_summary(kind: str, title: str, chat_id: int, *, creator: bool) -> str:
+    """The dry-run's version: what would be left and what that costs, without the banner."""
+    return "\n".join(
+        [
+            f"Dry-run: leave {kind} {title} ({chat_id}).",
+            *_leave_lines(kind, creator=creator),
+            "Nothing has changed. Re-run with --execute to leave for real.",
+        ]
+    )
+
+
+def format_leave_preview(kind: str, title: str, chat_id: int, *, creator: bool) -> str:
+    """What is about to be left, so the typed title is an informed answer."""
+    lines = [
+        "====================================================",
+        f"WARNING: LEAVE {kind.upper()}",
+        "",
+        "This account leaves a real chat on Telegram.",
+        "Nothing in it is deleted; getting back in is not up to you.",
+        RULE,
+        f"Kind    {kind}",
+        f"Title   {title}",
+        f"Chat    {chat_id}",
+        RULE,
+        *_leave_lines(kind, creator=creator),
+        "====================================================",
+    ]
+    return "\n".join(lines)
+
+
+async def leave_chat(
+    client,
+    peer: Any,
+    *,
+    kind: str,
+    title: str,
+    chat_id: int,
+    creator: bool = False,
+    execute: bool = False,
+    confirm: Callable[[str, str], str] = confirm_delete,
+    progress: Callable[[str], None] | None = None,
+    recheck: Callable[[], Any] | None = None,
+) -> LeaveResult:
+    """Leave a group or channel after a dry-run and a typed title.
+
+    A supergroup or channel is left through `channels.leaveChannel`; a basic
+    group has no such call, so it is left by removing this account from it
+    (`messages.deleteChatUser` with the account itself as the user).
+    """
+    progress = progress or (lambda _message: None)
+
+    if not execute:
+        progress(format_leave_summary(kind, title, chat_id, creator=creator))
+        return LeaveResult(kind=kind, id=chat_id, title=title, creator=creator, dry_run=True)
+
+    preview = format_leave_preview(kind, title, chat_id, creator=creator)
+
+    if not _titles_match(confirm(preview, title), title):
+        progress(f"Leave {kind} cancelled - the typed title did not match.")
+        return LeaveResult(kind=kind, id=chat_id, title=title, creator=creator, dry_run=False, cancelled=True)
+
+    # The typed title belongs to the chat about to be left, not to one it was
+    # renamed from in the meantime.
+    if recheck is not None:
+        await recheck()
+
+    if isinstance(peer, InputPeerChat):
+        await client(DeleteChatUserRequest(chat_id=peer.chat_id, user_id=InputUserSelf()))
+    else:
+        await client(LeaveChannelRequest(channel=peer))
+    progress(f"Left {kind} {title} ({chat_id})")
+    return LeaveResult(kind=kind, id=chat_id, title=title, creator=creator, dry_run=False, left=True)

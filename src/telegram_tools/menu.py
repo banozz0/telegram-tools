@@ -1931,6 +1931,51 @@ async def _flow_structure_remap(*, session, runner, read, write) -> bool:
             return _leave(result)
 
 
+async def _flow_leave(*, session, runner, read, write) -> bool:
+    """Row 7 of Build: this account out of a group or channel. Nothing is deleted."""
+    trail = crumb(MAIN, "Leave")
+    while True:
+        picked = await _pick_chat(session=session, read=read, write=write, trail=trail)
+        if picked is BACK:
+            return True
+        if picked.type == "user":
+            write(f"error: {picked.title} is a private chat, which is not a chat to leave. Delete its history in Telegram itself.")
+            if not after_action(read=read, write=write):
+                return False
+            continue
+
+        where = crumb(trail, picked.title)
+        dry_run = _namespace(command="leave", chat=picked.reference, execute=False)
+
+        # The dry-run always runs first, and it is where the creator note is
+        # said: the menu must never be a shorter path out of a chat than the flags are.
+        if await _call(dry_run, session=session, runner=runner, write=write) is None:
+            return _leave_action(after_action(read=read, write=write))
+
+        choice = choose(
+            ["Leave it for real - the next screen asks for its exact title"],
+            title=crumb(where, "Nothing is deleted"),
+            read=read,
+            write=write,
+            back_label="Back to the chat list",
+        )
+        if choice is BACK:
+            continue
+
+        for_real = _namespace(**{**vars(dry_run), "execute": True})
+        result = await _act(
+            for_real,
+            session=session,
+            runner=runner,
+            read=read,
+            write=write,
+            trail=where,
+            rows=((STAY, "Leave another"),),
+        )
+        if result is not STAY:
+            return _leave(result)
+
+
 BUILD_ROWS = (
     ("Create a group, channel, or topic", _flow_create),
     ("Delete a group, channel, or topic", _flow_delete),
@@ -1938,6 +1983,7 @@ BUILD_ROWS = (
     ("Diff a blueprint against a chat", _flow_structure_diff),
     ("Apply a blueprint (dry-run first, then its exact title)", _flow_structure_apply),
     ("Show the remap table of an apply", _flow_structure_remap),
+    ("Leave a group or channel (nothing is deleted)", _flow_leave),
 )
 
 

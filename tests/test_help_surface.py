@@ -60,6 +60,7 @@ COMMANDS = {
     "delete-group": ("delete", "group"),
     "delete-channel": ("delete", "channel"),
     "delete-topic": ("delete", "topic"),
+    "leave": ("leave",),
     "login": ("auth",),
     "profiles": ("profiles",),
     "doctor": ("doctor",),
@@ -217,6 +218,10 @@ _ROOT_ADDITIONS = (
     "watch,schedule,",
     "watch Rules over live Telegram events, and the runner that fires them",
     "schedule Messages waiting to be posted: list, post (this runner holds it), cancel",
+    # The leave card (agent-bo-95422191): one new command, this account out of
+    # a group or channel behind `delete`'s gate. Both spellings of the name.
+    "leave,",
+    "leave Leave a group or channel: nothing in it is deleted (dry-run by default)",
 )
 
 ALLOWED_ADDITIONS = {

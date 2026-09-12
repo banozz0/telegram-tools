@@ -1685,6 +1685,36 @@ def test_build_holds_create_delete_and_the_structure_rows():
     assert "4. Diff a blueprint against a chat" in text
     assert "5. Apply a blueprint (dry-run first, then its exact title)" in text
     assert "6. Show the remap table of an apply" in text
+    assert "7. Leave a group or channel (nothing is deleted)" in text
+
+
+LEAVE = ("4", "7")
+
+
+def test_leave_flow_dry_runs_before_offering_execute():
+    # Leave > Forum groups > Hermes > for real > exit
+    _code, calls, output = run_menu([LEAVE, "1", "1", "1", "0", "0"])
+
+    assert [call.command for call in calls] == ["leave", "leave"]
+    assert calls[0].execute is False
+    assert calls[1].execute is True
+    assert calls[1].chat == "-100111"
+    assert "the next screen asks for its exact title" in screens(output)
+
+
+def test_leave_flow_backing_out_never_executes():
+    _code, calls, _output = run_menu([LEAVE, "1", "1", "0", "0", "0", "0"])
+
+    assert [call.command for call in calls] == ["leave"]
+    assert not any(getattr(call, "execute", False) for call in calls)
+
+
+def test_leave_flow_refuses_a_private_chat():
+    # Direct chats > Mum: not a chat with a seat to give up.
+    _code, calls, output = run_menu([LEAVE, "3", "1", "0", "0"])
+
+    assert calls == []
+    assert "not a chat to leave" in screens(output)
 
 
 STRUCTURE_EXPORT = ("4", "3")

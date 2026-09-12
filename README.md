@@ -19,6 +19,7 @@ Built on [Telethon](https://github.com/LonamiWebs/Telethon). Everything runs on 
 - **`message`** — what you do to a message once it exists: `reply`, `edit`, `delete`, `forward`, `copy`, `react`, `unreact`, `pin`, `unpin`, `poll`, `typing`, `read`, `unread`, `bookmark`, `draft`. Each shows the chat and the message it is about to act on, then asks. Deleting is dry-run by default, bounded, and needs `--execute` plus a typed `DELETE`. See [Message tools](#message-tools).
 - **`create`** — makes a supergroup (optionally with topics already on), a broadcast channel, or a topic inside a forum group, and prints the new ID.
 - **`delete`** — removes a supergroup, a broadcast channel, or a forum topic: the thing itself, not just its messages. Dry-run by default; deleting requires `--execute` *and* typing the target's exact title at a prompt. It deletes exactly what `create` can make, so nothing this tool removes is beyond making again.
+- **`leave`** — takes this account out of a group or channel. Nothing in it is deleted and everyone else stays; what goes is your seat. Dry-run by default, and the dry-run says when you created the chat, because leaving one you own does not hand it to anyone and you cannot come back as its creator. Leaving requires `--execute` *and* typing the chat's exact title at a terminal.
 - **`structure`** — a chat's shape as a file: `structure export` writes a blueprint (kind, title, description, topics, default rights, slow mode, join approval — never members, admins, messages, history or invite links), `structure diff` says what another chat would need to match it, `structure apply` makes the missing topics and settings behind the same typed-title gate `delete` has and never deletes anything on the target, and `structure remap` prints the id table an apply wrote. See [Structure blueprints](#structure-blueprints).
 - **`admin`, `member`, `join-requests`, `invite`, `settings`** — running a group or channel: list, promote, change and demote admins; list, ban, kick, unban, mute, unmute and restrict members; approve or decline join requests; list, create and revoke invite links; show and change a chat's title, description, topics flag and slow mode, or one topic's title, icon, closed and hidden. Every write names the right it needs before it starts, and banning, kicking or demoting someone — or switching a group's topics off — asks for their exact label or the chat's exact title at a terminal. See [Admins and members](#admins-and-members).
 - **`folders`** — your own chat folders, the shelves Telegram draws above your chat list: `folders list` shows them with their chats and categories, `folders create` and `folders edit` build one out of named chats and whole categories (`groups`, `bots`, `contacts`, …), and `folders delete` removes one behind the same typed-title gate `delete` has. A folder belongs to an account, so `--as-bot folders` refuses. See [Folders](#folders).
@@ -274,6 +275,10 @@ telegram-tools create topic --chat -1001234567890 --title "Deploys"
 # Take one back. Both dry-run first; --execute then asks you to type the title.
 telegram-tools delete topic --chat -1001234567890 --topic 141
 telegram-tools delete group --chat -1001234567890 --execute
+
+# Leave a group or channel you are in (nothing is deleted): dry-run, then --execute and its exact title
+telegram-tools leave --chat -1001234567890
+telegram-tools leave --chat -1001234567890 --execute
 
 # Which bots do I own, and what are their IDs?
 telegram-tools bots
@@ -774,12 +779,13 @@ for a code or a password. Relay the refusal and let the person run it.
 | `bots` | No — changes settings on bots you own, after a diff and a `y/N` unless you pass `--yes`; reversible if you still have the old values, but `--remove-photo` and `--clear-commands` discard data Telegram will not hand back |
 | `clear-messages` | Yes — but only with `--execute` **and** a typed `DELETE`, only messages, never topics |
 | `delete` | Yes, and further than `clear-messages` goes — the group, channel or topic itself, for everyone in it. Only with `--execute` **and** the target's exact title typed back; there is no `--yes`, so it never runs unattended. It removes only what `create` can make: a basic group is refused, because this tool cannot make one back |
+| `leave` | No — nothing is deleted and the chat stays for everyone else; this account's seat in it goes, and a chat you created keeps running without you and cannot be re-entered as its creator, which the dry-run says. Only with `--execute` **and** the chat's exact title typed at a terminal, in either mode; there is no `--yes`. A bot may leave a chat it was added to |
 
 `clear-messages` also verifies you actually hold the delete-messages permission in the chat before doing anything, skips topic starter messages, and handles Telegram flood-wait limits automatically.
 
 `bots` refuses to edit a bot you do not own, and it never fetches or exports a bot token from Telegram — the three token-only edits simply fail with a message naming the fields they need one for.
 
-Every write — sending, a message verb, creating, clearing, deleting, applying a blueprint, an admin, member, setting or folder change, a rule file, a schedule, editing a bot — now also
+Every write — sending, a message verb, creating, clearing, deleting, leaving, applying a blueprint, an admin, member, setting or folder change, a rule file, a schedule, editing a bot — now also
 asks Telegram what rights your account actually holds in that chat before it
 does anything, and refuses by name when one it needs is missing. Once you have
 answered the gate, the target is resolved a second time and compared with the

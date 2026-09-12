@@ -1,0 +1,6 @@
+usage: telegram-tools leave [-h] --chat CHAT [--execute]
+
+options:
+  -h, --help   show this help message and exit
+  --chat CHAT  Chat username, link, or ID
+  --execute    Actually leave it after typing its exact title

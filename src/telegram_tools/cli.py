@@ -52,6 +52,8 @@ from telegram_tools.delete import (
     confirm_delete,
     delete_chat,
     delete_topic,
+    leave_chat,
+    leave_kind_for_type,
     delete_topic_messages,
     kind_for_type,
 )
@@ -91,7 +93,7 @@ DELETE_TOPIC_RIGHTS = ("delete_messages",)
 # The commands that change something at Telegram's end or on this machine.
 # `auth` is here because it writes a session, which is the one local file worth
 # being strict about.
-WRITES = ("send", "message", "create", "delete", "clear-messages", "bots", "auth")
+WRITES = ("send", "message", "create", "delete", "leave", "clear-messages", "bots", "auth")
 # The one structure command that writes: `apply` makes topics and sets settings
 # on the target and writes remap rows into the archive. `export` and `diff`
 # read a chat; `remap` reads the archive.
@@ -129,7 +131,8 @@ SCHEDULE_WRITES = watch_ops.SCHEDULE_WRITES
 # `watch` is here because a bot receives updates for the chats it is in, which
 # is exactly what a rule watches; `schedule` is not, because `schedule_date` is
 # user-only (section 5.2) and a bot cannot hold a message for Telegram to post.
-BOT_MODE_COMMANDS = ("send", "create", "message", "watch", *manage_ops.GROUPS)
+# `leave` is on it: a bot may leave a chat it was added to, as an account may.
+BOT_MODE_COMMANDS = ("send", "create", "message", "watch", "leave", *manage_ops.GROUPS)
 BOT_MODE_CREATE_KINDS = ("topic",)
 
 
@@ -608,6 +611,12 @@ def build_parser() -> argparse.ArgumentParser:
         kind_parser.add_argument(
             "--execute", action="store_true", help="Actually delete it after typing its exact title"
         )
+
+    leave_parser = subparsers.add_parser(
+        "leave", help="Leave a group or channel: nothing in it is deleted (dry-run by default)"
+    )
+    leave_parser.add_argument("--chat", required=True, help="Chat username, link, or ID")
+    leave_parser.add_argument("--execute", action="store_true", help="Actually leave it after typing its exact title")
 
     auth_parser = subparsers.add_parser("auth", help="Log a profile in or out (asks at the terminal)")
     auth_mode = auth_parser.add_mutually_exclusive_group()
@@ -1990,6 +1999,100 @@ async def _gone(client, peer, result) -> str:
     except Exception:  # noqa: BLE001 - Telegram refusing to find it is the confirmation
         return f"{result.kind} {result.title} ({result.id}) is gone"
     raise LookupError("Telegram still lists the chat; it may be answering from a cache")
+
+
+async def _run_leave(client, args, *, report: Reporter | None = None) -> int:
+    """`leave`: this account out of a group or channel, behind `delete`'s gate.
+
+    Nothing is deleted and no right is needed -- anyone may leave -- but a
+    chat the account created and left is one it may not get back into, so
+    the dry-run names that and the real thing takes the chat's exact title at
+    a terminal, in either mode, with no `--yes`. A bot may leave too.
+    """
+    report = report or Reporter()
+    resolved = await _resolve(client, report, args.chat)
+    peer = resolved.input_entity
+    target = ChatTargets.chat_target(resolved, args.chat)
+    title = target.title
+    report.set_target(target)
+    identity = await _acting(client, report)
+
+    chat_type = classify_entity(resolved.entity)
+    kind = leave_kind_for_type(chat_type)
+    if kind is None:
+        raise CommandError(
+            f"{title} is a {chat_type}, which is not a chat to leave: a private chat has no members, "
+            "and its history is deleted in Telegram itself.",
+            code="TARGET_KIND_MISMATCH",
+        )
+    rights = await _rights(client, report, peer)
+    creator = bool(getattr(resolved.entity, "creator", False)) or "is_creator" in rights.held
+
+    report.show_banner()
+    plan, warnings = build_plan(
+        identity=identity,
+        command="leave",
+        targets=[target],
+        mutations=[Mutation("leave_chat", target.rid, {"kind": kind, "creator": creator})],
+        approval="typed_name",
+        rights=rights,
+        required=(),
+    )
+    report.set_plan(plan)
+    for warning in warnings:
+        report.warn(warning)
+
+    async def rebuild():
+        again = await _resolve(client, report, args.chat)
+        fresh = ChatTargets.chat_target(again, args.chat)
+        return build_plan(
+            identity=identity,
+            command="leave",
+            targets=[fresh],
+            mutations=[Mutation("leave_chat", fresh.rid, {"kind": kind, "creator": creator})],
+            approval="typed_name",
+            rights=rights,
+            required=(),
+        )[0]
+
+    if args.execute:
+        # A container's worth of consequence: a terminal in either mode, as `delete` has.
+        if not manage_ops.terminal_present():
+            raise ApprovalRequired(report.human_command)
+    gate = partial(confirm_delete, **(report.confirm_io() if args.execute else {}))
+    recheck = recheck_for(plan, rebuild) if args.execute else None
+
+    result = await leave_chat(
+        client,
+        peer,
+        kind=kind,
+        title=title,
+        chat_id=resolved.id,
+        creator=creator,
+        execute=args.execute,
+        confirm=gate,
+        progress=report.info,
+        recheck=recheck,
+    )
+
+    status = "dry_run" if result.dry_run else "cancelled" if result.cancelled else "ok"
+    if status == "ok":
+        evidence = await read_back("the left " + result.kind, lambda: _left(client, result))
+        report.set_evidence(evidence)
+        report.audit(plan, status=status, evidence=evidence)
+    report.printed_result(result.to_dict(), status=status)
+    return 1 if result.cancelled else 0
+
+
+async def _left(client, result) -> str:
+    """Telegram's own word that this account is out: the chat gone from its reach, or marked left."""
+    try:
+        fresh = await client.get_entity(result.id)
+    except Exception:  # noqa: BLE001 - a chat Telegram will no longer show is one this account is out of
+        return f"{result.kind} {result.title} ({result.id}) is out of reach: left"
+    if getattr(fresh, "left", False):
+        return f"{result.kind} {result.title} ({result.id}) is marked left"
+    raise LookupError("Telegram still lists this account in the chat; it may be answering from a cache")
 
 
 
@@ -3791,6 +3894,8 @@ async def run(args, *, client=None, config=None, report: Reporter | None = None)
             return await _run_create(client, args, report=report)
         if args.command == "delete":
             return await _run_delete(client, args, report=report)
+        if args.command == "leave":
+            return await _run_leave(client, args, report=report)
         if args.command == "archive":
             return await _run_archive_sync(client, args, report=report)
         if args.command == "structure":

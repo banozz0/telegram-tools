@@ -128,6 +128,34 @@ class ContainerDeleteResult:
 
 
 @dataclass(frozen=True)
+class LeaveResult:
+    """What `leave` was pointed at and whether this account left it.
+
+    Not a `ContainerDeleteResult`: nothing is deleted, the chat stays for
+    everyone else, and `creator` is the one fact the dry-run has to say.
+    """
+
+    kind: str
+    id: int
+    title: str
+    dry_run: bool
+    creator: bool = False
+    left: bool = False
+    cancelled: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "kind": self.kind,
+            "chat_id": self.id,
+            "title": self.title,
+            "creator": self.creator,
+            "left": self.left,
+            "dry_run": self.dry_run,
+            "cancelled": self.cancelled,
+        }
+
+
+@dataclass(frozen=True)
 class BotCommandInfo:
     command: str
     description: str

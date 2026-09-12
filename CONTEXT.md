@@ -168,6 +168,15 @@ The terms this codebase uses, and the boundaries they imply.
   group** is refused with that reason stated, because `create` makes
   supergroups and cannot make a basic group back. The kind you name is checked
   against what Telegram says the chat is before anything is asked.
+- **Leave** — this account out of a group or channel, the counterpart of the
+  sibling tool's leave-server. Nothing is deleted and no right is needed;
+  a supergroup or channel is left through `channels.leaveChannel`, a basic
+  group through `messages.deleteChatUser` with the account itself, and a
+  private chat is refused because it has no seat to give up. It takes the
+  typed name anyway — dry-run, `--execute`, the chat's exact title, a terminal
+  in either mode, no `--yes` — because a chat the account **created** and left
+  keeps running without an owner and cannot be re-entered as its creator; the
+  dry-run says so (`creator` in the result and the mutation). A bot may leave.
 - **Record** — the plain dict a message becomes (`records.py`): what `search`
   prints and what both export formats write. `has_media` keeps an
   attachment-only message from reading as empty.

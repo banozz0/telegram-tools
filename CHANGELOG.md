@@ -4,6 +4,13 @@ All notable changes to this project will be documented here.
 
 This project follows a practical changelog style: user-visible changes, safety changes, and release notes belong here; active task tracking belongs outside the repo.
 
+## 3.20.0 - 2026-09-12
+
+- **`leave`: this account out of a group or channel.** `telegram-tools leave --chat @teamhermes` dry-runs; `--execute` asks for the chat's exact title at a terminal, refuses without one in either mode, and has no `--yes`. Nothing is deleted and everyone else stays — what goes is your seat, and getting back in takes an invite, a public username or someone inside adding you. A supergroup or channel is left through Telegram's own leave; a basic group by removing yourself from it; a private chat is refused, because it has no seat to give up. Until now the only way out was the Telegram app.
+- **The dry-run says when you created the chat.** Leaving a chat you own does not delete it and does not hand it to anyone: it keeps running without an owner, you cannot come back as its creator, and with no other admin nobody can run it. That is why the gate is `delete`'s rather than a `y/N`. The result and the plan carry `creator` too.
+- **A bot may leave** a chat it was added to: `--as-bot NICK leave` runs, behind the same gate.
+- **Menu.** Row 4 › Build gains *Leave a group or channel (nothing is deleted)* as its seventh row; it runs the dry-run first and asks for the title at the CLI's own prompt, like Delete. The root screen is unchanged, so no transcript is re-recorded.
+
 ## 3.19.0 - 2026-09-12
 
 - **`member kick`: out now, may rejoin.** `telegram-tools member kick --chat @teamhermes --user @troll --reason spam --execute` removes a person without banning them, beside `member ban` and behind the same gate: dry-run by default, `--execute` plus the person's exact label typed at a terminal, refused without one in either mode, no `--yes`. Telegram has no kick of its own — a kick is a ban followed at once by an unban, which is what Telethon's `kick_participant` does — so the person is out, may rejoin, and no ban row remains afterwards; the dry-run says exactly that. Until now the only way to do this was `member ban` and then `member unban` by hand.

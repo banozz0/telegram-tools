@@ -1,7 +1,7 @@
 ---
 name: telegram-tools
 description: "Use when you need the real numeric ID of a Telegram chat, channel, group or forum topic — 'what's the ID of that topic?', 'which chat is -100…?', 'where do I send this?' — when the user wants their own Telegram messages searched or exported (JSON, CSV, JSONL, Markdown, HTML), when a history question can be answered from the local archive instead of a fresh fetch, when a message must be posted to a chat or topic the user has allowlisted, when a message the user named should get a reply, a reaction, a pin, or be forwarded, copied or bookmarked, when the user asks who the admins of a chat are, who is waiting to join, which invite links exist, what a chat's or a topic's settings are, or which chat folders they have, or when they want a message posted at a set time or a rule that alerts them when something happens in a chat."
-version: 1.15.0
+version: 1.16.0
 author: banozz0
 license: MIT
 platforms: [macos]
@@ -106,7 +106,11 @@ for everyone in it, not just the messages inside. There is no `--yes`: the
 destructive path needs `--execute` plus the target's exact title typed at a
 prompt, which no agent can answer. That is deliberate, not an obstacle to route
 around — do not drive it through the menu, a pty, or a piped answer. If the user
-wants something gone, hand them the exact command and let them run it.
+wants something gone, hand them the exact command and let them run it. **`leave
+--execute` is the same rule**: it deletes nothing, but it takes the user's seat in
+a group or channel, and a chat they created keeps running without them and cannot
+be re-entered as its creator. Its dry-run (no `--execute`) is safe to run and says
+whether they are the creator; the real thing is theirs, behind the same typed title.
 
 **5. Never run `clear-messages`.** It deletes real messages out of their forum topics
 and Telegram does not undo that. Dry-run is its default and the destructive path
@@ -360,6 +364,7 @@ names the files).
 | "make me a group with topics" (they asked) | `telegram-tools create group --title "..." --forum --yes` |
 | "add a topic to that group" (they asked) | `telegram-tools create topic --chat <id> --title "..." --yes` |
 | "delete that topic/group" | hand them `telegram-tools delete topic --chat <id> --topic <id> --execute` — rule 4, they run it |
+| "leave that group/channel" | `telegram-tools --json leave --chat <id>` shows what leaving costs and whether they created it; then hand them `telegram-tools leave --chat <id> --execute` — rule 4, they type the title |
 | "which account is this acting as?" | `telegram-tools profiles`, or read `identity` off any `--json` run |
 | "use my other account" | `telegram-tools --profile work <command>` |
 | "post that from the alerts bot" (they named it, allowlisted) | `telegram-tools --as-bot alerts send --chat <id> --topic <topic-id> --text "..." --yes` — rule 9 |
@@ -443,6 +448,9 @@ names the files).
 - **`delete`** — it removes the group, channel or topic itself, for everyone in
   it. Rule 4 above. It refuses to run unattended by construction; hand the user
   the command instead.
+- **`leave --execute`** — the user's seat in a group or channel, behind the chat's
+  exact title typed at a terminal, with no `--yes`. Rule 4. The dry-run (no
+  `--execute`) is safe to run and says whether they created the chat.
 - **`clear-messages`** — irreversible deletion of the user's messages. Rule 5 above.
 - **`message delete`** — the same, on a selection. Rule 10. It has no `--yes`; the
   dry-run (no `--execute`) is safe to run to show the user what would go.
