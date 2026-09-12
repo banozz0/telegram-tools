@@ -304,15 +304,25 @@ def test_folders_delete_needs_a_terminal_in_either_mode(run_cli, capsys):
     assert writes(fake) == []
 
 
-def test_no_folders_verb_has_a_yes(run_cli, capsys):
-    for argv in (
-        ["folders", "create", "--title", "Ops", "--include", FORUM, "--yes"],
-        ["folders", "edit", "--id", "2", "--title", "Ops", "--yes"],
-        ["folders", "delete", "--id", "2", "--execute", "--yes"],
-    ):
-        code, _out, err, fake = run_cli(argv, client=FolderedClient(), capsys=capsys, isatty=True, answer="y")
-        assert code == 2 and "--yes" in err, argv
-        assert writes(fake) == []
+def test_yes_answers_create_and_edit_and_the_preview_still_prints(run_cli, capsys, home):
+    """Card agent-bo-95422198: the two y/N verbs take --yes; no terminal, answer n, still written."""
+    code, out, err, fake = run_cli(
+        ["--json", "folders", "create", "--title", "Ops", "--include", FORUM, "--yes"], client=FolderedClient(), capsys=capsys, isatty=False, answer="n"
+    )
+    assert code == 0, out
+    assert writes(fake) == ["UpdateDialogFilterRequest"] and "Do it? [y/N]" not in err and "Ops" in err
+    code, out, err, fake = run_cli(
+        ["--json", "folders", "edit", "--id", "2", "--title", "Renamed", "--yes"], client=FolderedClient(), capsys=capsys, isatty=False, answer="n"
+    )
+    assert code == 0, out
+    assert writes(fake) == ["UpdateDialogFilterRequest"] and "Do it? [y/N]" not in err and "Renamed" in err
+    assert [line["command"] for line in audit_lines(home)] == ["folders create", "folders edit"]
+
+
+def test_folders_delete_has_no_yes(run_cli, capsys):
+    code, _out, err, fake = run_cli(["folders", "delete", "--id", "2", "--execute", "--yes"], client=FolderedClient(), capsys=capsys, isatty=True, answer="y")
+    assert code == 2 and "--yes" in err
+    assert writes(fake) == []
 
 
 # -- the plan, and what never reaches an envelope ------------------------------

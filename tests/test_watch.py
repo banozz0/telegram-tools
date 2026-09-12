@@ -787,6 +787,17 @@ def test_removing_a_rule_asks_first_and_a_no_keeps_the_file(run_watch, capsys, h
     assert envelope_of(out)["evidence"]["readback"] == "deploys.json is gone"
 
 
+def test_rules_remove_yes_skips_the_prompt_and_the_preview_still_prints(run_watch, capsys, home):
+    """Card agent-bo-95422198: no terminal, answer n, the file is still gone."""
+    code, out, _err, _fake = run_watch(["--json", "watch", "rules", "add", "--name", "deploys", "--on", "message", "--tag", "seen"], capsys=capsys, isatty=True, answer="y")
+    assert code == 0, out
+    path = archive_store.paths_for(home).rules / "deploys.json"
+    assert path.exists()
+    code, out, err, _fake = run_watch(["--json", "watch", "rules", "remove", "--name", "deploys", "--yes"], capsys=capsys, isatty=False, answer="n")
+    assert code == 0, out
+    assert not path.exists() and "[y/N]" not in err and "deploys" in err
+
+
 def test_test_says_what_would_fire_and_fires_nothing(run_watch, capsys, home, tmp_path):
     add_a_rule(run_watch, capsys, "--alert-to", ALERTS_RID)
     event_file = tmp_path / "event.json"
@@ -1024,6 +1035,29 @@ def test_cancelling_one_telegram_holds_needs_its_chat_and_reads_back_that_it_is_
     assert payload["result"]["cancelled_schedule"]["guarantee"] == watch_ops.SERVER_HELD
     assert payload["evidence"]["readback"] == f"Telegram no longer holds {message_id}"
     assert client.scheduled[CHANNEL_ID] == []
+
+
+def test_schedule_cancel_yes_skips_the_prompt_for_both_kinds(run_watch, capsys, home):
+    """Card agent-bo-95422198: no terminal, answer n, both a runner-held and a Telegram-held one cancelled."""
+    code, out, _err, _fake = run_watch(
+        ["--json", "schedule", "post", "--chat", "@agencyalerts", "--text", "standup", "--every", "1d"], capsys=capsys, isatty=True, answer="y"
+    )
+    schedule_id = envelope_of(out)["result"]["schedule"]["id"]
+    code, out, err, _fake = run_watch(["--json", "schedule", "cancel", "--id", schedule_id, "--yes"], capsys=capsys, isatty=False, answer="n")
+    assert code == 0, out
+    assert envelope_of(out)["result"]["cancelled_schedule"]["id"] == schedule_id and "[y/N]" not in err and schedule_id in err
+
+    when = datetime.now(UTC) + timedelta(hours=2)
+    client = SendingClient()
+    code, out, _err, _fake = run_watch(
+        ["--json", "send", "--chat", "@agencyalerts", "--text", "native", "--at", when.isoformat()], capsys=capsys, client=client, isatty=True, answer="y"
+    )
+    message_id = envelope_of(out)["result"]["message_id"]
+    code, out, err, _fake = run_watch(
+        ["--json", "schedule", "cancel", "--id", str(message_id), "--chat", "@agencyalerts", "--yes"], capsys=capsys, client=client, isatty=False, answer="n"
+    )
+    assert code == 0, out
+    assert client.scheduled[CHANNEL_ID] == [] and "[y/N]" not in err
 
 
 def test_cancelling_one_this_runner_holds_needs_no_chat_and_no_connection(run_watch, capsys, home):

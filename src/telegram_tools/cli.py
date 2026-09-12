@@ -302,6 +302,7 @@ def build_parser() -> argparse.ArgumentParser:
     banned_rights_help = "Comma-separated rights to take away. Valid names: " + ", ".join(manage_ops.BANNED_RIGHT_NAMES)
     until_help = "When it ends: a duration (30m, 2h, 7d, 1w) or an ISO date/time; at least a minute, at most a year"
 
+    yes_help = "Skip the y/N; the preview still prints"
     admin_parser = subparsers.add_parser("admin", help="Admins and their rights: list, promote, rights, demote (demote asks for the person's exact label)")
     admin_kinds = admin_parser.add_subparsers(dest="admin_kind")
     admin_list = admin_kinds.add_parser("list", help="The creator and every admin, with their rights and ranks")
@@ -311,11 +312,13 @@ def build_parser() -> argparse.ArgumentParser:
     admin_promote.add_argument("--user", required=True, help=user_help)
     admin_promote.add_argument("--rights", required=True, help=admin_rights_help)
     admin_promote.add_argument("--rank", help="A custom title shown beside their name")
+    admin_promote.add_argument("--yes", action="store_true", help=yes_help)
     admin_rights = admin_kinds.add_parser("rights", help="Set an admin's rights to exactly the ones you name (y/N)")
     admin_rights.add_argument("--chat", required=True, help=chat_help)
     admin_rights.add_argument("--user", required=True, help=user_help)
     admin_rights.add_argument("--rights", required=True, help=admin_rights_help)
     admin_rights.add_argument("--rank", help="A custom title shown beside their name")
+    admin_rights.add_argument("--yes", action="store_true", help=yes_help)
     admin_demote = admin_kinds.add_parser("demote", help="Take every admin right off a person (dry-run by default)")
     admin_demote.add_argument("--chat", required=True, help=chat_help)
     admin_demote.add_argument("--user", required=True, help=user_help)
@@ -336,18 +339,22 @@ def build_parser() -> argparse.ArgumentParser:
     member_unban = member_kinds.add_parser("unban", help="Lift a ban or a restriction (y/N)")
     member_unban.add_argument("--chat", required=True, help=chat_help)
     member_unban.add_argument("--user", required=True, help=user_help)
+    member_unban.add_argument("--yes", action="store_true", help=yes_help)
     member_mute = member_kinds.add_parser("mute", help="Stop a person sending anything until a moment you name (y/N)")
     member_mute.add_argument("--chat", required=True, help=chat_help)
     member_mute.add_argument("--user", required=True, help=user_help)
     member_mute.add_argument("--until", required=True, help=until_help)
+    member_mute.add_argument("--yes", action="store_true", help=yes_help)
     member_unmute = member_kinds.add_parser("unmute", help="Lift a mute or a restriction (y/N)")
     member_unmute.add_argument("--chat", required=True, help=chat_help)
     member_unmute.add_argument("--user", required=True, help=user_help)
+    member_unmute.add_argument("--yes", action="store_true", help=yes_help)
     member_restrict = member_kinds.add_parser("restrict", help="Take named rights off a person until a moment you name (y/N)")
     member_restrict.add_argument("--chat", required=True, help=chat_help)
     member_restrict.add_argument("--user", required=True, help=user_help)
     member_restrict.add_argument("--rights", required=True, help=banned_rights_help)
     member_restrict.add_argument("--until", required=True, help=until_help)
+    member_restrict.add_argument("--yes", action="store_true", help=yes_help)
 
     join_parser = subparsers.add_parser("join-requests", help="People waiting to join a chat that needs approval: list, approve, decline")
     join_kinds = join_parser.add_subparsers(dest="join_kind")
@@ -356,9 +363,11 @@ def build_parser() -> argparse.ArgumentParser:
     join_approve = join_kinds.add_parser("approve", help="Let a person in (y/N)")
     join_approve.add_argument("--chat", required=True, help=chat_help)
     join_approve.add_argument("--user", required=True, help=user_help)
+    join_approve.add_argument("--yes", action="store_true", help=yes_help)
     join_decline = join_kinds.add_parser("decline", help="Turn a request down (y/N)")
     join_decline.add_argument("--chat", required=True, help=chat_help)
     join_decline.add_argument("--user", required=True, help=user_help)
+    join_decline.add_argument("--yes", action="store_true", help=yes_help)
 
     invite_parser = subparsers.add_parser("invite", help="Invite links: list, create, revoke (links are shown by list and create only)")
     invite_kinds = invite_parser.add_subparsers(dest="invite_kind")
@@ -371,9 +380,11 @@ def build_parser() -> argparse.ArgumentParser:
     invite_create.add_argument("--expires", help="When the link stops working: a duration (2h, 7d) or an ISO date/time")
     invite_create.add_argument("--usage-limit", dest="usage_limit", type=positive_int, metavar="N", help="How many people may join through it")
     invite_create.add_argument("--request-needed", dest="request_needed", action="store_true", help="Joining through it needs an admin's approval")
+    invite_create.add_argument("--yes", action="store_true", help=yes_help)
     invite_revoke = invite_kinds.add_parser("revoke", help="Revoke an invite link (y/N); the link is redacted everywhere but the flag")
     invite_revoke.add_argument("--chat", required=True, help=chat_help)
     invite_revoke.add_argument("--link", required=True, help="The link to revoke, as `invite list` printed it")
+    invite_revoke.add_argument("--yes", action="store_true", help=yes_help)
 
     settings_parser = subparsers.add_parser("settings", help="A chat's or topic's settings: show, set")
     settings_kinds = settings_parser.add_subparsers(dest="settings_kind")
@@ -405,6 +416,7 @@ def build_parser() -> argparse.ArgumentParser:
         folder_parser.add_argument("--include", action="append", metavar="CHAT", help=f"A chat the folder holds; repeatable, and it replaces the list. {chat_help}. `none` empties it")
         folder_parser.add_argument("--exclude", action="append", metavar="CHAT", help="A chat the folder leaves out; repeatable, replaces the list, `none` empties it")
         folder_parser.add_argument("--types", help=types_help)
+        folder_parser.add_argument("--yes", action="store_true", help=yes_help)
     folders_delete = folders_kinds.add_parser("delete", help="Delete a folder (dry-run by default; --execute asks for its exact title)")
     folders_delete.add_argument("--id", dest="folder_id", required=True, type=positive_int, help="The folder id `folders list` prints")
     folders_delete.add_argument("--execute", action="store_true", help="Actually delete it after typing its exact title")
@@ -449,6 +461,8 @@ def build_parser() -> argparse.ArgumentParser:
     for verb, text in (("remove", "Delete a rule file (y/N)"), ("enable", "Turn a rule on"), ("disable", "Turn a rule off, keeping the file")):
         named = rules_kinds.add_parser(verb, help=text)
         named.add_argument("--name", required=True, help="The rule's name")
+        if verb == "remove":
+            named.add_argument("--yes", action="store_true", help=yes_help)
     rules_test = rules_kinds.add_parser("test", help="Say what a recorded event would do, firing nothing and asking no host")
     rules_test.add_argument("--event", required=True, metavar="FILE", help="A JSON file holding one recorded event")
     rules_test.add_argument("--name", help="Only this rule; without it, every loaded rule")
@@ -467,6 +481,7 @@ def build_parser() -> argparse.ArgumentParser:
     schedule_cancel = schedule_kinds.add_parser("cancel", help="Cancel one scheduled message (y/N)")
     schedule_cancel.add_argument("--id", dest="schedule_id", required=True, metavar="ID", help="The id `schedule list` printed")
     schedule_cancel.add_argument("--chat", help="The chat it is in, for one Telegram is holding; omit for one of this runner's own")
+    schedule_cancel.add_argument("--yes", action="store_true", help=yes_help)
 
     bots_parser = subparsers.add_parser("bots", help="List the bots you own and edit their BotFather settings")
     bots_parser.add_argument("--bot", help="Bot nickname from TELEGRAM_BOT_TOKENS, @username, or numeric ID")
@@ -2509,6 +2524,21 @@ def _run_migrate(profile, *, report: Reporter, read, write, home: Path | None) -
 # -- folders (section 13, the account's own shelf over its chat list) ----------
 
 
+def _yes_or(args, preview: str, ask, *, report: Reporter) -> bool:
+    """The y/N a write asks, or `--yes` having answered it already.
+
+    The preview prints either way, on the stream the prompt would have used,
+    so a log of an unattended run still shows what was about to change. `ask`
+    is called only without `--yes`, because under `--json` with no terminal it
+    refuses (`APPROVAL_REQUIRED`) rather than blocking, and `--yes` is the
+    answer to exactly that.
+    """
+    if getattr(args, "yes", False):
+        report.info(preview)
+        return True
+    return ask()
+
+
 async def _run_folders(client, args, *, report: Reporter) -> int:
     """One `folders` verb, behind the steps every write here takes.
 
@@ -2620,7 +2650,7 @@ async def _run_folders(client, args, *, report: Reporter) -> int:
         if not answered:
             report.info("That is not the title; nothing was changed.")
     else:
-        answered = message_ops.confirm_prompt_y(preview, **report.confirm_io())
+        answered = _yes_or(args, preview, lambda: message_ops.confirm_prompt_y(preview, **report.confirm_io()), report=report)
     if not answered:
         report.printed_result({"command": f"folders {verb}", "folder": shown.to_dict(), "dry_run": False, "executed": False, "cancelled": True}, status="cancelled")
         return 1
@@ -2884,7 +2914,7 @@ async def _run_manage(client, args, *, report: Reporter) -> int:
             if not answered:
                 report.info("That is not the title; nothing was changed.")
     else:
-        answered = message_ops.confirm_prompt_y(preview, **report.confirm_io())
+        answered = _yes_or(args, preview, lambda: message_ops.confirm_prompt_y(preview, **report.confirm_io()), report=report)
     if not answered:
         outcome = manage_ops.Outcome(op.command, resolved.id, member, cancelled=True)
         report.printed_result(outcome.to_dict(), status="cancelled")
@@ -3271,7 +3301,7 @@ async def _run_watch_rules(args, config, *, report: Reporter) -> int:
     plan = _watch_plan(identity, "watch rules remove", "rule.remove", {"name": name})
     report.set_plan(plan)
     preview = watch_ops.format_rules([_rules.load_rule(stored, source=path.name)], paths.rules)
-    if not watch_ops.confirm(preview, f"Delete {path.name}?", **report.confirm_io()):
+    if not _yes_or(args, preview, lambda: watch_ops.confirm(preview, f"Delete {path.name}?", **report.confirm_io()), report=report):
         report.result({**plan.describe(), "removed": None, "cancelled": True}, status="cancelled")
         return 1
     path.unlink()
@@ -3465,7 +3495,7 @@ async def _run_schedule_cancel(args, schedules, identity: Identity, *, client, r
         for warning in warnings:
             report.warn(warning)
         preview = watch_ops.format_schedules([row], [])
-        if not watch_ops.confirm(preview, f"Cancel scheduled message {schedule_id}?", **report.confirm_io()):
+        if not _yes_or(args, preview, lambda: watch_ops.confirm(preview, f"Cancel scheduled message {schedule_id}?", **report.confirm_io()), report=report):
             report.result({**plan.describe(), "cancelled_schedule": None, "cancelled": True}, status="cancelled")
             return 1
         await client(DeleteScheduledMessagesRequest(peer=resolved.input_entity, id=[int(schedule_id)]))
@@ -3494,7 +3524,8 @@ async def _run_schedule_cancel(args, schedules, identity: Identity, *, client, r
         {"schedule": stored.id, "guarantee": stored.guarantee},
     )
     report.set_plan(plan)
-    if not watch_ops.confirm(watch_ops.format_schedules([], [row]), f"Cancel schedule {stored.id}?", **report.confirm_io()):
+    preview = watch_ops.format_schedules([], [row])
+    if not _yes_or(args, preview, lambda: watch_ops.confirm(preview, f"Cancel schedule {stored.id}?", **report.confirm_io()), report=report):
         report.result({**plan.describe(), "cancelled_schedule": None, "cancelled": True}, status="cancelled")
         return 1
     schedules.cancel(stored.id)

@@ -255,6 +255,29 @@ ALLOWED_ADDITIONS = {
         "[--at TIME]",
         "--at TIME Hand it to Telegram to post at this ISO 8601 moment; Telegram holds it and posts it with this machine off",
     ),
+    # The --yes-on-y/N card (agent-bo-95422198): every command whose only gate
+    # was an interactive y/N takes `--yes`, as its Discord counterpart does.
+    # The preview still prints; the typed-label and typed-title gates gain
+    # nothing. One entry per parser, so the words are struck from that help only.
+    **{
+        key: ("[--yes]", "--yes Skip the y/N; the preview still prints")
+        for key in (
+            "admin-promote",
+            "admin-rights",
+            "member-unban",
+            "member-mute",
+            "member-unmute",
+            "member-restrict",
+            "join-requests-approve",
+            "join-requests-decline",
+            "invite-create",
+            "invite-revoke",
+            "folders-create",
+            "folders-edit",
+            "watch-rules-remove",
+            "schedule-cancel",
+        )
+    },
 }
 
 ALLOWED_REWRITES = {

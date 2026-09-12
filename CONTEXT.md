@@ -78,10 +78,11 @@ The terms this codebase uses, and the boundaries they imply.
   `--yes` bound to the chat the write *lands in*; `structure apply` = dry-run
   default + `--execute` + the target's exact title, no `--yes`, a terminal
   required in either mode; `member ban` and `admin demote` = the same gate on
-  a person, their exact label typed; every other administration write = a
-  `y/N` with no `--yes`; `schedule post`, `schedule cancel` and `watch rules
-  remove` = a `y/N` with no `--yes` either, because nothing unattended should
-  write a rule or a schedule. The menu builds the same args the flags would and never sets
+  a person, their exact label typed; every other administration write,
+  `folders create`/`edit`, `watch rules remove` and `schedule cancel` = a
+  `y/N` that `--yes` answers with the preview still printed and no allowlist
+  (the plan's approval kind stays `prompt_y`); `schedule post` = a `y/N` with
+  no `--yes`, because nothing unattended should write a schedule. The menu builds the same args the flags would and never sets
   `yes`/`execute` itself — it is never a shorter path past a gate.
 - **Message verb** — one of the fifteen things `message` does to a message
   (`messages.VERBS`). Each is an `Op`: its approval kind, the rights its plan

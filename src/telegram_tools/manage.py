@@ -10,8 +10,9 @@ audit line. What is specific to these commands is settled in this module:
   rights (`admin demote`) or every topic a chat has (`settings set --forum
   off`) is `typed_name`: dry-run by default, `--execute`, the exact label or
   title typed at a terminal, no `--yes`, and a terminal in either mode.
-  Everything else is `prompt_y` and has no `--yes` either, because no
-  allowlist exists for an admin action.
+  Everything else is `prompt_y`, and `--yes` answers it (the preview still
+  prints, the approval kind stays `prompt_y`); no allowlist applies, because
+  none exists for an admin action.
 * **A setting's scope decides its right.** `settings set` on a chat needs
   `change_info`; on a topic it needs `manage_topics`, and the flags of one
   scope are a usage error in the other. Every `set` reads the fields before

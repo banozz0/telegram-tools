@@ -465,6 +465,35 @@ def test_admin_rights_edits_an_existing_admin_and_promote_refuses_one(run_cli, c
     assert mutations(fake) == ["EditAdminRequest"]
 
 
+# Every y/N verb takes `--yes` (card agent-bo-95422198), as its Discord
+# counterpart does. The proof it skipped the prompt: no terminal under --json
+# would otherwise be APPROVAL_REQUIRED, and the typed answer is "n".
+YES_VERBS = {
+    "admin promote": ["admin", "promote", "--chat", FORUM, "--user", "@harry", "--rights", "pin_messages", "--yes"],
+    "admin rights": ["admin", "rights", "--chat", FORUM, "--user", "@dobby", "--rights", "ban_users", "--yes"],
+    "member unban": ["member", "unban", "--chat", FORUM, "--user", "@troll", "--yes"],
+    "member mute": ["member", "mute", "--chat", FORUM, "--user", "@harry", "--until", "2h", "--yes"],
+    "member unmute": ["member", "unmute", "--chat", FORUM, "--user", "@troll", "--yes"],
+    "member restrict": ["member", "restrict", "--chat", FORUM, "--user", "@harry", "--rights", "send_media", "--until", "2h", "--yes"],
+    "join-requests approve": ["join-requests", "approve", "--chat", FORUM, "--user", "@newbie", "--yes"],
+    "join-requests decline": ["join-requests", "decline", "--chat", FORUM, "--user", "@newbie", "--yes"],
+    "invite create": ["invite", "create", "--chat", FORUM, "--title", "night", "--yes"],
+    "invite revoke": ["invite", "revoke", "--chat", FORUM, "--link", INVITE, "--yes"],
+}
+
+
+@pytest.mark.parametrize("command", sorted(YES_VERBS))
+def test_yes_answers_the_prompt_and_the_preview_still_prints(run_cli, capsys, home, command):
+    code, out, err, fake = run_cli(["--json", *YES_VERBS[command]], client=PeopledClient(), capsys=capsys, isatty=False, answer="n")
+    assert code == 0, out
+    envelope = envelope_of(out)
+    assert envelope["status"] == "ok" and envelope["plan"]["approval"] == "prompt_y"
+    assert "Do it? [y/N]" not in err
+    assert "Team Hermes" in err  # the preview went to stderr, as the prompt's would have
+    assert mutations(fake) != []
+    assert [line["command"] for line in audit_lines(home)] == [command]
+
+
 def test_a_declined_prompt_changes_nothing(run_cli, capsys, home):
     code, out, _err, fake = run_cli(["--json", "member", "mute", "--chat", FORUM, "--user", "@harry", "--until", "2h"], client=PeopledClient(), capsys=capsys, isatty=True, answer="n")
     assert code == 1 and envelope_of(out)["status"] == "cancelled"

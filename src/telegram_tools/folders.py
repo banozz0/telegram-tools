@@ -17,10 +17,10 @@ chat list -- Telegram calls it a dialog filter -- and four verbs manage them:
   include list afterwards, the way `admin rights` sets exactly the rights
   named; `--include none` empties it. A field no flag names is left alone,
   and that includes the pinned chats, which this tool never reorders.
-* **Which gate.** `create` and `edit` are `prompt_y` with no `--yes`, because
-  nothing unattended should reshape a chat list. `delete` is `typed_name`: a
-  folder is a container, so it dry-runs by default, takes `--execute` plus the
-  folder's exact title at a terminal, and has no `--yes` either.
+* **Which gate.** `create` and `edit` are `prompt_y`, and `--yes` answers it
+  with the preview still printed. `delete` is `typed_name`: a folder is a
+  container, so it dry-runs by default, takes `--execute` plus the folder's
+  exact title at a terminal, and has no `--yes`.
 * **A shared folder is listed, never edited.** A folder someone handed over as
   a chatlist invite carries no exclude list and no categories, so the edit
   Telegram would accept is not the folder that comes back; both `edit` and

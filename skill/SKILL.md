@@ -1,7 +1,7 @@
 ---
 name: telegram-tools
 description: "Use when you need the real numeric ID of a Telegram chat, channel, group or forum topic — 'what's the ID of that topic?', 'which chat is -100…?', 'where do I send this?' — when the user wants their own Telegram messages searched or exported (JSON, CSV, JSONL, Markdown, HTML), when a history question can be answered from the local archive instead of a fresh fetch, when a message must be posted to a chat or topic the user has allowlisted, when a message the user named should get a reply, a reaction, a pin, or be forwarded, copied or bookmarked, when the user asks who the admins of a chat are, who is waiting to join, which invite links exist, what a chat's or a topic's settings are, or which chat folders they have, or when they want a message posted at a set time or a rule that alerts them when something happens in a chat."
-version: 1.13.0
+version: 1.14.0
 author: banozz0
 license: MIT
 platforms: [macos]
@@ -187,10 +187,10 @@ not drive either through the menu, a pty, or a piped answer; hand the user the c
 and relay the dry-run (no `--execute`), which is safe to run and shows who would be
 affected. The other administration writes — `admin promote`, `admin rights`, `member
 unban`, `mute`, `unmute`, `restrict`, `join-requests approve` and `decline`, `invite
-create` and `revoke`, `settings set` (except `--forum off`) — ask `y/N` and have no `--yes`, so from an agent
-session they block; run one only when the user asked for that exact change of that
-exact person or link in this conversation, and expect to hand it over rather than
-answer for them. Never add `--reason` on the user's behalf, never pick an `--until`
+create` and `revoke`, `settings set` (except `--forum off`) — ask `y/N`, and `--yes`
+answers it with the same preview printed and no allowlist. Pass `--yes` only when the
+user asked for that exact change of that exact person or link in this conversation;
+otherwise hand them the command without it. Never add `--reason` on the user's behalf, never pick an `--until`
 the user did not give, and never guess a person: `member list` and `admin list` show
 ids and usernames. The reads — `admin list`, `member list`, `join-requests list`,
 `invite list`, `settings show` (with or without `--topic`) — are yours to run. `invite list` prints real invite
@@ -210,9 +210,9 @@ is safe and shows what would go.
 **15. Folders are the user's chat list, and reshaping it is theirs.** `folders list` is
 yours to run and answers "which folders do I have, and what's in each"; the rids it
 prints (`tg:folder:2`) are what `--id` takes. `folders create`, `edit` and `delete`
-change what the user sees every time they open Telegram, and none of the three has a
-`--yes`, so from an agent session they block — propose the exact command and hand it
-over. Two things to say accurately rather than guess: `--include`, `--exclude` and
+change what the user sees every time they open Telegram: `create` and `edit` take
+`--yes` for a folder the user described in this conversation, `delete` has none and
+blocks — propose the exact command and hand it over. Two things to say accurately rather than guess: `--include`, `--exclude` and
 `--types` **replace** the folder's lists rather than adding to them, so an edit that
 names one chat leaves the folder holding that one chat; and a folder listed as `shared`
 came from a chatlist invite and refuses `edit` and `delete` by name — that one is
@@ -224,8 +224,8 @@ on the user's account without them present, so propose the exact command and let
 run it; the same for `watch run`, which is a process they start and stop, and which
 blocks until they do. The reads are yours: `watch rules list`, `watch status`,
 `schedule list`, and `watch rules test --event FILE`, which says what a recorded event
-*would* do and fires none of it. `watch rules remove` asks `y/N` and has no `--yes`,
-so from an agent session it blocks — hand it over. Every schedule in `result` carries
+*would* do and fires none of it. `watch rules remove` asks `y/N` or takes `--yes`;
+pass it only for a rule the user named. Every schedule in `result` carries
 `guarantee`: `server-held` means Telegram holds the message and will post it with the
 user's machine off; `runner-held: fires only while watch run is up on this machine`
 means it will not post unless their runner is running. Quote the field, do not
@@ -337,15 +337,15 @@ names the files).
 | "what's the slow mode / do people need approval to join?" | `telegram-tools --json settings show --chat <id>` — reads only |
 | "what is that topic called / is it closed?" | `telegram-tools --json settings show --chat <id> --topic <topic-id>` — reads only |
 | "which folders do I have?" / "what's in that folder?" | `telegram-tools --json folders list` — reads only |
-| "make X an admin" / "let X pin things" (they named the person and the rights) | hand them `telegram-tools admin promote --chat <id> --user <@x> --rights pin_messages` — rule 13, it asks y/N |
+| "make X an admin" / "let X pin things" (they named the person and the rights) | `telegram-tools --json admin promote --chat <id> --user <@x> --rights pin_messages --yes` — rule 13; without `--yes` it asks y/N |
 | "ban X" / "remove X as admin" | hand them `telegram-tools member ban --chat <id> --user <@x> --execute` or `admin demote … --execute` — rule 13, they type the label; the dry-run without `--execute` is yours to show |
-| "mute X for an hour" / "let X back in" | hand them `telegram-tools member mute --chat <id> --user <@x> --until 1h` / `member unmute …` — rule 13 |
-| "let X in" / "turn X down" (a join request) | hand them `telegram-tools join-requests approve --chat <id> --user <@x>` or `… decline …` — rule 13 |
-| "make an invite link" / "kill that link" | hand them `telegram-tools invite create --chat <id> --expires 7d` or `invite revoke --chat <id> --link <link>` — rule 13 |
+| "mute X for an hour" / "let X back in" | `telegram-tools --json member mute --chat <id> --user <@x> --until 1h --yes` / `member unmute … --yes` — rule 13, the `--until` is theirs |
+| "let X in" / "turn X down" (a join request) | `telegram-tools --json join-requests approve --chat <id> --user <@x> --yes` or `… decline … --yes` — rule 13 |
+| "make an invite link" / "kill that link" | `telegram-tools --json invite create --chat <id> --expires 7d --yes` or `invite revoke --chat <id> --link <link> --yes` — rule 13; the link is in `result` once |
 | "set slow mode to a minute" | hand them `telegram-tools settings set --chat <id> --slow-mode 60` — rule 13 |
 | "rename that topic / close it" | hand them `telegram-tools settings set --chat <id> --topic <topic-id> --title "..." --closed on` — rule 13 |
 | "turn topics off for that group" | hand them `telegram-tools settings set --chat <id> --forum off --execute` — they type the chat's title; every topic goes. Rule 13 |
-| "make me a folder for X" / "change that folder" | hand them `telegram-tools folders create --title X --include <id> --types groups` or `folders edit --id <n> …` — rule 15; the lists replace |
+| "make me a folder for X" / "change that folder" | `telegram-tools --json folders create --title X --include <id> --types groups --yes` or `folders edit --id <n> … --yes` — rule 15; the lists replace |
 | "delete that folder" | hand them `telegram-tools folders delete --id <n> --execute` — they type its exact title, and the chats on it stay. Rule 15 |
 | "what am I watching for?" / "what rules do I have?" | `telegram-tools --json watch rules list` — offline |
 | "is the watcher running?" | `telegram-tools --json watch status` — offline; reports the holder, the last tick and the rules loaded |
@@ -354,7 +354,7 @@ names the files).
 | "what's scheduled?" | `telegram-tools --json schedule list --chat <id>` — quote each row's `guarantee` verbatim |
 | "send this tomorrow at 9" (allowlisted) | `telegram-tools --json send --chat <id> --text "..." --at 2026-09-09T09:00 --yes` — Telegram holds it (`server-held`); account only |
 | "post this every Monday at 9" | hand them `telegram-tools schedule post --chat <id> --text "..." --every "0 9 * * mon"` — rule 14; it is `runner-held`, so say it fires only while `watch run` is up |
-| "cancel that scheduled message" | hand them `telegram-tools schedule cancel --id <id>` (add `--chat <id>` for one Telegram holds) — rule 14, it asks y/N |
+| "cancel that scheduled message" | `telegram-tools --json schedule cancel --id <id> --yes` (add `--chat <id>` for one Telegram holds) — rule 14 |
 | "make me a group with topics" (they asked) | `telegram-tools create group --title "..." --forum --yes` |
 | "add a topic to that group" (they asked) | `telegram-tools create topic --chat <id> --title "..." --yes` |
 | "delete that topic/group" | hand them `telegram-tools delete topic --chat <id> --topic <id> --execute` — rule 4, they run it |
@@ -463,23 +463,25 @@ names the files).
 - **`member ban --execute` and `admin demote --execute`** — a person's membership or
   rights, for everyone, behind their exact label typed at a terminal, with no `--yes`.
   Rule 13. The dry-run (no `--execute`) and the five reads are fine to run; the other
-  administration writes ask `y/N` and are the user's to answer.
+  administration writes ask `y/N`, or take `--yes` when the user asked for exactly that.
 - **`settings set --forum off --execute`** — every topic in the group stops existing
   and its messages become one stream, behind the chat's exact title typed at a
   terminal, with no `--yes`. Rule 13. Its dry-run (no `--execute`) is fine to run;
   `--forum on` and every other `settings set` asks `y/N` and is the user's to answer.
-- **`folders create`, `folders edit`, `folders delete`** — they reshape the chat list
-  the user sees every time they open Telegram, and none has a `--yes`, so from an
-  agent session they block. Rule 15. `folders list` is the read-only half and is fine
-  to run; a folder marked `shared` refuses the two writes by name.
+- **`folders delete`** — it reshapes the chat list the user sees every time they open
+  Telegram, behind the folder's exact title typed at a terminal, with no `--yes`. Rule
+  15. `folders create` and `edit` take `--yes` for a folder the user described;
+  `folders list` is the read-only half and is fine to run; a folder marked `shared`
+  refuses the two writes by name.
 - **`watch rules add`, `edit`, `enable`, `disable`, `remove`, and `watch run`** — the
   first five write a file that acts on the user's account without them present, and
   `watch run` is a long-running process they start and stop (it blocks until they do).
   Rule 14. `watch rules list`, `watch status`, `schedule list` and `watch rules test`
   are the read-only half and are fine to run.
-- **`schedule post` and `schedule cancel`** — each asks `y/N` and has no `--yes`, so
-  from an agent session they block. Rule 14; hand the user the command. `send --at` is
-  a `send` and follows rule 2: allowlisted destination, `--yes`, and the user asked.
+- **`schedule post`** — it asks `y/N` and has no `--yes`, so from an agent session it
+  blocks. Rule 14; hand the user the command. `schedule cancel --yes` cancels one the
+  user named. `send --at` is a `send` and follows rule 2: allowlisted destination,
+  `--yes`, and the user asked.
 - **`archive retention` and `archive forget`** — they remove rows from the user's
   local archive. Dry-run is the default and executing needs `--execute` plus the
   scope's exact title typed at a prompt, with no `--yes`; hand the user the command.
