@@ -187,8 +187,9 @@ not drive either through the menu, a pty, or a piped answer; hand the user the c
 and relay the dry-run (no `--execute`), which is safe to run and shows who would be
 affected. The other administration writes — `admin promote`, `admin rights`, `member
 unban`, `mute`, `unmute`, `restrict`, `join-requests approve` and `decline`, `invite
-create` and `revoke`, `settings set` (except `--forum off`) — ask `y/N`, and `--yes`
-answers it with the same preview printed and no allowlist. Pass `--yes` only when the
+create` and `revoke`, `settings set` (except `--forum off`) — ask `y/N`; all but
+`settings set` take `--yes`, which answers it with the same preview printed and no
+allowlist, and `settings set` stays the user's to answer. Pass `--yes` only when the
 user asked for that exact change of that exact person or link in this conversation;
 otherwise hand them the command without it. Never add `--reason` on the user's behalf, never pick an `--until`
 the user did not give, and never guess a person: `member list` and `admin list` show

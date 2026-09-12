@@ -2521,9 +2521,6 @@ def _run_migrate(profile, *, report: Reporter, read, write, home: Path | None) -
     return 0
 
 
-# -- folders (section 13, the account's own shelf over its chat list) ----------
-
-
 def _yes_or(args, preview: str, ask, *, report: Reporter) -> bool:
     """The y/N a write asks, or `--yes` having answered it already.
 
@@ -2537,6 +2534,9 @@ def _yes_or(args, preview: str, ask, *, report: Reporter) -> bool:
         report.info(preview)
         return True
     return ask()
+
+
+# -- folders (section 13, the account's own shelf over its chat list) ----------
 
 
 async def _run_folders(client, args, *, report: Reporter) -> int:
