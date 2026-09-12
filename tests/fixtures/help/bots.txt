@@ -22,18 +22,8 @@ options:
   --remove-photo        Remove the current profile photo (needs a bot token)
   --group-rights GROUP_RIGHTS
                         Default admin rights for groups, comma-separated, or
-                        none (needs a bot token). Valid names: change_info,
-                        post_messages, edit_messages, delete_messages,
-                        ban_users, invite_users, pin_messages, add_admins,
-                        anonymous, manage_call, other, manage_topics,
-                        post_stories, edit_stories, delete_stories,
-                        manage_direct_messages, manage_ranks
+                        none (needs a bot token). Valid names: <admin rights>
   --channel-rights CHANNEL_RIGHTS
                         Default admin rights for channels, comma-separated, or
-                        none (needs a bot token). Valid names: change_info,
-                        post_messages, edit_messages, delete_messages,
-                        ban_users, invite_users, pin_messages, add_admins,
-                        anonymous, manage_call, other, manage_topics,
-                        post_stories, edit_stories, delete_stories,
-                        manage_direct_messages, manage_ranks
+                        none (needs a bot token). Valid names: <admin rights>
   --yes                 Skip the confirmation prompt

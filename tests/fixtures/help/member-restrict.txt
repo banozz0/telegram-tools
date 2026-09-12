@@ -6,11 +6,6 @@ options:
   --chat CHAT      The chat: numeric ID, @username, or link
   --user USER      The person: numeric ID or @username
   --rights RIGHTS  Comma-separated rights to take away. Valid names:
-                   change_info, edit_rank, embed_links, invite_users,
-                   manage_topics, pin_messages, send_audios, send_docs,
-                   send_games, send_gifs, send_inline, send_media,
-                   send_messages, send_photos, send_plain, send_polls,
-                   send_reactions, send_roundvideos, send_stickers,
-                   send_videos, send_voices, view_messages
+                   <banned rights>
   --until UNTIL    When it ends: a duration (30m, 2h, 7d, 1w) or an ISO
                    date/time; at least a minute, at most a year

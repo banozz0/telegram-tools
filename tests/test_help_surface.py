@@ -22,6 +22,11 @@ Two relaxations, both deliberate:
   what the fixture says, keyed by the parser, and the substitution runs before
   the comparison. It is the narrower relaxation on purpose: an addition can
   only add, a rewrite can hide a removal, so every entry carries its reason.
+* The rights lists are Telethon's, not this tool's. Four help texts spell
+  every admin or banned right read off `ChatAdminRights`/`ChatBannedRights` at
+  import, so a Telethon release that adds a right would fail the freeze with no
+  flag having moved (1.45.0 did exactly that). `RIGHTS_LISTS` replaces the live
+  spelling with a marker, and the fixtures carry the marker.
 * Whitespace is squeezed to single spaces on both sides. `--json [JSON_OUTPUT]`
   is two characters wider than `--json JSON_OUTPUT`, and argparse widens the
   whole help column of that parser to match, so a byte comparison would fail on
@@ -38,6 +43,7 @@ from pathlib import Path
 
 import pytest
 
+from telegram_tools import bots, manage
 from telegram_tools.cli import build_parser
 
 FIXTURES = Path(__file__).parent / "fixtures" / "help"
@@ -334,6 +340,14 @@ ALLOWED_REWRITES = {
 # brackets in both the usage line and the option list.
 OPTIONAL_PATH = re.compile(r"\[([A-Z_]+)\]")
 
+# Telethon's rights, as each help text spells them after squeezing: `bots` in
+# signature order, the administration commands sorted. Each becomes its marker.
+RIGHTS_LISTS = (
+    (", ".join(bots.right_names()), "<admin rights>"),
+    (", ".join(manage.ADMIN_RIGHT_NAMES), "<admin rights>"),
+    (", ".join(manage.BANNED_RIGHT_NAMES), "<banned rights>"),
+)
+
 
 def render(parts: tuple[str, ...]) -> str:
     parser = build_parser()
@@ -348,8 +362,12 @@ def squeeze(text: str) -> str:
 
 
 def normalise(text: str) -> str:
-    """The help as this test compares it: whitespace squeezed, an optional path spelled plainly."""
-    return OPTIONAL_PATH.sub(r"\1", squeeze(text))
+    """The help as this test compares it: whitespace squeezed, an optional path
+    spelled plainly, Telethon's rights lists replaced by their markers."""
+    text = OPTIONAL_PATH.sub(r"\1", squeeze(text))
+    for spelling, marker in RIGHTS_LISTS:
+        text = text.replace(spelling, marker)
+    return text
 
 
 @pytest.fixture(autouse=True)

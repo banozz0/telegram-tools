@@ -3,6 +3,7 @@ from pathlib import Path
 
 from telegram_tools import menu
 from telegram_tools._core.columns import width
+from telegram_tools.bots import IMPLICIT_OTHER_RIGHT, right_names
 from telegram_tools.config import ConfigError
 from telegram_tools.models import BotCommandInfo, BotInfo, ChatChoice, TopicInfo
 
@@ -827,8 +828,10 @@ def test_bot_edit_rights_toggle_with_a_token():
     session = FakeSession(bot_tokens={"harry": "12345:AAtoken"})
     # 6 = group rights, 2 = change, then the toggle: post_messages is preselected
     # (row 2 of page 1), tick change_info (row 1), Continue is numbered after
-    # every right (16 of them) on every page.
-    answers = [BOTS_ROW, "1", "1", "6", "2", "1", "18", "8", "", "0", "0"]
+    # every right and Select all on every page. Telethon spells the rights, and a
+    # release that adds one moves the row, so it is computed and never typed.
+    continue_row = str(len([name for name in right_names() if name != IMPLICIT_OTHER_RIGHT]) + 2)
+    answers = [BOTS_ROW, "1", "1", "6", "2", "1", continue_row, "8", "", "0", "0"]
     _code, calls, _output = run_menu(answers, session=session)
 
     assert calls[0].group_rights == "change_info,post_messages"
