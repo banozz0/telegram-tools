@@ -4,6 +4,11 @@ All notable changes to this project will be documented here.
 
 This project follows a practical changelog style: user-visible changes, safety changes, and release notes belong here; active task tracking belongs outside the repo.
 
+## 3.21.0 - 2026-09-12
+
+- **`profiles remove`: a profile off this machine.** `telegram-tools profiles remove --name work` deletes the profile's session file and its record, behind the profile's exact name typed at a terminal, refused without one in either mode, no `--yes` — the gate `auth --logout` already has. It is the local half only: Telegram is not told, so it is for a profile that was logged out already, or whose login was ended from the phone. The profile the run acts as refuses with `SESSION_IN_USE` while it is logged in, pointing at `auth --logout`, and a name nobody logged in refuses with `CONFIG_MISSING`. The result carries a count of files removed, never a path. Until now a stale profile could only be removed by hand.
+- **Menu.** Row 8 › Identity's first row opens a *Profiles* screen with three rows, as the sibling tool's has: *List them*, *Switch profile* (the rest of the session acts as the chosen login; the connection and everything learned through it are dropped and reopened on the next screen that needs them) and *Remove a profile* (a pick-list, then the name at the CLI's own prompt). The root screen is unchanged, so no transcript is re-recorded.
+
 ## 3.20.0 - 2026-09-12
 
 - **`leave`: this account out of a group or channel.** `telegram-tools leave --chat @teamhermes` dry-runs; `--execute` asks for the chat's exact title at a terminal, refuses without one in either mode, and has no `--yes`. Nothing is deleted and everyone else stays — what goes is your seat, and getting back in takes an invite, a public username or someone inside adding you. A supergroup or channel is left through Telegram's own leave; a basic group by removing yourself from it; a private chat is refused, because it has no seat to give up. Until now the only way out was the Telegram app.

@@ -104,6 +104,19 @@ class FakeSession:
         self.closed = True
         self.banner = None
 
+    # The named logins on this machine, as the Profiles screen sees them, and
+    # the switch that changes which one the rest of the session acts as.
+    @property
+    def profile(self):
+        return self.config.profile
+
+    def profile_names(self):
+        return list(getattr(self, "_profile_names", ["default", "work"]))
+
+    async def switch_profile(self, name):
+        await self.release()
+        self.config.profile = name
+
 
 # What the remap picker sees: `(apply id, label)`.
 APPLIES = [("a1b2c3d4e5f60718", "a1b2c3d4e5f60718  2026-09-06T10:00:00Z  blueprint 0123456789abcdef")]
@@ -148,6 +161,9 @@ MANAGE = "6"
 WATCH = "7"
 IDENTITY = "8"
 PROFILES = ("8", "1")
+PROFILES_LIST = ("8", "1", "1")
+PROFILES_SWITCH = ("8", "1", "2")
+PROFILES_REMOVE = ("8", "1", "3")
 LOG_IN = ("8", "2")
 LOG_IN_QR = ("8", "3")
 LOG_OUT = ("8", "4")
@@ -1792,7 +1808,7 @@ def test_identity_lists_the_profile_rows_and_my_bots():
     _code, _calls, output = run_menu([IDENTITY, "0", "0"])
 
     text = screens(output)
-    assert "1. Profiles on this machine" in text
+    assert "1. Profiles on this machine (list, switch, remove)" in text
     assert "2. Log in (phone and code)" in text
     assert "3. Log in by scanning a QR code" in text
     assert "4. Log out" in text
@@ -1800,16 +1816,66 @@ def test_identity_lists_the_profile_rows_and_my_bots():
     assert "6. My bots" in text
 
 
+def test_identity_profiles_is_a_screen_with_list_switch_and_remove():
+    _code, _calls, output = run_menu([PROFILES, "0", "0", "0"])
+    text = screens(output)
+    assert "Main › Identity › Profiles\n" in text
+    for row in ("1. List them", "2. Switch profile", "3. Remove a profile"):
+        assert row in text, row
+
+
 def test_identity_runs_profiles_without_the_menus_connection():
     session = FakeSession()
 
-    _code, calls, _output = run_menu([PROFILES, "", "0"], session=session)
+    _code, calls, _output = run_menu([PROFILES_LIST, "", "0"], session=session)
 
     assert calls[0].command == "profiles"
+    assert calls[0].profiles_kind is None
     # It reads the store and opens nothing, so the menu keeps its connection --
     # and with it the identity line every screen after this one still carries.
     assert session.released == 0
     assert session.banner is not None
+
+
+def test_profiles_switch_lists_the_logins_marks_the_current_one_and_switches():
+    session = FakeSession()
+
+    # 2 = switch, 2 = work, then back out of Profiles, Identity and the root.
+    _code, calls, output = run_menu([PROFILES_SWITCH, "2", "0", "0", "0"], session=session)
+    text = screens(output)
+
+    assert "Main › Identity › Profiles › Switch\n" in text
+    assert "1. default  (current)" in text
+    assert "2. work" in text
+    assert session.config.profile == "work"
+    assert "Now acting as profile work." in "\n".join(output)
+    # Everything the menu learned belonged to the old account.
+    assert session.released == 1 and session.banner is None
+    assert calls == [], "a switch runs no command; the next screen that needs a client opens one"
+
+
+def test_profiles_switch_to_the_current_one_changes_nothing():
+    session = FakeSession()
+
+    _code, _calls, output = run_menu([PROFILES_SWITCH, "1", "0", "0", "0", "0"], session=session)
+
+    assert "Already on default." in "\n".join(output)
+    assert session.released == 0 and session.config.profile == "default"
+
+
+def test_profiles_remove_picks_a_name_and_runs_the_command_that_asks_for_it():
+    session = FakeSession()
+
+    # 3 = remove, 2 = work; the typed name is asked by the CLI, not here.
+    _code, calls, output = run_menu([PROFILES_REMOVE, "2", "", "0"], session=session)
+    text = screens(output)
+
+    assert "Main › Identity › Profiles › Remove\n" in text
+    assert calls[0].command == "profiles"
+    assert calls[0].profiles_kind == "remove"
+    assert calls[0].name == "work"
+    assert not hasattr(calls[0], "yes")
+    assert session.released == 0, "the command reads the store and opens nothing"
 
 
 def test_identity_hands_the_session_file_back_before_a_login():
@@ -2159,8 +2225,8 @@ def test_main_menu_after_an_action_is_the_root_not_the_group_screen():
     _code, output = journey([CREATE, "4", "1", "1", "Deploys", "", "0"])
     assert screens(output).count("Main › Build\n") == 1
 
-    # Identity: profiles, Enter, 0.
-    _code, output = journey([PROFILES, "", "0"])
+    # Identity: profiles, list, Enter, 0.
+    _code, output = journey([PROFILES_LIST, "", "0"])
     assert screens(output).count("Main › Identity\n") == 1
 
     # And 0 on the after-run screen still exits outright.

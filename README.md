@@ -103,10 +103,15 @@ appears exactly as it always has.
 ```bash
 telegram-tools profiles              # what this machine is logged in as
 telegram-tools auth --logout         # end a session, after typing the profile's name
+telegram-tools profiles remove --name work   # delete a profile you are not on, after typing its name
 ```
 
 Logging out also removes the local session; the session shows under Telegram's
-*Settings → Devices* either way.
+*Settings → Devices* either way. `profiles remove` is the local half only — the
+session file and the record go, Telegram is not told — for a profile that was logged
+out already, or one whose login you ended from the phone. The profile the run acts as
+refuses while it is logged in: `auth --logout` is the way off a live login. Both gates
+ask for the profile's exact name at a terminal, in either mode, and neither has `--yes`.
 
 ### More than one account
 
@@ -622,7 +627,9 @@ and the exact title is typed at the CLI's own prompt — and show an apply's rem
 *Manage* opens six screens: the five administration groups, a row per verb — the settings
 form stages every field of a chat and of a topic, and its `--forum off` row runs the
 dry-run first and asks for the chat's exact title at the CLI's own prompt — and *Folders*,
-which is the one Manage screen that picks no chat, because a folder belongs to the account. *Watch* opens four screens:
+which is the one Manage screen that picks no chat, because a folder belongs to the account. *Identity* opens *Profiles* (list them, switch which one the rest of
+the session acts as, remove one — the name is typed at the CLI's own prompt), the login
+rows and *My bots*. *Watch* opens four screens:
 *Rules* (list, add, edit, enable, disable, remove, test — the add form has a row for every
 flag the command takes, and the file it writes stays editable by hand), *Runner* (run it
 here in the foreground, its status, stop, reload), *Scheduled* (what is scheduled with its
@@ -772,6 +779,7 @@ for a code or a password. Relay the refusal and let the person run it.
 | `structure apply` | Additive on the target — makes topics and sets the chat's settings, never deletes a topic, a setting or the chat. Dry-run by default; executing needs `--execute` **and** the target's exact title typed at a terminal, in either mode; there is no `--yes`. `--create` makes a new chat of the blueprint's kind first |
 | `archive retention`, `archive forget` | Local only — prune or remove rows of the local archive, never anything on Telegram. Dry-run by default; executing needs `--execute` **and** the scope's exact title typed back; there is no `--yes` |
 | `auth` | Local only — writes or removes this machine's login. `--logout` needs the profile's name typed back, `--migrate` a `y/N`; there is no `--yes`, and it cannot run unattended. Nothing it asks for is stored: a two-step-verification password goes straight into the sign-in call |
+| `profiles remove` | Local only — deletes a profile's session file and record from this machine; Telegram is not told. Needs the profile's exact name typed at a terminal, in either mode; there is no `--yes`. The profile the run acts as refuses while it is logged in (`auth --logout` first) |
 | `create` | No — makes new things, changes nothing existing, after a `y/N` unless you pass `--yes` |
 | `send` | Outward-facing — posts publicly as you (text, files, or both), after showing the whole message and asking `y/N`. `--yes` skips the prompt only for destinations in `TELEGRAM_SEND_ALLOWLIST`. Under `--as-bot` it posts as that bot, only into chats the bot is in, behind the same preview and the same allowlist |
 | `message reply/edit/forward/copy/react/unreact/pin/unpin/poll/typing/read/unread/bookmark/draft` | Outward-facing where it posts, visible to the chat where it reacts or pins — each shows the chat and the message it acts on, then asks `y/N`; `--yes` only for a landing chat in `TELEGRAM_SEND_ALLOWLIST`. `edit` of someone else's message needs the edit right, `pin` the pin right |

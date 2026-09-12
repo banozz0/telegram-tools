@@ -1,0 +1,5 @@
+usage: telegram-tools profiles remove [-h] --name NAME
+
+options:
+  -h, --help   show this help message and exit
+  --name NAME  Profile name to remove

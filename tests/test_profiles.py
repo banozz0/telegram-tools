@@ -534,6 +534,103 @@ def test_logout_refuses_a_profile_that_was_never_logged_in(run_cli, capsys):
     assert not client.logged_out
 
 
+# -- profiles remove -------------------------------------------------------
+
+
+def test_profiles_remove_needs_the_profile_name_typed_back(run_cli, home, capsys):
+    profiles.record_login(profiles.load("work", home=home), label="Sven (@sven)", user_id=4242)
+    session = _session(home, "work")
+
+    code, out, _err, _fake = run_cli(["profiles", "remove", "--name", "work"], capsys=capsys, answers=["wrong"])
+
+    assert code == 1
+    assert session.exists()
+    assert (profiles.profile_dir("work", home) / "profile.json").exists(), "a refused gate deletes nothing"
+    assert "not the profile name" in out
+
+
+def test_profiles_remove_deletes_the_session_file_and_the_record(run_cli, home, capsys):
+    profiles.record_login(profiles.load("work", home=home), label="Sven (@sven)", user_id=4242)
+    session = _session(home, "work")
+
+    code, out, _err, client = run_cli(["--json", "profiles", "remove", "--name", "work"], capsys=capsys, answers=["work"])
+
+    envelope = json.loads(out)
+    assert code == 0
+    assert envelope["status"] == "ok"
+    assert envelope["result"] == {"profile": "work", "removed": True, "files_removed": 3}
+    assert not session.exists()
+    assert not profiles.profile_dir("work", home).exists()
+    assert "work" not in profiles.names(home)
+    assert str(home) not in out, "counts, never paths"
+    # Telegram is not told: the local half only, and no connection was opened.
+    assert not client.logged_out and client.sent_codes == []
+
+
+def test_profiles_remove_refuses_the_profile_this_run_acts_as_while_it_is_logged_in(run_cli, home, capsys):
+    profiles.record_login(profiles.load("work", home=home), label="Sven (@sven)", user_id=4242)
+    session = _session(home, "work")
+
+    code, out, _err, _fake = run_cli(
+        ["--json", "--profile", "work", "profiles", "remove", "--name", "work"], capsys=capsys, answers=["work"]
+    )
+
+    envelope = json.loads(out)
+    assert code == 2
+    assert envelope["error"]["code"] == "SESSION_IN_USE"
+    assert envelope["error"]["hint"] == "telegram-tools --profile work auth --logout"
+    assert session.exists()
+
+    # Once logged out -- no session file -- the leftover record may go.
+    session.unlink()
+    code, out, _err, _fake = run_cli(
+        ["--json", "--profile", "work", "profiles", "remove", "--name", "work"], capsys=capsys, answers=["work"]
+    )
+    assert code == 0 and json.loads(out)["result"]["files_removed"] == 2
+
+
+def test_profiles_remove_refuses_a_name_nobody_logged_in(run_cli, capsys):
+    code, out, _err, _fake = run_cli(["--json", "profiles", "remove", "--name", "ghost"], capsys=capsys, answers=["ghost"])
+
+    envelope = json.loads(out)
+    assert code == 2
+    assert envelope["error"]["code"] == "CONFIG_MISSING"
+    assert envelope["error"]["hint"] == "telegram-tools profiles"
+
+
+def test_profiles_remove_refuses_without_a_terminal_in_either_mode(run_cli, home, capsys):
+    profiles.record_login(profiles.load("work", home=home), label="Sven (@sven)", user_id=4242)
+    session = _session(home, "work")
+
+    code, out, _err, _fake = run_cli(
+        ["--json", "profiles", "remove", "--name", "work"], capsys=capsys, answers=["work"], isatty=False
+    )
+    assert (code, json.loads(out)["error"]["code"]) == (3, "APPROVAL_REQUIRED")
+
+    code, _out, err, _fake = run_cli(["profiles", "remove", "--name", "work"], capsys=capsys, answers=["work"], isatty=False)
+    assert code == 3 and "terminal" in err
+    assert session.exists()
+
+
+def test_profiles_remove_takes_no_yes(run_cli, capsys):
+    code, _out, err, _fake = run_cli(["profiles", "remove", "--name", "work", "--yes"], capsys=capsys)
+
+    assert code == 2
+    assert "unrecognized arguments: --yes" in err
+
+
+def test_profiles_remove_needs_no_credentials(run_cli, home, monkeypatch, capsys):
+    for key in ("TELEGRAM_API_ID", "TELEGRAM_API_HASH"):
+        monkeypatch.delenv(key, raising=False)
+    profiles.record_login(profiles.load("work", home=home), label="Sven (@sven)", user_id=4242)
+    _session(home, "work")
+
+    code, _out, _err, _fake = run_cli(["profiles", "remove", "--name", "work"], capsys=capsys, answers=["work"])
+
+    assert code == 0
+    assert not profiles.profile_dir("work", home).exists()
+
+
 # -- auth --migrate --------------------------------------------------------
 
 

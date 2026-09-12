@@ -1,7 +1,7 @@
 ---
 name: telegram-tools
 description: "Use when you need the real numeric ID of a Telegram chat, channel, group or forum topic — 'what's the ID of that topic?', 'which chat is -100…?', 'where do I send this?' — when the user wants their own Telegram messages searched or exported (JSON, CSV, JSONL, Markdown, HTML), when a history question can be answered from the local archive instead of a fresh fetch, when a message must be posted to a chat or topic the user has allowlisted, when a message the user named should get a reply, a reaction, a pin, or be forwarded, copied or bookmarked, when the user asks who the admins of a chat are, who is waiting to join, which invite links exist, what a chat's or a topic's settings are, or which chat folders they have, or when they want a message posted at a set time or a rule that alerts them when something happens in a chat."
-version: 1.16.0
+version: 1.17.0
 author: banozz0
 license: MIT
 platforms: [macos]
@@ -123,7 +123,9 @@ the user's device, sometimes a two-step-verification password. None of those are
 yours to ask for, type or hold, and `--logout` and `--migrate` have gates no agent
 can answer. There is no `--yes`. If a command refuses with `LOGIN_REQUIRED`, relay
 the `auth` command in `error.hint` and let the user run it at their own terminal.
-Do not drive it through the menu, a pty, or a piped answer.
+Do not drive it through the menu, a pty, or a piped answer. `profiles remove` is
+the same rule: it deletes a login from this machine behind the profile's exact name
+at a terminal, with no `--yes` — hand it to the user, never type the name.
 
 **7. Never print the credentials.** `TELEGRAM_API_ID`, `TELEGRAM_API_HASH` and the
 `.session` file are secrets. Point at where they live; never read them out, copy
@@ -369,6 +371,7 @@ names the files).
 | "use my other account" | `telegram-tools --profile work <command>` |
 | "post that from the alerts bot" (they named it, allowlisted) | `telegram-tools --as-bot alerts send --chat <id> --topic <topic-id> --text "..." --yes` — rule 9 |
 | "log me in" / "log me out" | hand them `telegram-tools auth` or `telegram-tools auth --logout` — rule 6, they run it |
+| "get rid of that old profile" | hand them `telegram-tools profiles remove --name <name>` — rule 6, they type the name. It deletes the local session and record only; the one they are acting as refuses until `auth --logout` |
 | "is telegram-tools set up?" | `telegram-tools doctor` |
 
 - **`discover` defaults to admin/managed chats only** — the ones the user runs. Add
@@ -459,8 +462,8 @@ names the files).
 - **`create` on your own initiative** — rule 3. If a new group or topic looks like
   the right answer, propose it and let the user say yes; do not create it and report
   back.
-- **`auth`** — the login itself, in every form. Rule 6 above. `profiles` is the
-  read-only half and is fine to run.
+- **`auth`** — the login itself, in every form. Rule 6 above. `profiles` (the list)
+  is the read-only half and is fine to run; `profiles remove` is rule 6 too.
 - **`review approve`, `review accept`, `review reject`, `review retry`** — the two
   human decisions that download and keep a file, and the two that undo or redo one.
   Rule 11. `approve`, `accept` and `reject` refuse without a terminal; `retry` asks

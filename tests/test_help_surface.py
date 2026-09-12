@@ -63,6 +63,7 @@ COMMANDS = {
     "leave": ("leave",),
     "login": ("auth",),
     "profiles": ("profiles",),
+    "profiles-remove": ("profiles", "remove"),
     "doctor": ("doctor",),
     "archive": ("archive",),
     "archive-sync": ("archive", "sync"),
@@ -165,7 +166,9 @@ _ROOT_ADDITIONS = (
     # once in the usage line and once over the positional arguments.
     "auth,profiles,",
     "auth Log a profile in or out (asks at the terminal)",
-    "profiles List the named logins on this machine",
+    # The profiles-remove card (agent-bo-95422197) reworded this one line:
+    # `profiles` gained `remove`, behind the profile's exact name.
+    "profiles List the named logins on this machine, or remove one",
     # The bot-mode card (agent-bo-95421937): one global flag, the explicit
     # switch into acting as an owned bot. No subcommand gained or lost a flag.
     "[--as-bot NICK]",
@@ -226,6 +229,14 @@ _ROOT_ADDITIONS = (
 
 ALLOWED_ADDITIONS = {
     "root": _ROOT_ADDITIONS,
+    # The profiles-remove card (agent-bo-95422197): `profiles` gained one verb,
+    # so its own help grew a subcommand list. Both spellings, plus the group
+    # heading argparse prints once there is a positional.
+    "profiles": (
+        "{remove} ...",
+        "positional arguments: {remove}",
+        "remove Delete a profile's session file and record after typing the profile's exact name",
+    ),
     # The member-kick card (agent-bo-95422192): one new verb in the `member`
     # group, between ban and unban.
     "member": ("kick Remove a person from the chat without banning them: they may rejoin (dry-run by default)",),

@@ -624,7 +624,12 @@ def build_parser() -> argparse.ArgumentParser:
     auth_mode.add_argument("--logout", action="store_true", help="End this profile's session after typing its name")
     auth_mode.add_argument("--migrate", action="store_true", help="Move the pre-profile session into the default profile")
 
-    subparsers.add_parser("profiles", help="List the named logins on this machine")
+    profiles_parser = subparsers.add_parser("profiles", help="List the named logins on this machine, or remove one")
+    profiles_kinds = profiles_parser.add_subparsers(dest="profiles_kind")
+    profiles_remove = profiles_kinds.add_parser(
+        "remove", help="Delete a profile's session file and record after typing the profile's exact name"
+    )
+    profiles_remove.add_argument("--name", required=True, help="Profile name to remove")
 
     subparsers.add_parser("doctor", help="Check local setup without printing secrets")
 
@@ -2494,7 +2499,9 @@ def _profile_row(profile) -> str:
 
 
 def _run_profiles(args, *, report: Reporter, home: Path | None = None) -> int:
-    """List the named logins. Reads the store; opens no connection."""
+    """List the named logins, or remove one. Reads the store; opens no connection."""
+    if getattr(args, "profiles_kind", None) == "remove":
+        return _run_profile_remove(args, report=report, home=home)
     found = profile_store.listing(home)
     if not report.machine:
         if found:
@@ -2506,6 +2513,56 @@ def _run_profiles(args, *, report: Reporter, home: Path | None = None) -> int:
         {"profiles": [profile.to_dict() for profile in found], "active": _profile_name(args)},
         status="ok" if found else "empty",
     )
+    return 0
+
+
+def _run_profile_remove(args, *, report: Reporter, home: Path | None = None) -> int:
+    """Delete a profile from this machine -- its session file and its record --
+    behind the profile's exact name typed at a terminal, in either mode.
+
+    The local half only: nothing is said to Telegram, so a session that is
+    still live stays listed under *Settings → Devices* until it expires or is
+    ended there. The profile this run acts as refuses while it is logged in,
+    because `auth --logout` is the way to end a live login (it tells Telegram,
+    then deletes the same files); `remove` is for the profile you are not on.
+    There is no `--yes`, and the wrong name deletes nothing.
+    """
+    name = profile_store.check_name(args.name.strip())
+    if name not in profile_store.names(home):
+        raise profile_store.ProfileError(
+            f"No profile named {name!r} on this machine.",
+            code="CONFIG_MISSING",
+            hint="telegram-tools profiles",
+        )
+    profile = profile_store.load(name, home=home)
+    if name == _profile_name(args) and profile.logged_in:
+        raise profile_store.ProfileError(
+            f"Profile {name!r} is the one this run acts as and it is logged in; log it out first.",
+            code="SESSION_IN_USE",
+            hint=f"telegram-tools --profile {name} auth --logout",
+        )
+    # A container: a terminal in either mode, as `delete` has. A typed name
+    # piped into stdin is not a person, whichever mode asked.
+    if not manage_ops.terminal_present():
+        raise ApprovalRequired(report.human_command)
+    io = report.confirm_io()
+    read = io.get("read") or input
+    write = report.info
+
+    parts = ["its session file"] if profile.logged_in else []
+    if (profile.directory / profile_store.PROFILE_FILE).exists():
+        parts.append("its record")
+    write(f"This deletes profile {name!r} from this machine: {' and '.join(parts) or 'an empty directory'}. Telegram is not told.")
+    typed = read(f"Type the exact profile name ({name}) to continue: ").strip()
+    if typed != name:
+        write("That is not the profile name; nothing was removed.")
+        report.result({"profile": name, "removed": False}, status="cancelled")
+        return 1
+
+    removed = profile_store.forget(profile)
+    write(f"Profile {name!r} was removed from this machine.")
+    # Counts, never paths: where it lived is never printed.
+    report.result({"profile": name, "removed": True, "files_removed": len(removed)}, status="ok")
     return 0
 
 

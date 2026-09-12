@@ -149,6 +149,13 @@ The terms this codebase uses, and the boundaries they imply.
   title typed back, no `--yes`. The re-derivation after the gate compares the
   scope row's title, not the plan id, because a retention plan's cutoff moves
   with the clock.
+- **Profile remove** — `profiles remove --name X`: the local half of ending a
+  login, `profiles.forget` behind the profile's exact name at a terminal in
+  either mode, no `--yes`. `auth --logout` tells Telegram and then runs the
+  same `forget`; `remove` tells nobody, so it is for a profile already logged
+  out (or ended from the phone), and the profile the run acts as refuses with
+  `SESSION_IN_USE` while its session file exists. Counts in the result, never
+  a path.
 - **Chat reference** — what `--chat` accepts: a numeric ID, a `@username` or a
   link. `resolve_chat` (`resolver.py`) is the one place it becomes an entity;
   a numeric reference is looked for in the dialog list first, because Telegram

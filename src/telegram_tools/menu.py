@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -156,6 +157,27 @@ class MenuSession:
         self._chats = None
         self._bots = None
         self.banner = None
+
+    @property
+    def profile(self) -> str:
+        """The profile this menu acts as, without forcing the config to load."""
+        if self._config is not None:
+            return getattr(self._config, "profile", profile_store.DEFAULT_PROFILE)
+        return self._profile or os.environ.get("TELEGRAM_TOOLS_PROFILE") or profile_store.DEFAULT_PROFILE
+
+    async def switch_profile(self, name: str) -> None:
+        """Act as another named login from here on.
+
+        Everything learned so far belonged to the old account -- the connection,
+        the chat and bot caches, the banner -- so it all goes, and the next
+        screen that needs a client opens one on the new profile's session.
+        """
+        await self.release()
+        self._profile = name
+
+    def profile_names(self) -> list[str]:
+        """Every named login on this machine. Reads the store; opens no connection."""
+        return profile_store.names()
 
 
 def _namespace(**kwargs) -> argparse.Namespace:
@@ -2770,7 +2792,7 @@ async def _flow_manage(*, session, runner, read, write) -> bool:
 
 
 IDENTITY_ROWS = (
-    "Profiles on this machine",
+    "Profiles on this machine (list, switch, remove)",
     "Log in (phone and code)",
     "Log in by scanning a QR code",
     "Log out",
@@ -2792,44 +2814,101 @@ async def _flow_identity(*, session, runner, read, write) -> bool:
         choice = choose(list(IDENTITY_ROWS), title=trail, read=read, write=write)
         if choice is BACK:
             return True
-        if choice == 5:
-            outcome = await _group(_flow_bots, session=session, runner=runner, read=read, write=write)
+        if choice in (0, 5):
+            flow = _flow_profiles if choice == 0 else _flow_bots
+            outcome = await _group(flow, session=session, runner=runner, read=read, write=write)
             if outcome is not True:
                 return outcome
             continue
 
-        profile = getattr(session.config, "profile", profile_store.DEFAULT_PROFILE)
-        if choice == 0:
-            args = _namespace(command="profiles", profile=profile)
-            label = "Profiles"
-        else:
-            args = _namespace(
-                command="auth",
-                profile=profile,
-                qr=choice == 2,
-                logout=choice == 3,
-                migrate=choice == 4,
-            )
-            label = IDENTITY_ROWS[choice]
+        args = _namespace(
+            command="auth",
+            profile=session.profile,
+            qr=choice == 2,
+            logout=choice == 3,
+            migrate=choice == 4,
+        )
 
         # `auth` opens its own client on the session file the menu is holding,
         # so the file has to be free first, and afterwards what the menu cached
-        # was learned as whoever was logged in before this screen. `profiles`
-        # reads the store and opens nothing, so it costs the menu neither.
-        if choice != 0:
-            await session.release()
+        # was learned as whoever was logged in before this screen.
+        await session.release()
         result = await _act(
             args,
             session=session,
             runner=runner,
             read=read,
             write=write,
-            trail=crumb(trail, label),
+            trail=crumb(trail, IDENTITY_ROWS[choice]),
             rows=((STAY, "Back to Identity"),),
             connect=False,
         )
-        if choice != 0:
-            await session.release()
+        await session.release()
+        if result is not STAY:
+            return _leave(result)
+
+
+async def _flow_profiles(*, session, runner, read, write) -> bool:
+    """Identity row 1. List the named logins, switch to one, or remove one.
+
+    Listing and removing run the `profiles` command itself, so the typed-name
+    gate a removal meets here is the command's own -- the menu is never a
+    shorter path past it. Both read the store and open nothing, so the menu
+    keeps its connection. A switch drops it: the next screen that needs a
+    client opens one on the chosen profile's session.
+    """
+    trail = crumb(MAIN, "Identity", "Profiles")
+    while True:
+        choice = choose(["List them", "Switch profile", "Remove a profile"], title=trail, read=read, write=write)
+        if choice is BACK:
+            return True
+        if choice == 0:
+            result = await _act(
+                _namespace(command="profiles", profiles_kind=None, profile=session.profile),
+                session=session,
+                runner=runner,
+                read=read,
+                write=write,
+                trail=crumb(trail, "List"),
+                rows=((STAY, "Back to Profiles"),),
+                connect=False,
+            )
+            if result is not STAY:
+                return _leave(result)
+            continue
+
+        names = session.profile_names()
+        if choice == 1:
+            current = session.profile
+            chosen = pick(
+                names,
+                title=crumb(trail, "Switch"),
+                label=lambda name: f"{name}{'  (current)' if name == current else ''}",
+                read=read,
+                write=write,
+            )
+            if chosen is BACK:
+                continue
+            if chosen == current:
+                write(f"Already on {current}.")
+                continue
+            await session.switch_profile(chosen)
+            write(f"Now acting as profile {chosen}.")
+            continue
+
+        chosen = pick(names, title=crumb(trail, "Remove"), label=lambda name: name, read=read, write=write)
+        if chosen is BACK:
+            continue
+        result = await _act(
+            _namespace(command="profiles", profiles_kind="remove", name=chosen, profile=session.profile),
+            session=session,
+            runner=runner,
+            read=read,
+            write=write,
+            trail=crumb(trail, "Remove"),
+            rows=((STAY, "Back to Profiles"),),
+            connect=False,
+        )
         if result is not STAY:
             return _leave(result)
 
