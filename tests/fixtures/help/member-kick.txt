@@ -1,0 +1,11 @@
+usage: telegram-tools member kick [-h] --chat CHAT --user USER
+                                  [--reason REASON] [--execute]
+
+options:
+  -h, --help       show this help message and exit
+  --chat CHAT      The chat: numeric ID, @username, or link
+  --user USER      The person: numeric ID or @username
+  --reason REASON  Why, recorded in the local audit line only: Telegram stores
+                   no reason
+  --execute        Actually kick them after typing their exact label (no --yes
+                   exists)

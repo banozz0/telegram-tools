@@ -2404,6 +2404,7 @@ MANAGE_FORMS = {
     ("admin", "demote"): (_PERSON,),
     ("member", "list"): (("query", "Name or username contains", "text"), ("limit", "Limit", "int"), ("banned", "The banned and restricted instead", "toggle")),
     ("member", "ban"): (_PERSON, ("reason", "Reason (kept in the local audit line only)", "text")),
+    ("member", "kick"): (_PERSON, ("reason", "Reason (kept in the local audit line only)", "text")),
     ("member", "unban"): (_PERSON,),
     ("member", "mute"): (_PERSON, _UNTIL),
     ("member", "unmute"): (_PERSON,),
@@ -2436,6 +2437,7 @@ MANAGE_REQUIRED = {
     ("admin", "rights"): ("user", "rights"),
     ("admin", "demote"): ("user",),
     ("member", "ban"): ("user",),
+    ("member", "kick"): ("user",),
     ("member", "unban"): ("user",),
     ("member", "mute"): ("user", "until"),
     ("member", "unmute"): ("user",),
@@ -2444,10 +2446,10 @@ MANAGE_REQUIRED = {
     ("join-requests", "decline"): ("user",),
     ("invite", "revoke"): ("link",),
 }
-# The two typed_name verbs: the dry-run runs first, and the exact label is typed
-# at the CLI's own prompt on the run that follows. The menu never sets execute
-# on the first run.
-MANAGE_TYPED = {("admin", "demote"), ("member", "ban")}
+# The three typed_name verbs: the dry-run runs first, and the exact label is
+# typed at the CLI's own prompt on the run that follows. The menu never sets
+# execute on the first run.
+MANAGE_TYPED = {("admin", "demote"), ("member", "ban"), ("member", "kick")}
 
 
 def _typed_here(group: str, verb: str, values: dict) -> bool:
@@ -2471,6 +2473,7 @@ MANAGE_ROWS = {
     "member": (
         ("list", "List members (or the banned and restricted)"),
         ("ban", "Ban a person (dry-run first, then their exact label)"),
+        ("kick", "Kick a person: out now, may rejoin (dry-run first, then their exact label)"),
         ("unban", "Lift a ban"),
         ("mute", "Mute a person until a moment"),
         ("unmute", "Lift a mute or restriction"),
@@ -2485,7 +2488,7 @@ MANAGE_ROWS = {
 }
 MANAGE_GROUPS = (
     ("admin", "Admins", "Admins: list, promote, change rights, demote"),
-    ("member", "Members", "Members: list, ban, unban, mute, unmute, restrict"),
+    ("member", "Members", "Members: list, ban, kick, unban, mute, unmute, restrict"),
     ("join-requests", "Join requests", "Join requests: list, approve, decline"),
     ("invite", "Invite links", "Invite links: list, create, revoke"),
     ("settings", "Chat and topic settings", "Chat and topic settings: show, set"),

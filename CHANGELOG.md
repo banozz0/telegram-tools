@@ -4,6 +4,12 @@ All notable changes to this project will be documented here.
 
 This project follows a practical changelog style: user-visible changes, safety changes, and release notes belong here; active task tracking belongs outside the repo.
 
+## 3.19.0 - 2026-09-12
+
+- **`member kick`: out now, may rejoin.** `telegram-tools member kick --chat @teamhermes --user @troll --reason spam --execute` removes a person without banning them, beside `member ban` and behind the same gate: dry-run by default, `--execute` plus the person's exact label typed at a terminal, refused without one in either mode, no `--yes`. Telegram has no kick of its own — a kick is a ban followed at once by an unban, which is what Telethon's `kick_participant` does — so the person is out, may rejoin, and no ban row remains afterwards; the dry-run says exactly that. Until now the only way to do this was `member ban` and then `member unban` by hand.
+- **What a kick refuses.** An admin, naming `admin demote`, as a ban does. Anyone not in the chat: kicking a banned person would lift their ban, so that refuses by name and points at `member unban`. `--reason` is kept in the plan, the readback and the local audit line, because Telegram stores none.
+- **Menu.** Row 6 › Members gains *Kick a person* after *Ban a person*; it runs the dry-run first and asks for the label at the CLI's own prompt, like ban. The root screen is unchanged, so no transcript is re-recorded.
+
 ## 3.18.0 - 2026-09-12
 
 - **`--yes` on every `y/N`.** The fourteen commands whose only gate was a question at the terminal take `--yes` now, as their counterparts on the sibling tool already did: `admin promote`, `admin rights`, `member unban`, `mute`, `unmute` and `restrict`, `join-requests approve` and `decline`, `invite create` and `revoke`, `folders create` and `edit`, `watch rules remove` and `schedule cancel`. The preview prints exactly as before and the plan, readback and audit line are unchanged; only the question is skipped, so a script or an agent that was told to make that exact change can make it under `--json` with no terminal, where it used to stop with `APPROVAL_REQUIRED`. No allowlist applies — none exists for an admin action, a folder or a rule file — so `--yes` here means "the person already said yes", and the skill's rules say when an agent may pass it.

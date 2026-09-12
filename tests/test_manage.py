@@ -36,6 +36,7 @@ INVITE_TWO = "https://t.me/+ZyXwVuTs98765"
 MUTATING = (
     "EditAdminRequest",
     "EditBannedRequest",
+    "KickParticipantCall",
     "HideChatJoinRequestRequest",
     "ExportChatInviteRequest",
     "EditExportedChatInviteRequest",
@@ -102,6 +103,13 @@ class PeopledWorld(World):
         return self.people.setdefault(marked, {}).get(user_id)
 
 
+class KickParticipantCall:
+    """What the fake records for `client.kick_participant`, beside the raw requests."""
+
+    def __init__(self, channel, user) -> None:
+        self.channel, self.user = channel, user
+
+
 class PeopledClient(FakeClient):
     """The structure fake, plus users, participants and the administration calls."""
 
@@ -127,6 +135,15 @@ class PeopledClient(FakeClient):
 
     async def get_permissions(self, peer, user):
         return SimpleNamespace(**{name: name in self.held for name in RIGHT_NAMES})
+
+    async def kick_participant(self, channel, user):
+        # Telethon's kick: a ban then an unban, recorded here as the one call
+        # the port makes. The person is out afterwards and no ban row remains.
+        marked, _chat = self.world.by_peer(channel)
+        uid = self._user_id(user)
+        self.world.requests.append(KickParticipantCall(channel, user))
+        self.world.people[marked].pop(uid, None)
+        return None
 
     def _user_id(self, input_user) -> int:
         if isinstance(input_user, types.InputUserSelf):
@@ -399,6 +416,52 @@ def test_member_ban_is_a_dry_run_by_default_and_records_the_reason_locally(run_c
     assert "reason: spam" in lines[0]["evidence"]["readback"]
 
 
+def test_member_kick_is_a_dry_run_that_says_it_is_a_ban_then_an_unban(run_cli, capsys, home):
+    code, out, _err, fake = run_cli(["--json", "member", "kick", "--chat", FORUM, "--user", "@harry", "--reason", "spam"], client=PeopledClient(), capsys=capsys)
+    assert code == 0
+    envelope = envelope_of(out)
+    assert envelope["status"] == "dry_run" and envelope["result"]["member"]["status"] == "member"
+    assert envelope["plan"]["approval"] == "typed_name"
+    assert fake.world.requests[-1].__class__.__name__ == "GetParticipantRequest"
+    assert mutations(fake) == [] and audit_lines(home) == []
+    code, out, _err, _fake = run_cli(["member", "kick", "--chat", FORUM, "--user", "@harry", "--reason", "spam"], client=PeopledClient(), capsys=capsys)
+    assert "member kick: Team Hermes" in out and "Who     Harry (@harry) (777), now member" in out
+    assert "ban followed at once by an unban" in out and "may rejoin" in out and "no ban row remains" in out
+    assert "Reason  spam" in out and "Telegram stores no reason for a kick" in out
+    assert "Dry-run. Add --execute" in out
+
+
+def test_member_kick_executed_calls_kick_participant_once_and_records_the_reason_locally(run_cli, capsys, home):
+    code, out, _err, fake = run_cli(["--json", "member", "kick", "--chat", FORUM, "--user", "@harry", "--reason", "spam", "--execute"], client=PeopledClient(), capsys=capsys, isatty=True, answer="@harry")
+    assert code == 0, out
+    envelope = envelope_of(out)
+    assert envelope["status"] == "ok" and envelope["result"]["member"]["status"] == "none" and envelope["result"]["reason"] == "spam"
+    assert "no longer in Team Hermes and may rejoin (reason: spam)" in envelope["evidence"]["readback"]
+    assert mutations(fake) == ["KickParticipantCall"]
+    lines = audit_lines(home)
+    assert len(lines) == 1 and lines[0]["command"] == "member kick" and lines[0]["approval"] == "typed_name"
+    assert "reason: spam" in lines[0]["evidence"]["readback"]
+
+
+def test_member_kick_refuses_the_wrong_label_and_changes_nothing(run_cli, capsys, home):
+    code, out, _err, fake = run_cli(["--json", "member", "kick", "--chat", FORUM, "--user", "@harry", "--execute"], client=PeopledClient(), capsys=capsys, isatty=True, answer="dobby")
+    assert code == 1
+    assert envelope_of(out)["status"] == "cancelled"
+    assert mutations(fake) == [] and audit_lines(home) == []
+
+
+def test_member_kick_refuses_an_admin_and_someone_who_is_not_in(run_cli, capsys):
+    code, out, _err, fake = run_cli(["--json", "member", "kick", "--chat", FORUM, "--user", "@dobby", "--execute"], client=PeopledClient(), capsys=capsys, isatty=True, answer="@dobby")
+    error = envelope_of(out)["error"]
+    assert code == 2 and error["code"] == "HIERARCHY_DENIED" and "cannot be kicked until demoted" in error["message"]
+    assert "admin demote" in error["hint"] and mutations(fake) == []
+    # Kicking a banned person would lift their ban (Telethon says so), so it names unban instead.
+    code, out, _err, fake = run_cli(["--json", "member", "kick", "--chat", FORUM, "--user", "@troll", "--execute"], client=PeopledClient(), capsys=capsys, isatty=True, answer="@troll")
+    error = envelope_of(out)["error"]
+    assert code == 2 and error["code"] == "TARGET_KIND_MISMATCH" and "they are banned" in error["message"]
+    assert "member unban" in error["hint"] and mutations(fake) == []
+
+
 def test_member_ban_refuses_the_wrong_label_and_changes_nothing(run_cli, capsys, home):
     code, out, _err, fake = run_cli(["--json", "member", "ban", "--chat", FORUM, "--user", "@harry", "--execute"], client=PeopledClient(), capsys=capsys, isatty=True, answer="dobby")
     assert code == 1
@@ -413,11 +476,14 @@ def test_ban_and_demote_refuse_without_a_terminal_in_either_mode(run_cli, capsys
     code, _out, err, fake = run_cli(["admin", "demote", "--chat", FORUM, "--user", "@dobby", "--execute"], client=PeopledClient(), capsys=capsys, isatty=False, answer="@dobby")
     assert code == 3 and "no terminal" in err
     assert mutations(fake) == []
+    code, out, _err, fake = run_cli(["--json", "member", "kick", "--chat", FORUM, "--user", "@harry", "--execute"], client=PeopledClient(), capsys=capsys, isatty=False, answer="@harry")
+    assert code == 3 and envelope_of(out)["error"]["code"] == "APPROVAL_REQUIRED"
+    assert mutations(fake) == []
 
 
 def test_ban_and_demote_have_no_yes_flag():
     parser = cli.build_parser()
-    for argv in (["member", "ban", "--chat", "x", "--user", "y", "--yes"], ["admin", "demote", "--chat", "x", "--user", "y", "--yes"]):
+    for argv in (["member", "ban", "--chat", "x", "--user", "y", "--yes"], ["member", "kick", "--chat", "x", "--user", "y", "--yes"], ["admin", "demote", "--chat", "x", "--user", "y", "--yes"]):
         with pytest.raises(SystemExit):
             parser.parse_args(argv)
 

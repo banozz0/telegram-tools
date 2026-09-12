@@ -1,7 +1,7 @@
 ---
 name: telegram-tools
 description: "Use when you need the real numeric ID of a Telegram chat, channel, group or forum topic — 'what's the ID of that topic?', 'which chat is -100…?', 'where do I send this?' — when the user wants their own Telegram messages searched or exported (JSON, CSV, JSONL, Markdown, HTML), when a history question can be answered from the local archive instead of a fresh fetch, when a message must be posted to a chat or topic the user has allowlisted, when a message the user named should get a reply, a reaction, a pin, or be forwarded, copied or bookmarked, when the user asks who the admins of a chat are, who is waiting to join, which invite links exist, what a chat's or a topic's settings are, or which chat folders they have, or when they want a message posted at a set time or a rule that alerts them when something happens in a chat."
-version: 1.14.0
+version: 1.15.0
 author: banozz0
 license: MIT
 platforms: [macos]
@@ -64,7 +64,7 @@ It can also run a chat: **`admin`**, **`member`**, **`join-requests`**, **`invit
 and **`settings`** list and change who administers a group, who is in it, who is
 waiting at its door, which links open it, and what the chat or one of its topics is
 called and how it behaves. The reads are yours; rule 13 below says which of the writes
-are, and which three never are.
+are, and which four never are.
 
 It also knows the user's own **`folders`** — the shelves above their chat list. Reading
 them is yours (`folders list`); making, changing or deleting one is theirs, and rule 15
@@ -179,8 +179,8 @@ and change nothing. When the user wants a chat to match a blueprint, hand them t
 not a copy: never describe it as copying members, admins, messages or history, because
 `never_transferred` in the file says it does not, and `structure export` prints the same.
 
-**13. Never run `member ban --execute` or `admin demote --execute`.** They take a
-person's membership or a person's rights away, for everyone in the chat, and their
+**13. Never run `member ban --execute`, `member kick --execute` or `admin demote
+--execute`.** They take a person's membership or a person's rights away, for everyone in the chat, and their
 gate is `delete`'s: `--execute` plus the person's exact label typed at a terminal,
 refused without one in either mode (`APPROVAL_REQUIRED`, exit 3), and no `--yes`. Do
 not drive either through the menu, a pty, or a piped answer; hand the user the command
@@ -340,6 +340,7 @@ names the files).
 | "which folders do I have?" / "what's in that folder?" | `telegram-tools --json folders list` — reads only |
 | "make X an admin" / "let X pin things" (they named the person and the rights) | `telegram-tools --json admin promote --chat <id> --user <@x> --rights pin_messages --yes` — rule 13; without `--yes` it asks y/N |
 | "ban X" / "remove X as admin" | hand them `telegram-tools member ban --chat <id> --user <@x> --execute` or `admin demote … --execute` — rule 13, they type the label; the dry-run without `--execute` is yours to show |
+| "kick X" / "throw X out but let them come back" | hand them `telegram-tools member kick --chat <id> --user <@x> --execute` — rule 13, they type the label. A kick is a ban then an unban: they may rejoin and no ban row remains; say so. The dry-run without `--execute` is yours to show |
 | "mute X for an hour" / "let X back in" | `telegram-tools --json member mute --chat <id> --user <@x> --until 1h --yes` / `member unmute … --yes` — rule 13, the `--until` is theirs |
 | "let X in" / "turn X down" (a join request) | `telegram-tools --json join-requests approve --chat <id> --user <@x> --yes` or `… decline … --yes` — rule 13 |
 | "make an invite link" / "kill that link" | `telegram-tools --json invite create --chat <id> --expires 7d --yes` or `invite revoke --chat <id> --link <link> --yes` — rule 13; the link is in `result` once |
@@ -461,8 +462,8 @@ names the files).
   behind the chat's exact title typed at a terminal, with no `--yes`. Rule 12. The
   dry-run (no `--execute`), `export`, `diff` and `remap` are the read-only half and are
   fine to run.
-- **`member ban --execute` and `admin demote --execute`** — a person's membership or
-  rights, for everyone, behind their exact label typed at a terminal, with no `--yes`.
+- **`member ban --execute`, `member kick --execute` and `admin demote --execute`** — a
+  person's membership or rights, for everyone, behind their exact label typed at a terminal, with no `--yes`.
   Rule 13. The dry-run (no `--execute`) and the five reads are fine to run; the other
   administration writes ask `y/N`, or take `--yes` when the user asked for exactly that.
 - **`settings set --forum off --execute`** — every topic in the group stops existing

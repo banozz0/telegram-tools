@@ -11,8 +11,9 @@ The rights primitives an apply also needs -- one person's admin rights set,
 slow mode -- are the blueprint port's (`adapters/blueprint.py`), and this port
 wraps them rather than spelling `channels.editAdmin` a second time. What is
 only here: `channels.editBanned` (a ban, a restriction, and lifting either:
-the same call with different rights and an `until_date`), the participant
-reads, `messages.hideChatJoinRequest`, and the three invite calls.
+the same call with different rights and an `until_date`), a kick (Telethon's
+`kick_participant`, which is that call twice -- a ban, then an unban), the
+participant reads, `messages.hideChatJoinRequest`, and the three invite calls.
 
 Basic groups are refused (`PLATFORM_UNSUPPORTED`): every call here is a
 channel call, and Telegram itself moves a group to a supergroup the moment an
@@ -205,6 +206,10 @@ class TelegramManagePort:
         """`channels.editBanned`: a ban, a restriction, or lifting either (no names, no date)."""
         rights = ChatBannedRights(until_date=until, **{name: True for name in sorted(set(names))})
         await self.client(EditBannedRequest(channel=channel, participant=input_user, banned_rights=rights))
+
+    async def kick(self, channel: Any, input_user: Any) -> None:
+        """Telethon's `kick_participant`: `channels.editBanned` twice, a ban then an unban, which is Telegram's kick."""
+        await self.client.kick_participant(channel, input_user)
 
     # -- join requests ----------------------------------------------------------
 

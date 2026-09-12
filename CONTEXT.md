@@ -77,7 +77,7 @@ The terms this codebase uses, and the boundaries they imply.
   count typed above 1000; every other message verb = `send`'s gate, with
   `--yes` bound to the chat the write *lands in*; `structure apply` = dry-run
   default + `--execute` + the target's exact title, no `--yes`, a terminal
-  required in either mode; `member ban` and `admin demote` = the same gate on
+  required in either mode; `member ban`, `member kick` and `admin demote` = the same gate on
   a person, their exact label typed; every other administration write,
   `folders create`/`edit`, `watch rules remove` and `schedule cancel` = a
   `y/N` that `--yes` answers with the preview still printed and no allowlist
@@ -276,9 +276,9 @@ The terms this codebase uses, and the boundaries they imply.
   archive's `remaps` table under its `apply_id`, one row per minted or matched
   id, each its own transaction. `structure remap --apply-id` prints them
   offline.
-- **Administration verb** — one of the eighteen things the five groups do
+- **Administration verb** — one of the nineteen things the five groups do
   (`manage.OPS`, keyed by group and verb): `admin list/promote/rights/demote`,
-  `member list/ban/unban/mute/unmute/restrict`, `join-requests
+  `member list/ban/kick/unban/mute/unmute/restrict`, `join-requests
   list/approve/decline`, `invite list/create/revoke`, `settings show/set`. Each
   `Op` names its approval kind (None for a read), the right its plan states,
   the mutation op the plan records and whether it names a person. `settings
@@ -322,7 +322,7 @@ The terms this codebase uses, and the boundaries they imply.
   flag names what the field *is* afterwards, not what to add, and `none`
   empties it. A field no flag names is left alone -- which is how an edit puts
   back the chats pinned inside a folder without ever being asked about them.
-- **Typed label** — the gate `member ban` and `admin demote` share with
+- **Typed label** — the gate `member ban`, `member kick` and `admin demote` share with
   `delete`: dry-run by default, `--execute`, and the person's exact label typed
   back — their `@username`, or their name when they have none, either with or
   without the `@`, case-insensitively. No `--yes`, and a terminal in either

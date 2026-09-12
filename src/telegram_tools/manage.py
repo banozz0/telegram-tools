@@ -6,9 +6,9 @@ other write here has: a plan, a preflight that names the missing right, the
 gate section 7 assigns, a re-derivation after the gate, a readback and one
 audit line. What is specific to these commands is settled in this module:
 
-* **Which gate.** Removing someone's membership (`member ban`), someone's
-  rights (`admin demote`) or every topic a chat has (`settings set --forum
-  off`) is `typed_name`: dry-run by default, `--execute`, the exact label or
+* **Which gate.** Removing someone's membership (`member ban`, `member kick`),
+  someone's rights (`admin demote`) or every topic a chat has (`settings set
+  --forum off`) is `typed_name`: dry-run by default, `--execute`, the exact label or
   title typed at a terminal, no `--yes`, and a terminal in either mode.
   Everything else is `prompt_y`, and `--yes` answers it (the preview still
   prints, the approval kind stays `prompt_y`); no allowlist applies, because
@@ -27,8 +27,11 @@ audit line. What is specific to these commands is settled in this module:
   minute ahead and at most a year, because Telegram reads anything further as
   forever and a restriction with no end is a ban with a different name.
 * **No audit reason on Telegram** (section 16). The platform stores no reason
-  beside a ban, so `--reason` is recorded in the plan and in the local audit
-  line, and the docs say that is the only record.
+  beside a ban or a kick, so `--reason` is recorded in the plan and in the
+  local audit line, and the docs say that is the only record.
+* **A kick is a ban then an unban.** Telegram has no kick of its own;
+  Telethon's `kick_participant` bans and at once unbans, so the person is out,
+  may rejoin, and leaves no ban row behind. The dry-run says so.
 * **Invite links are shown only where they were asked for**: `invite list`
   and `invite create` carry them; every other screen, envelope and audit line
   goes through the shared redaction, which blanks them.
@@ -100,6 +103,9 @@ OPS: dict[tuple[str, str], Op] = {
         Op("admin", "demote", "typed_name", ("add_admins",), "admin.demote", typed=True, person=True),
         Op("member", "list", None, ()),
         Op("member", "ban", "typed_name", ("ban_users",), "member.ban", typed=True, person=True),
+        # A kick is what Telegram means by it: a ban followed at once by an
+        # unban, so the person is out and may rejoin, and no ban row remains.
+        Op("member", "kick", "typed_name", ("ban_users",), "member.kick", typed=True, person=True),
         Op("member", "unban", "prompt_y", ("ban_users",), "member.unban", person=True),
         Op("member", "mute", "prompt_y", ("ban_users",), "member.mute", person=True),
         Op("member", "unmute", "prompt_y", ("ban_users",), "member.unmute", person=True),

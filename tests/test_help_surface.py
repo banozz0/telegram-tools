@@ -106,6 +106,7 @@ COMMANDS = {
     "member": ("member",),
     "member-list": ("member", "list"),
     "member-ban": ("member", "ban"),
+    "member-kick": ("member", "kick"),
     "member-unban": ("member", "unban"),
     "member-mute": ("member", "mute"),
     "member-unmute": ("member", "unmute"),
@@ -197,7 +198,9 @@ _ROOT_ADDITIONS = (
     # the rights lists on the admin parsers' own help.
     "admin,member,join-requests,invite,settings,",
     "admin Admins and their rights: list, promote, rights, demote (demote asks for the person's exact label)",
-    "member Members and restrictions: list, ban, unban, mute, unmute, restrict (ban asks for the person's exact label)",
+    # The member-kick card (agent-bo-95422192) reworded this one line: `kick`
+    # sits between ban and unban and takes ban's gate.
+    "member Members and restrictions: list, ban, kick, unban, mute, unmute, restrict (ban and kick ask for the person's exact label)",
     "join-requests People waiting to join a chat that needs approval: list, approve, decline",
     "invite Invite links: list, create, revoke (links are shown by list and create only)",
     # The folders-and-settings card (agent-bo-95421954) reworded this one line:
@@ -218,6 +221,9 @@ _ROOT_ADDITIONS = (
 
 ALLOWED_ADDITIONS = {
     "root": _ROOT_ADDITIONS,
+    # The member-kick card (agent-bo-95422192): one new verb in the `member`
+    # group, between ban and unban.
+    "member": ("kick Remove a person from the chat without banning them: they may rejoin (dry-run by default)",),
     # The archive card gave the live `search` a switch that is the documented
     # alias of `archive search`.
     "search": (
@@ -285,6 +291,9 @@ ALLOWED_REWRITES = {
     # more formats. Section 15: `--format` gains jsonl, markdown and html, and
     # json and csv stay first so a script reading the usage line still finds them.
     "search": (("{json,csv,jsonl,markdown,html}", "{json,csv}"),),
+    # The member-kick card (agent-bo-95422192): the choice list grew by one
+    # verb, in the middle, because ban and kick belong side by side.
+    "member": (("{list,ban,kick,unban,mute,unmute,restrict}", "{list,ban,unban,mute,unmute,restrict}"),),
     # The folders-and-settings card (agent-bo-95421954). `settings set` used to
     # change one thing, so `--slow-mode` was required; now it changes any of a
     # chat's or a topic's fields and each is optional, which argparse spells

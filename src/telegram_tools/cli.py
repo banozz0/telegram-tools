@@ -324,7 +324,7 @@ def build_parser() -> argparse.ArgumentParser:
     admin_demote.add_argument("--user", required=True, help=user_help)
     admin_demote.add_argument("--execute", action="store_true", help="Actually demote them after typing their exact label (no --yes exists)")
 
-    member_parser = subparsers.add_parser("member", help="Members and restrictions: list, ban, unban, mute, unmute, restrict (ban asks for the person's exact label)")
+    member_parser = subparsers.add_parser("member", help="Members and restrictions: list, ban, kick, unban, mute, unmute, restrict (ban and kick ask for the person's exact label)")
     member_kinds = member_parser.add_subparsers(dest="member_kind")
     member_list = member_kinds.add_parser("list", help="Members of a chat, newest first, or the banned and restricted ones")
     member_list.add_argument("--chat", required=True, help=chat_help)
@@ -336,6 +336,11 @@ def build_parser() -> argparse.ArgumentParser:
     member_ban.add_argument("--user", required=True, help=user_help)
     member_ban.add_argument("--reason", help="Why, recorded in the local audit line only: Telegram stores no reason")
     member_ban.add_argument("--execute", action="store_true", help="Actually ban them after typing their exact label (no --yes exists)")
+    member_kick = member_kinds.add_parser("kick", help="Remove a person from the chat without banning them: they may rejoin (dry-run by default)")
+    member_kick.add_argument("--chat", required=True, help=chat_help)
+    member_kick.add_argument("--user", required=True, help=user_help)
+    member_kick.add_argument("--reason", help="Why, recorded in the local audit line only: Telegram stores no reason")
+    member_kick.add_argument("--execute", action="store_true", help="Actually kick them after typing their exact label (no --yes exists)")
     member_unban = member_kinds.add_parser("unban", help="Lift a ban or a restriction (y/N)")
     member_unban.add_argument("--chat", required=True, help=chat_help)
     member_unban.add_argument("--user", required=True, help=user_help)
@@ -2742,7 +2747,7 @@ async def _run_manage(client, args, *, report: Reporter) -> int:
 
     Plan, preflight, the hierarchy rule, the gate section 7 assigns, the
     re-derivation, the call, the readback, the audit line. A `typed_name` verb
-    (`member ban`, `admin demote`) dry-runs by default, takes `--execute`, asks
+    (`member ban`, `member kick`, `admin demote`) dry-runs by default, takes `--execute`, asks
     for the person's exact label, has no `--yes`, and needs a terminal in either
     mode. Under `--as-bot` the bot has to be an admin of the chat, and then the
     same preflight names any right it lacks.
@@ -2808,14 +2813,27 @@ async def _run_manage(client, args, *, report: Reporter) -> int:
         manage_ops.require_hierarchy(actor, target=member, granting=(), chat_title=target.title)
         params = {"status": member.status, "rights": []}
         details.append("Rights  none (every admin right taken away)")
-    elif op.verb in ("ban", "mute", "restrict"):
+    elif op.verb in ("ban", "kick", "mute", "restrict"):
         if member.is_admin:
+            cannot = {"ban": "banned", "kick": "kicked"}.get(op.verb, "restricted")
             raise CommandError(
-                f"{member.label} is an admin of {target.title}; an admin cannot be {op.verb}ned until demoted." if op.verb == "ban" else f"{member.label} is an admin of {target.title}; an admin cannot be restricted until demoted.",
+                f"{member.label} is an admin of {target.title}; an admin cannot be {cannot} until demoted.",
                 code="HIERARCHY_DENIED",
                 hint=f"telegram-tools admin demote --chat {args.chat} --user {args.user} --execute",
             )
-        if op.verb == "ban":
+        if op.verb == "kick":
+            # A kick is Telegram's ban-then-unban: the person is out and may
+            # rejoin, so it only makes sense on someone who is in; kicking a
+            # banned person would lift their ban (Telethon says so).
+            if member.status not in ("member", "restricted"):
+                hint = f"telegram-tools member unban --chat {args.chat} --user {args.user}" if member.status == "banned" else None
+                raise CommandError(f"{member.label} is not in {target.title} (they are {member.status}); a kick removes someone who is in.", code="TARGET_KIND_MISMATCH", hint=hint)
+            params = {"status": member.status, "reason": args.reason or ""}
+            if args.reason:
+                details.append(f"Reason  {args.reason}")
+            details.append("Note    A kick is a ban followed at once by an unban: they are out and may rejoin; no ban row remains.")
+            details.append("Note    Telegram stores no reason for a kick; the local audit line is the only record.")
+        elif op.verb == "ban":
             names = manage_ops.BAN_RIGHTS
             params = {"status": member.status, "rights": list(names), "reason": args.reason or ""}
             if args.reason:
@@ -2937,6 +2955,8 @@ async def _run_manage(client, args, *, report: Reporter) -> int:
         await port.set_admin(peer, input_user, names, rank=args.rank)
     elif op.verb == "demote":
         await port.set_admin(peer, input_user, ())
+    elif op.verb == "kick":
+        await port.kick(peer, input_user)
     elif op.verb in ("ban", "mute", "restrict"):
         await port.set_banned(peer, input_user, names, until=until)
     elif op.verb in ("unban", "unmute"):
@@ -2976,12 +2996,15 @@ async def _run_manage(client, args, *, report: Reporter) -> int:
         async def person_now() -> str:
             nonlocal after
             after = await port.participant(peer, user, input_user)
-            line = f"{after.label} is now {after.status} in {target.title}"
+            if op.verb == "kick" and after.status == "none":
+                line = f"{after.label} is no longer in {target.title} and may rejoin"
+            else:
+                line = f"{after.label} is now {after.status} in {target.title}"
             if after.rights and after.status in ("admin", "restricted"):
                 line += f" with {', '.join(after.rights)}"
             if after.until:
                 line += f" until {after.until}"
-            if op.verb == "ban" and args.reason:
+            if op.verb in ("ban", "kick") and args.reason:
                 line += f" (reason: {args.reason})"
             return line
 
@@ -3000,7 +3023,7 @@ async def _run_manage(client, args, *, report: Reporter) -> int:
             return f"{plan_target.display}: " + manage_ops.settings_diff(before, now, fields)
 
         evidence = await read_back("the settings", settings_now)
-    if op.verb == "ban":
+    if op.verb in ("ban", "kick"):
         extra["reason"] = args.reason or ""
     report.set_evidence(evidence)
     report.audit(plan, status="ok", evidence=evidence)

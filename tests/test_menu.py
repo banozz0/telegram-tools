@@ -1469,7 +1469,7 @@ def test_manage_holds_the_administration_groups_and_folders():
     text = screens(output)
     assert calls == []
     assert "1. Admins: list, promote, change rights, demote" in text
-    assert "2. Members: list, ban, unban, mute, unmute, restrict" in text
+    assert "2. Members: list, ban, kick, unban, mute, unmute, restrict" in text
     assert "3. Join requests: list, approve, decline" in text
     assert "4. Invite links: list, create, revoke" in text
     assert "5. Chat and topic settings: show, set" in text
@@ -1521,11 +1521,23 @@ def test_member_ban_backing_out_after_the_dry_run_bans_nobody():
     assert [args.execute for args in calls] == [False]
 
 
+def test_member_kick_takes_bans_gate_in_the_menu():
+    # kick (3), Hermes, person (1), reason (2), run (3): the dry-run; then the one row for real; Enter, 0.
+    code, calls, output = run_menu([MANAGE_MEMBERS, "3", "1", "1", "1", "@troll", "2", "spam", "3", "1", "", "0"])
+    assert code == 0
+    dry, real = calls
+    assert (dry.command, dry.member_kind, dry.user, dry.reason, dry.execute) == ("member", "kick", "@troll", "spam", False)
+    assert (real.member_kind, real.user, real.reason, real.execute) == ("kick", "@troll", "spam", True)
+    assert "Do it for real - the next screen asks for the person's exact label" in screens(output)
+    _code, calls, _output = run_menu([MANAGE_MEMBERS, "3", "1", "1", "1", "@troll", "3", "0", "0", "0", "0", "0", "0"])
+    assert [args.execute for args in calls] == [False]
+
+
 def test_member_mute_needs_an_until_and_restrict_needs_rights_too():
-    _code, calls, output = run_menu([MANAGE_MEMBERS, "4", "1", "1", "1", "@harry", "3", "0", "0", "0", "0", "0"])
+    _code, calls, output = run_menu([MANAGE_MEMBERS, "5", "1", "1", "1", "@harry", "3", "0", "0", "0", "0", "0"])
     assert calls == []
     assert "Fill in first: Until (30m, 2h, 7d, 1w, or a date)." in screens(output)
-    _code, calls, _output = run_menu([MANAGE_MEMBERS, "6", "1", "1", "1", "@harry", "2", "send_media", "3", "2h", "4", "", "0"])
+    _code, calls, _output = run_menu([MANAGE_MEMBERS, "7", "1", "1", "1", "@harry", "2", "send_media", "3", "2h", "4", "", "0"])
     (args,) = calls
     assert (args.member_kind, args.rights, args.until) == ("restrict", "send_media", "2h")
 
