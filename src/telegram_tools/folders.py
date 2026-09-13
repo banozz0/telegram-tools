@@ -38,6 +38,7 @@ from telegram_tools._core import rid as _rid
 from telegram_tools._core.redaction import redact_text
 from telegram_tools.envelope import PREFIX, CommandError
 from telegram_tools.manage import RULE, parse_rights
+from telegram_tools.surface import execute_hint
 
 # Every category flag Telegram spells on a dialog filter, in its own words. The
 # first five say which whole categories the folder holds; the last three say
@@ -238,7 +239,7 @@ def format_preview(verb: str, *, actor: str, folder: Folder | None, details: Seq
     elif execute:
         lines.append("Executing: the next prompt asks for the folder's exact title.")
     else:
-        lines.append("Dry-run. Add --execute to do it; the folder's exact title is asked for then.")
+        lines.append(f"Dry-run. {execute_hint()}; the folder's exact title is asked for then.")
     return "\n".join(lines)
 
 

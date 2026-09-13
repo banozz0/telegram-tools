@@ -10,6 +10,7 @@ from telethon.tl.functions.messages import DeleteChatUserRequest, DeleteTopicHis
 from telethon.tl.types import InputPeerChat, InputUserSelf
 
 from telegram_tools.models import ContainerDeleteResult, DeleteResult, LeaveResult, TopicInfo
+from telegram_tools.surface import execute_hint
 
 CLEAR_TOPIC_MESSAGES_WARNING = """\
 ====================================================
@@ -171,7 +172,7 @@ def format_delete_summary(kind: str, title: str, chat_id: int, *, where: str | N
         [
             f"Dry-run: {target}.",
             DELETE_CONSEQUENCES[kind],
-            "Nothing has been deleted. Re-run with --execute to do it for real.",
+            f"Nothing has been deleted. {execute_hint('do it for real', flag='Re-run with --execute')}.",
         ]
     )
 
@@ -337,7 +338,7 @@ def format_leave_summary(kind: str, title: str, chat_id: int, *, creator: bool) 
         [
             f"Dry-run: leave {kind} {title} ({chat_id}).",
             *_leave_lines(kind, creator=creator),
-            "Nothing has changed. Re-run with --execute to leave for real.",
+            f"Nothing has changed. {execute_hint('leave for real', flag='Re-run with --execute')}.",
         ]
     )
 

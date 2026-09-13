@@ -35,6 +35,7 @@ from telegram_tools._core.blueprint import (
 from telegram_tools._core.identity import Identity, Target
 from telegram_tools._core.plan import Approval, Mutation, Plan, Preflight
 from telegram_tools.envelope import TOOL, CommandError
+from telegram_tools.surface import execute_hint
 
 SCHEMA = "cli-tools/blueprint/telegram/1"
 # The gate an apply is behind (section 12): the target's exact title, typed.
@@ -177,7 +178,7 @@ def format_steps(steps: Sequence[Step], *, target: Target, extras: Sequence[str]
     lines.append(
         "Executing: the next prompt asks for the chat's exact title."
         if execute
-        else "Dry-run. Add --execute to do it; the exact title is asked for then."
+        else f"Dry-run. {execute_hint()}; the exact title is asked for then."
     )
     return "\n".join(lines)
 

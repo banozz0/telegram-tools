@@ -27,6 +27,7 @@ from telegram_tools._core.export import FORMATS as EXPORT_FORMATS
 from telegram_tools._core.paths import ToolPaths, make_private_dir, open_private
 from telegram_tools._core.plan import Plan
 from telegram_tools import profiles as profile_store
+from telegram_tools.surface import execute_hint
 
 CONFIG_FILE = "config.json"
 # What `archive search` wraps a match in on a screen (section 8.4).
@@ -259,7 +260,7 @@ def format_plan(plan: Plan, *, execute: bool) -> str:
         lines.append(f"everything for this {'scope' if 'scope' in params else 'identity'} would go: {params.get('messages', 0)} message(s)")
     lines.append(
         "Executing: the next prompt asks for the exact title." if execute
-        else "Dry-run. Add --execute to do it; the exact title is asked for then."
+        else f"Dry-run. {execute_hint()}; the exact title is asked for then."
     )
     return "\n".join(lines)
 

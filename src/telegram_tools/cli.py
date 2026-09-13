@@ -1666,6 +1666,17 @@ async def _run_message(client, args, config, *, report: Reporter | None = None) 
     if verb == "copy":
         details.append("Copy    text only; an attachment becomes a link to the original")
     topic_line = None if topic is None else f"{topic.id} {topic.display_title}"
+    # The destination names its topic the way the source line does, id first. A
+    # topic's title can be anything -- including a number that is not its id --
+    # and the id in the parentheses is the chat's, so without this the screen
+    # names nothing the person can check the target against.
+    to_line = None
+    if to_target is not None:
+        where = (
+            to_target.display if to_topic is None
+            else " › ".join([*to_chat.path, f"{to_topic.id} {to_topic.display_title}"])
+        )
+        to_line = f"{where} ({to_resolved.id})"
     preview = message_ops.format_preview(
         op,
         actor=actor,
@@ -1673,7 +1684,7 @@ async def _run_message(client, args, config, *, report: Reporter | None = None) 
         chat_id=resolved.id,
         topic=topic_line,
         messages=briefs,
-        destination=None if to_target is None else f"{to_target.display} ({to_resolved.id})",
+        destination=to_line,
         text=text if verb in ("reply", "edit", "draft") else None,
         details=details,
         execute=execute if verb == "delete" else None,
