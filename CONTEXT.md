@@ -383,6 +383,14 @@ The terms this codebase uses, and the boundaries they imply.
   by the caller and never closed by `run`. Its exit code is what titles the
   after-run screen: 0 is Done, 1 (a declined confirm) is Not done, and a caught
   error is Failed.
+- **Surface** — which of the two places a run is being read on, and the only
+  thing that differs between them: wording. On the command line a dry-run's
+  last line names `--execute`, the control a shell has; in the menu there are
+  no flags, so `surface.menu_row` (set by `menu._call`, around that one
+  command) hands the formatters the row that would execute instead and
+  `surface.execute_hint` spells the sentence either way. Nothing else is
+  mode-dependent: the same dry-run runs, the same gate asks, the same audit
+  line is written.
 - **Envelope** — the one object `--json` puts on stdout (`cli-tools/envelope/1`,
   built in `_core/contract.py`). Schema, tool, version, command, echoed args,
   identity, target, status, result, plan, evidence, warnings, error, meta —

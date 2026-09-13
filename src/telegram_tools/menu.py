@@ -26,6 +26,7 @@ from telegram_tools.records import parse_date_bound
 from telegram_tools import messages as message_ops
 from telegram_tools.prompts import BACK, CLEAR, EXIT, MENU, RULE, Extra, after_action, after_run, ask_int, ask_lines, ask_text, choose, edit_field, pick, pick_many
 from telegram_tools.resolver import resolve_chat
+from telegram_tools import surface
 from telegram_tools import review as review_ops
 from telegram_tools import structure as structure_ops
 from telegram_tools import manage as manage_ops
@@ -184,18 +185,23 @@ def _namespace(**kwargs) -> argparse.Namespace:
     return argparse.Namespace(**kwargs)
 
 
-async def _call(args, *, session, runner, write, connect: bool = True) -> int | None:
+async def _call(args, *, session, runner, write, connect: bool = True, execute_row: str | None = None) -> int | None:
     """Run one action. Returns its exit code, or None when it errored and the
     message is already printed.
 
     `connect=False` runs it against a client of its own: `auth` writes the very
     session file the menu is holding open, and two clients on one file is the
     lock error this menu exists to avoid.
+
+    `execute_row` is the row that would run this for real. A dry-run in here has
+    no `--execute` to name -- there is no command line in front of the person --
+    so it names that row instead; see `surface`.
     """
     try:
         client = await session.client() if session is not None and connect else None
         config = session.config if session is not None else None
-        return await runner(args, client=client, config=config)
+        with surface.menu_row(execute_row):
+            return await runner(args, client=client, config=config)
     except MENU_ERRORS as exc:
         write(f"error: {exc}")
         return None
@@ -211,14 +217,14 @@ RUN_AGAIN = (AGAIN, "Run it again")
 TWEAK = (STAY, "Tweak it")
 
 
-async def _act(args, *, session, runner, read, write, trail: str = MAIN, rows=(RUN_AGAIN, TWEAK), connect: bool = True) -> Any:
+async def _act(args, *, session, runner, read, write, trail: str = MAIN, rows=(RUN_AGAIN, TWEAK), connect: bool = True, execute_row: str | None = None) -> Any:
     """Run one action, then the after-run screen. Returns STAY, MENU or EXIT.
 
     The title says what happened: Done on exit code 0, Not done when a confirm
     was declined (the CLI returns 1), Failed after a printed error.
     """
     while True:
-        code = await _call(args, session=session, runner=runner, write=write, connect=connect)
+        code = await _call(args, session=session, runner=runner, write=write, connect=connect, execute_row=execute_row)
         outcome = "Done" if code == 0 else ("Failed" if code is None else "Not done")
         result = after_run(read=read, write=write, title=crumb(trail, outcome), rows=rows)
         if result is not AGAIN:
@@ -771,6 +777,11 @@ async def _flow_send(*, session, runner, read, write) -> bool:
 
 # -- the message verbs -----------------------------------------------------
 
+# The toggle that makes a `message delete` run real -- the menu's `--execute`.
+# Spelled once: the form row, the run row and the dry-run's own sentence about
+# how to execute all name it, so none of the three can drift from the others.
+DELETE_FOR_REAL_ROW = "Delete for real"
+
 # What each verb's form stages, in row order: (namespace key, row label, kind).
 # Kinds: int, text, lines (a body ended by `.`), ids (comma-separated ids),
 # chat (a second chat picker), topic (a topic in the picked chat), toggle,
@@ -784,7 +795,7 @@ MESSAGE_FORMS = {
         ("from_search", "Archive query (selects every match here)", "text"),
         ("limit", "Limit", "int"),
         ("i_know", "Allow more than 1000", "toggle"),
-        ("execute", "Delete for real (asks you to type DELETE)", "toggle"),
+        ("execute", f"{DELETE_FOR_REAL_ROW} (asks you to type DELETE)", "toggle"),
     ),
     "forward": (
         ("ids", "Message ids", "ids"),
@@ -837,7 +848,7 @@ MESSAGE_REQUIRED = {
     "draft": ("text",),
 }
 MESSAGE_RUN_ROW = {
-    "delete": "Run it (dry-run unless 'Delete for real' is on)",
+    "delete": f"Run it (dry-run unless '{DELETE_FOR_REAL_ROW}' is on)",
 }
 MESSAGE_TITLES = {
     "reply": "Reply",
@@ -967,7 +978,15 @@ def _flow_message(verb: str):
                 # The menu is never the shorter path past a gate: no verb here
                 # sets yes, and delete's execute is the person's own toggle.
                 args = _namespace(command="message", message_verb=verb, chat=picked.reference, yes=False, **values)
-                result = await _act(args, session=session, runner=runner, read=read, write=write, trail=form)
+                result = await _act(
+                    args,
+                    session=session,
+                    runner=runner,
+                    read=read,
+                    write=write,
+                    trail=form,
+                    execute_row=DELETE_FOR_REAL_ROW if verb == "delete" else None,
+                )
                 if result is not STAY:
                     return _leave(result)
                 continue
@@ -1135,11 +1154,12 @@ async def _flow_delete(*, session, runner, read, write) -> bool:
 
         # The dry-run always runs first: the menu must never be a shorter path
         # to a deletion than the flags are.
-        if await _call(dry_run, session=session, runner=runner, write=write) is None:
+        row = "Delete it for real"
+        if await _call(dry_run, session=session, runner=runner, write=write, execute_row=row) is None:
             return _leave_action(after_action(read=read, write=write))
 
         choice = choose(
-            ["Delete it for real - the next screen asks for its exact title"],
+            [f"{row} - the next screen asks for its exact title"],
             title=crumb(where, "Dry-run done"),
             read=read,
             write=write,
@@ -1809,10 +1829,11 @@ async def _flow_archive_retention(*, session, runner, read, write) -> bool:
         dry_run = _namespace(command="archive", archive_kind="retention", scope=scope, keep=keep, execute=False)
         # The dry-run always runs first: the menu must never be a shorter path
         # past a gate than the flags are.
-        if await _call(dry_run, session=session, runner=runner, write=write, connect=False) is None:
+        row = "Prune it for real"
+        if await _call(dry_run, session=session, runner=runner, write=write, connect=False, execute_row=row) is None:
             return _leave_action(after_action(read=read, write=write))
         choice = choose(
-            ["Prune it for real - the next screen asks for the scope's exact title"],
+            [f"{row} - the next screen asks for the scope's exact title"],
             title=crumb(trail, "Dry-run done"),
             read=read,
             write=write,
@@ -1843,10 +1864,11 @@ async def _flow_archive_forget(*, session, runner, read, write) -> bool:
             if identity is BACK:
                 continue
             dry_run = _namespace(command="archive", archive_kind="forget", scope=None, identity=identity, execute=False)
-        if await _call(dry_run, session=session, runner=runner, write=write, connect=False) is None:
+        row = "Forget it for real"
+        if await _call(dry_run, session=session, runner=runner, write=write, connect=False, execute_row=row) is None:
             return _leave_action(after_action(read=read, write=write))
         choice = choose(
-            ["Forget it for real - the next screen asks for its exact title"],
+            [f"{row} - the next screen asks for its exact title"],
             title=crumb(trail, "Dry-run done"),
             read=read,
             write=write,
@@ -1944,11 +1966,12 @@ async def _flow_structure_apply(*, session, runner, read, write) -> bool:
             dry_run = _namespace(command="structure", structure_kind="apply", blueprint=blueprint, chat=None, create=True, execute=False)
             label = "New chat"
 
-        if await _call(dry_run, session=session, runner=runner, write=write) is None:
+        row = "Apply it for real"
+        if await _call(dry_run, session=session, runner=runner, write=write, execute_row=row) is None:
             return _leave_action(after_action(read=read, write=write))
 
         choice = choose(
-            ["Apply it for real - the next screen asks for the chat's exact title"],
+            [f"{row} - the next screen asks for the chat's exact title"],
             title=crumb(trail, label, "Dry-run done"),
             read=read,
             write=write,
@@ -1999,11 +2022,12 @@ async def _flow_leave(*, session, runner, read, write) -> bool:
 
         # The dry-run always runs first, and it is where the creator note is
         # said: the menu must never be a shorter path out of a chat than the flags are.
-        if await _call(dry_run, session=session, runner=runner, write=write) is None:
+        row = "Leave it for real"
+        if await _call(dry_run, session=session, runner=runner, write=write, execute_row=row) is None:
             return _leave_action(after_action(read=read, write=write))
 
         choice = choose(
-            ["Leave it for real - the next screen asks for its exact title"],
+            [f"{row} - the next screen asks for its exact title"],
             title=crumb(where, "Nothing is deleted"),
             read=read,
             write=write,
@@ -2608,10 +2632,11 @@ def _flow_manage_verb(group: str, verb: str, title: str):
             return await _act(args, session=session, runner=runner, read=read, write=write, trail=form, rows=(RUN_AGAIN, _MANAGE_ANOTHER))
         what = "the chat's exact title" if group == "settings" else "the person's exact label"
         dry_run = _manage_namespace(group, verb, picked.reference, execute=False, **values)
-        if await _call(dry_run, session=session, runner=runner, write=write) is None:
+        row = "Do it for real"
+        if await _call(dry_run, session=session, runner=runner, write=write, execute_row=row) is None:
             return _leave_action(after_action(read=read, write=write))
         choice = choose(
-            [f"Do it for real - the next screen asks for {what}"],
+            [f"{row} - the next screen asks for {what}"],
             title=crumb(form, "Dry-run done"),
             read=read,
             write=write,
@@ -2744,10 +2769,11 @@ def _flow_folders_verb(verb: str, title: str):
         if not typed:
             return await _act(_folders_namespace(verb, values), session=session, runner=runner, read=read, write=write, trail=form, rows=(RUN_AGAIN,))
         dry_run = _folders_namespace(verb, {**values, "execute": False})
-        if await _call(dry_run, session=session, runner=runner, write=write) is None:
+        row = "Do it for real"
+        if await _call(dry_run, session=session, runner=runner, write=write, execute_row=row) is None:
             return _leave_action(after_action(read=read, write=write))
         choice = choose(
-            ["Do it for real - the next screen asks for the folder's exact title"],
+            [f"{row} - the next screen asks for the folder's exact title"],
             title=crumb(form, "Dry-run done"),
             read=read,
             write=write,

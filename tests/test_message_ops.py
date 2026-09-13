@@ -383,6 +383,18 @@ def test_delete_dry_runs_by_default_and_previews_the_target_and_the_messages(run
     assert fake.calls == []
 
 
+def test_the_dry_run_tail_names_the_execute_flag_on_the_command_line(run_cli, capsys, home):
+    """The command-line half of the menu's wording (card agent-bo-95422210).
+
+    `--execute` is the control a shell has, and this is where it is named. The
+    menu names its own row instead; `test_menu` holds that half.
+    """
+    code, out, _err, _fake = run_cli(["message", "delete", "--chat", FORUM, "--ids", "10,11"], capsys=capsys)
+
+    assert code == 0
+    assert "Dry-run: 2 message(s) would be deleted. Add --execute to do it; DELETE is asked for then." in out
+
+
 def test_delete_with_execute_needs_DELETE_typed_and_a_wrong_word_deletes_nothing(run_cli, capsys, home):
     code, out, _err, fake = run_cli(
         ["--json", "message", "delete", "--chat", FORUM, "--ids", "10", "--execute"], capsys=capsys, answers=("delete",)
@@ -553,6 +565,23 @@ def test_forward_into_a_topic_uses_the_raw_request_with_the_topic(run_cli, capsy
     assert code == 0
     assert fake.calls[0] == ("forward_raw", FORUM_ID, [300], 141)
     assert envelope_of(out)["evidence"]["readback"].endswith("is in Team Hermes › Deploys")
+
+
+@pytest.mark.parametrize("verb", ["forward", "copy"])
+def test_the_destination_line_names_the_topics_own_id(run_cli, capsys, home, verb):
+    """A topic title is not an id, and the id in the parentheses is the chat's.
+
+    Topic 141 here is titled "Deploys"; a topic titled "2" whose id is 4 is what
+    found this. Without the topic's own id the confirmation screen names nothing
+    the target can be checked against. Same shape as the source `Topic` line.
+    """
+    code, out, _err, _fake = run_cli(
+        ["message", verb, "--chat", CHANNEL, "--ids", "300", "--to", FORUM, "--to-topic", "141"], capsys=capsys, answers=("y",)
+    )
+
+    assert code == 0
+    to_line = next(line for line in out.splitlines() if line.startswith("To      "))
+    assert to_line == f"To      Team Hermes › 141 Deploys ({FORUM_ID})"
 
 
 def test_a_yes_run_is_gated_by_the_allowlist_on_the_chat_it_lands_in(run_cli, capsys, home, monkeypatch):

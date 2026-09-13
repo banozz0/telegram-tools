@@ -2,6 +2,8 @@ import asyncio
 from pathlib import Path
 
 from telegram_tools import menu
+from telegram_tools import messages as message_ops
+from telegram_tools import surface
 from telegram_tools._core.columns import width
 from telegram_tools.bots import IMPLICIT_OTHER_RIGHT, right_names
 from telegram_tools.config import ConfigError
@@ -2395,6 +2397,49 @@ def test_delete_messages_dry_runs_unless_the_person_toggles_delete_for_real():
     args = calls[0]
     assert (args.from_search, args.execute, args.ids) == ("deploy AND red", True, None)
     assert "[yes]" in screens(output)
+
+
+def test_a_dry_run_in_the_menu_names_the_row_that_executes_not_a_flag():
+    """Card agent-bo-95422210: `--execute` names nothing on a screen with no flags.
+
+    The tail is composed inside the command, which is exactly where `_call` has
+    put the row that would run it for real, so one formatter says `--execute` at
+    a shell and names the row here. The row it names is the toggle on this very
+    form, spelled from the same constant the row is labelled with.
+    """
+    tails = []
+
+    async def runner(args, *, client=None, config=None):
+        preview = message_ops.format_preview(
+            message_ops.OPS["delete"],
+            actor="Sven (@sven)",
+            chat_title="Hermes",
+            chat_id=-100111,
+            messages=(),
+            execute=bool(getattr(args, "execute", False)),
+        )
+        tails.append(preview.splitlines()[-1])
+        return 0
+
+    # 1 = forum groups, 1 = Hermes, 1 = Message ids, "11", 6 = Run it (execute off)
+    code, _calls, _output = run_menu([DELETE_MSGS, "1", "1", "1", "11", "6", "", "0"], runner=runner)
+
+    assert code == 0
+    assert tails == [
+        f'Dry-run: 0 message(s) would be deleted. Choose "{menu.DELETE_FOR_REAL_ROW}" to do it; DELETE is asked for then.'
+    ]
+    assert "--execute" not in tails[0]
+
+
+def test_the_menu_leaves_the_surface_as_it_found_it():
+    """Only the command the menu is running is on the menu surface.
+
+    The row is set around one `_call` and reset after it, so a formatter reached
+    any other way -- a later command, another session, a test -- is back on the
+    command line.
+    """
+    run_menu([DELETE_MSGS, "1", "1", "1", "11", "6", "", "0"])
+    assert surface.execute_hint() == "Add --execute to do it"
 
 
 def test_delete_messages_needs_ids_or_a_query():

@@ -53,6 +53,7 @@ from telegram_tools._core.plan import BULK_DEFAULT_LIMIT, BULK_HARD_LIMIT
 from telegram_tools.envelope import PREFIX, CommandError
 from telegram_tools.mentions import mentions_in, mentions_line
 from telegram_tools.records import topic_id_for_message
+from telegram_tools.surface import execute_hint
 
 RULE = "--------------------------------------------"
 
@@ -378,7 +379,7 @@ def format_preview(
         lines.append(text if text else "(no text)")
     lines.append(RULE)
     if execute is False:
-        lines.append(f"Dry-run: {len(messages)} message(s) would be deleted. Add --execute to do it; DELETE is asked for then.")
+        lines.append(f"Dry-run: {len(messages)} message(s) would be deleted. {execute_hint()}; DELETE is asked for then.")
     return "\n".join(lines)
 
 

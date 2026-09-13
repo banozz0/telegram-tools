@@ -52,6 +52,7 @@ from telegram_tools._core.plan import Approval
 from telegram_tools._core.redaction import redact_text
 from telegram_tools.adapters.blueprint import ADMIN_RIGHT_NAMES, BANNED_RIGHT_NAMES
 from telegram_tools.envelope import PREFIX, CommandError
+from telegram_tools.surface import execute_hint
 
 RULE = "--------------------------------------------"
 
@@ -621,7 +622,7 @@ def format_preview(
     elif execute:
         lines.append(f"Executing: the next prompt asks for {typed_what}.")
     else:
-        lines.append(f"Dry-run. Add --execute to do it; {typed_what} is asked for then.")
+        lines.append(f"Dry-run. {execute_hint()}; {typed_what} is asked for then.")
     return "\n".join(lines)
 
 

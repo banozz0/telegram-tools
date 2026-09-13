@@ -659,7 +659,9 @@ of the archive dry-runs first and asks for the scope's title too, deleting messa
 dry-runs first and still asks for `DELETE`, deleting a folder or switching a group's topics
 off dry-runs first and asks for its exact title, sending or any other message verb shows
 the whole thing and asks `y/N`, scheduling a message shows it with its guarantee and asks,
-removing a rule asks, and bot edits still print a diff and ask before writing. The
+removing a rule asks, and bot edits still print a diff and ask before writing. What
+a dry-run says differs by one line: with no command line in front of you it names the
+row that runs it for real rather than `--execute`. The
 menu has no equivalent of `--yes` at all. With no terminal attached it prints this help instead.
 
 ## For scripts and agents
