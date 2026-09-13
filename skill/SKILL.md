@@ -1,7 +1,7 @@
 ---
 name: telegram-tools
 description: "Use when you need the real numeric ID of a Telegram chat, channel, group or forum topic — 'what's the ID of that topic?', 'which chat is -100…?', 'where do I send this?' — when the user wants their own Telegram messages searched or exported (JSON, CSV, JSONL, Markdown, HTML), when a history question can be answered from the local archive instead of a fresh fetch, when a message must be posted to a chat or topic the user has allowlisted, when a message the user named should get a reply, a reaction, a pin, or be forwarded, copied or bookmarked, when the user asks who the admins of a chat are, who is waiting to join, which invite links exist, what a chat's or a topic's settings are, or which chat folders they have, or when they want a message posted at a set time or a rule that alerts them when something happens in a chat."
-version: 1.17.0
+version: 1.18.0
 author: banozz0
 license: MIT
 platforms: [macos]
@@ -413,6 +413,13 @@ names the files).
   when the id is not in that chat — so a wrong id costs nothing. The id comes from
   `search`, `archive search` (`result.messages[].message_id`) or the user; never
   guess one. `send --reply-to <msg-id>` posts a reply from the send command itself.
+- **Believe the readback, not the argument.** `react`/`unreact` report the reaction
+  set the message now holds in `result.reactions`, `pin`/`unpin` the message's pinned
+  flag in `result.pinned`, `read`/`unread` the chat's unread count and mark in
+  `result.unread`, and `draft` the saved draft in `result.draft` — all read back from
+  Telegram after the call, beside the `emoji` or `text` that was asked for. When they
+  disagree the run is still `ok` but `evidence.readback` starts `unverified:`: the
+  write did not take, so say so rather than reporting success.
 - **`send --topic` is the difference between delivered and lost.** Omitting it posts
   to the chat itself, not the thread. Confirm the topic ID with `discover` first;
   never guess one.

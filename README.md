@@ -339,6 +339,14 @@ Every verb resolves the chat, fetches the message it is about to act on, and sho
 — the chat, and the message's id, date, sender and first line — before asking. A
 message id that is not there refuses with `TARGET_NOT_FOUND` before any prompt.
 
+**A verb reports what Telegram says afterwards, not what it was asked for.** `react`
+and `unreact` carry the reaction set the message now holds (`result.reactions`), `pin`
+and `unpin` its pinned flag (`result.pinned`), `read` and `unread` the chat's unread
+count and mark (`result.unread`), and `draft` the draft Telegram saved
+(`result.draft`) — beside the emoji or the text the argument named, never instead of
+it. When the two disagree, `evidence.readback` reads `unverified:` and the key still
+says what the server holds, so a silent no-op no longer looks like a success.
+
 **`delete` is `clear-messages`' gate on a selection.** It lists every id it would
 remove and stops; `--execute` asks you to type `DELETE`, and there is no `--yes`.
 `--from-search` is an archive query (`archive search` syntax), so the archive has to
