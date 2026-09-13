@@ -604,8 +604,10 @@ needing credentials, and `Check setup` never needs any.
 and exits once you're back at the root; on a text prompt a blank line does the same.
 Every screen below the root carries its trail (`Main › Read › Search › Hermes › From`), so
 you always know where you are. Chats, topics, bots, and admin rights come from live
-pick-lists rather than prompts asking you to type an ID; long lists page on `n` and
-`p`, and an item keeps its number on every page. Bot fields show their current value
+pick-lists rather than prompts asking you to type an ID; every screen that lists a
+forum's topics lists them by topic ID, lowest first, so General leads and a row never
+moves because someone posted (Telegram's own order is by latest activity); long lists
+page on `n` and `p`, and an item keeps its number on every page. Bot fields show their current value
 and offer keep / change / clear.
 
 After a job the menu offers its own next step — *Tweak it* back to the filled-in search

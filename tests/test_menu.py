@@ -572,6 +572,64 @@ def test_the_clear_ticker_shows_the_topic_emoji_too():
     assert "2. [ ] 217     Support" in text
 
 
+# The order Telegram serves a forum's topics in: most recent activity first, so
+# it moves whenever anything is posted -- including by this menu. The ids and
+# titles are the group the bug was found on, three topics named after numbers.
+ACTIVITY_TOPICS = [
+    TopicInfo(id=6, title="3", top_message=903),
+    TopicInfo(id=4, title="2", top_message=902),
+    TopicInfo(id=2, title="1", top_message=901),
+    TopicInfo(id=1, title="General", top_message=900),
+]
+
+# What every topic screen must print for them: by id, so General leads and no
+# row moves when a send changes what Telegram calls recent.
+BY_ID = "\n".join(["1. 1       General", "2. 2       1", "3. 4       2", "4. 6       3"])
+
+
+def test_the_topic_picker_orders_by_id_not_by_the_activity_telegram_serves():
+    # 2 1 = read > search live, 1 = forum groups, 1 = Hermes, 1 = the Topic row, then back out.
+    answers = [SEARCH, "1", "1", "1", "0", "0", "0", "0", "0"]
+    code, _calls, output = run_menu(answers, session=FakeSession(topics=ACTIVITY_TOPICS))
+
+    assert code == 0
+    assert BY_ID in screens(output)
+
+
+def test_the_send_topic_picker_orders_by_id_so_a_remembered_key_lands_in_the_same_topic():
+    # 3 1 = write > send, 1 = forum groups, 1 = Hermes, 1 = the Topic row, 2 = the
+    # second topic, then a message and Send it. Row 2 is topic 2 whatever order
+    # Telegram listed them in -- posting reordered that list, and the key didn't.
+    answers = [SEND, "1", "1", "1", "2", "2", "hi", ".", "5", "", "0"]
+    code, calls, output = run_menu(answers, session=FakeSession(topics=ACTIVITY_TOPICS))
+
+    assert code == 0
+    assert BY_ID in screens(output)
+    assert calls[0].topic == 2
+
+
+def test_the_clear_ticker_orders_by_id_too():
+    # 5 = clear, 1 = Hermes, 0 = back out of the ticker, 0 = the picker, 0 = exit.
+    answers = [CLEAR, "1", "0", "0", "0"]
+    code, calls, output = run_menu(answers, session=FakeSession(topics=ACTIVITY_TOPICS))
+
+    assert code == 0
+    assert calls == []
+    ticked = ["1. [ ] 1       General", "2. [ ] 2       1", "3. [ ] 4       2", "4. [ ] 6       3"]
+    assert "\n".join(ticked) in screens(output)
+
+
+def test_the_topic_screens_head_their_two_number_columns():
+    # "6  3" is an id and a title with no telling which; the header says which.
+    picker = [SEARCH, "1", "1", "1", "0", "0", "0", "0", "0"]
+    _code, _calls, output = run_menu(picker, session=FakeSession(topics=ACTIVITY_TOPICS))
+    assert "   id      title\n1. 1       General" in screens(output)
+
+    ticker = [CLEAR, "1", "0", "0", "0"]
+    _code, _calls, output = run_menu(ticker, session=FakeSession(topics=ACTIVITY_TOPICS))
+    assert "       id      title\n1. [ ] 1       General" in screens(output)
+
+
 def test_search_zero_at_staging_returns_to_the_chat_picker_not_root():
     # 2 1 = read > search live, 1 = forum groups, 1 = Hermes, 0 = staging back -> chat picker,
     # 4 = type an ID/username this time, a new chat, 7 = run it (topic row is
