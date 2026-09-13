@@ -38,22 +38,27 @@ def _screen(
     numbers: Sequence[int] | None = None,
     pager: str | None = None,
     trailing: Sequence[str] = (),
+    header: str | None = None,
 ) -> str:
-    """One screen: title, rule, numbered rows, an optional paging line, the rows
-    that follow the list, then 0.
+    """One screen: title, rule, an optional column header, numbered rows, an
+    optional paging line, the rows that follow the list, then 0.
 
     `numbers` lets a paged list keep its own numbering (item 12 is 12 on every
     page); without it the rows count from 1. `trailing` rows are already
     formatted -- they carry their own numbers, which is how extras and control
     rows stay put while the page changes. The paging line sits between the list
     and them, which is also where the gap in the numbers falls on a later page.
+    `header` is an unnumbered line above the rows, for a list whose columns are
+    not self-describing; it is printed as given, so the caller is the one that
+    indents it under the labels -- only it knows how wide its own row prefix is.
     """
     numbers = list(range(1, len(labels) + 1)) if numbers is None else list(numbers)
     rows = [f"{number}. {label}" for number, label in zip(numbers, labels)]
     if pager is not None:
         rows.append(pager)
     rows.extend(trailing)
-    return "\n".join([title, RULE, *rows, f"0. {back_label}"])
+    above = [] if header is None else [header]
+    return "\n".join([title, RULE, *above, *rows, f"0. {back_label}"])
 
 
 def choose(labels: Sequence[str], *, title: str, read, write, back_label: str = "Back") -> Any:
@@ -121,6 +126,7 @@ def pick(
     write,
     extras: Sequence[Extra] = (),
     page_size: int = PAGE_SIZE,
+    header: str | None = None,
 ) -> Any:
     """Page through `items`. Returns an item, an Extra's key, or BACK."""
     if not items:
@@ -139,6 +145,8 @@ def pick(
                 numbers=[index + 1 for index in window],
                 pager=pages.pager(),
                 trailing=extra_rows,
+                # Indented past "1. ", the prefix every item row carries here.
+                header=None if header is None else f"   {header}",
             )
         )
 
@@ -164,6 +172,7 @@ def pick_many(
     preselected: Sequence[Any] = (),
     extras: Sequence[Extra] = (),
     page_size: int = PAGE_SIZE,
+    header: str | None = None,
 ) -> Any:
     """Toggle items on and off. Returns the selected items in list order, an
     Extra's key, or BACK.
@@ -188,7 +197,9 @@ def pick_many(
         control_numbers = [len(items) + offset for offset in range(1, len(control_labels) + 1)]
 
         control_rows = [f"{number}. {text}" for number, text in zip(control_numbers, control_labels)]
-        write(_screen(title, item_labels, "Back", numbers=[index + 1 for index in window], pager=pages.pager(), trailing=control_rows))
+        # Indented past "1. [ ] ", the prefix every item row carries here.
+        indented = None if header is None else f"       {header}"
+        write(_screen(title, item_labels, "Back", numbers=[index + 1 for index in window], pager=pages.pager(), trailing=control_rows, header=indented))
 
         answer = read(f"Choose one or more (2 3 or 2,3), {NEXT_KEY}/{PREV_KEY} to page: ").strip()
         if answer == "0":

@@ -427,12 +427,35 @@ async def _flow_doctor(*, session, runner, read, write) -> bool:
 _ALL_TOPICS = "All topics"
 
 
+def _topic_row(topic) -> str:
+    """One topic row: the id in a fixed column, then the title."""
+    return f"{topic.id:<6}  {topic.display_title}"
+
+
+# The columns `_topic_row` prints, for `pick`'s header. A topic whose title is a
+# number is two bare numbers otherwise, and there is no telling which is which.
+_TOPIC_COLUMNS = f"{'id':<6}  title"
+
+
+async def _topics_in_order(session, reference: str):
+    """Every topic of a chat, lowest id first -- the one order that holds still.
+
+    Telegram serves a forum's topics in most-recent-activity order, so a message
+    sent from this menu reorders the next render of the same picker: the key
+    that picked a topic last time picks a different one now, with nothing on
+    screen saying so. An id never moves, General is always 1 so it leads, and a
+    rename leaves the list alone -- which sorting by title would not. Every
+    screen that lists topics comes through here, so none of them sorts its own.
+    """
+    return sorted(await session.topics(reference), key=lambda topic: topic.id)
+
+
 def _shown(value, empty: str) -> str:
     return empty if value in (None, "") else str(value)
 
 
 async def _ask_topic(picked, *, session, read, write, trail: str) -> Any:
-    topics = await session.topics(picked.reference)
+    topics = await _topics_in_order(session, picked.reference)
     if not topics:
         write("That chat has no topics.")
         return BACK
@@ -440,7 +463,8 @@ async def _ask_topic(picked, *, session, read, write, trail: str) -> Any:
     chosen = pick(
         topics,
         title=crumb(trail, "Topic"),
-        label=lambda topic: f"{topic.id:<6}  {topic.display_title}",
+        label=_topic_row,
+        header=_TOPIC_COLUMNS,
         read=read,
         write=write,
         extras=(Extra("all", _ALL_TOPICS),),
@@ -627,7 +651,7 @@ async def _ask_send_topic(picked, *, session, read, write, trail: str) -> Any:
     A chat with no topics is an answer here, not the failure it is for `clear`:
     the message simply goes to the chat.
     """
-    topics = await session.topics(picked.reference)
+    topics = await _topics_in_order(session, picked.reference)
     if not topics:
         write("That chat has no topics - the message goes to the chat itself.")
         return CLEAR
@@ -635,7 +659,8 @@ async def _ask_send_topic(picked, *, session, read, write, trail: str) -> Any:
     chosen = pick(
         topics,
         title=crumb(trail, "Topic"),
-        label=lambda topic: f"{topic.id:<6}  {topic.display_title}",
+        label=_topic_row,
+        header=_TOPIC_COLUMNS,
         read=read,
         write=write,
         extras=(Extra("chat", _NO_TOPIC),),
@@ -1052,7 +1077,7 @@ async def _flow_delete(*, session, runner, read, write) -> bool:
             picked = await _pick_chat(session=session, read=read, write=write, forums_only=True, trail=trail)
             if picked is BACK:
                 continue
-            topics = await session.topics(picked.reference)
+            topics = await _topics_in_order(session, picked.reference)
             if not topics:
                 # One screen back -- the forum picker -- not all the way out.
                 write("That chat has no topics.")
@@ -1060,7 +1085,8 @@ async def _flow_delete(*, session, runner, read, write) -> bool:
             chosen = pick(
                 topics,
                 title=crumb(trail, picked.title, "Pick a topic to delete"),
-                label=lambda topic: f"{topic.id:<6}  {topic.display_title}",
+                label=_topic_row,
+                header=_TOPIC_COLUMNS,
                 read=read,
                 write=write,
             )
@@ -1155,7 +1181,7 @@ async def _flow_clear(*, session, runner, read, write) -> bool:
             return True
         chat = crumb(trail, picked.title)
 
-        topics = await session.topics(picked.reference)
+        topics = await _topics_in_order(session, picked.reference)
         if not topics:
             # One screen back -- the forum picker -- not all the way out.
             write("That chat has no topics.")
@@ -1165,7 +1191,8 @@ async def _flow_clear(*, session, runner, read, write) -> bool:
             selected = pick_many(
                 topics,
                 title=crumb(chat, "Tick what to clear"),
-                label=lambda topic: f"{topic.id:<6}  {topic.display_title}",
+                label=_topic_row,
+                header=_TOPIC_COLUMNS,
                 read=read,
                 write=write,
                 preselected=ticks.get(picked.reference, []),
@@ -1569,13 +1596,14 @@ async def _pick_live_scope(session, *, read, write, trail: str) -> Any:
         return BACK
     if picked.is_forum is False:
         return scope_rid_for(picked.reference)
-    topics = await session.topics(picked.reference)
+    topics = await _topics_in_order(session, picked.reference)
     if not topics:
         return scope_rid_for(picked.reference)
     chosen = pick(
         topics,
         title=crumb(trail, picked.title, "Topic"),
-        label=lambda topic: f"{topic.id:<6}  {topic.display_title}",
+        label=_topic_row,
+        header=_TOPIC_COLUMNS,
         read=read,
         write=write,
         extras=(Extra("all", "Every topic in this group"),),
