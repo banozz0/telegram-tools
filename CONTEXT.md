@@ -468,9 +468,13 @@ The terms this codebase uses, and the boundaries they imply.
 - **Drift** — the re-derivation between the answered gate and the call. The
   target is resolved again and compared with the one that was shown; a
   difference is `PLAN_DRIFT` and nothing is sent or deleted.
-- **Readback** — the state fetched after a write and reported as `evidence`.
-  One that cannot be fetched reads `unverified: <reason>` and is never
-  presented as verified.
+- **Readback** — the state fetched after a write and reported as `evidence`,
+  and, where the state has a shape worth reading, under its own key in
+  `result` beside the argument that asked for it — a message verb's
+  `reactions`, `pinned`, `unread` and `draft` (`messages.read_back`). One that
+  cannot be fetched reads `unverified: <reason>` and is never presented as
+  verified; the key it read is still reported, so a write the platform
+  accepted and did not apply says so rather than echoing the request.
 - **Audit line** — one redacted JSON line per *executed* write in
   `~/.telegram-tools/audit.jsonl`, from the menu exactly as from a flag. Dry
   runs and cancellations leave nothing.

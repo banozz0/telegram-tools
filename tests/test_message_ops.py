@@ -656,3 +656,122 @@ def test_brief_line_is_one_row_cut_to_width():
     brief = ops.brief_of(_message(7, text="x" * 200, media=object()))
     assert brief.line.startswith("7       2026-09-01 00:07 @harry: " + "x" * 59 + "…")
     assert brief.line.endswith("[media]")
+
+
+# -- what the seven quiet verbs read back ----------------------------------
+#
+# A reaction, a pin, a mark read or unread and a draft used to answer with the
+# argument they were given and nothing else, so a silent no-op and a real
+# success read the same. Each now carries Telegram's own answer in `result`.
+
+
+class CountingClient(FakeClient):
+    """The same account, counting message fetches, and able to answer a
+    reaction the way Telegram really does: an `Updates` carrying the new set."""
+
+    def __init__(self, *, answer_with_updates=False, **kwargs):
+        super().__init__(**kwargs)
+        self.answer_with_updates = answer_with_updates
+        self.fetches = 0
+
+    async def get_messages(self, peer, ids=None, **kwargs):
+        self.fetches += 1
+        return await super().get_messages(peer, ids=ids, **kwargs)
+
+    async def __call__(self, request):
+        if self.answer_with_updates and type(request).__name__ == "SendReactionRequest":
+            await super().__call__(request)
+            row = self.rows[self._chat(request.peer)][request.msg_id]
+            return SimpleNamespace(updates=[SimpleNamespace(msg_id=request.msg_id, reactions=row.reactions)])
+        return await super().__call__(request)
+
+
+class StubbornClient(FakeClient):
+    """Telegram that takes the call and changes nothing: the reaction does not
+    land, the pin does not hold, the chat stays unread, the draft reads its own."""
+
+    async def __call__(self, request):
+        name = type(request).__name__
+        if name == "SendReactionRequest":
+            chat = self._chat(request.peer)
+            self.calls.append(("react", chat, request.msg_id, [item.emoticon for item in (request.reaction or [])]))
+            return None
+        if name == "SaveDraftRequest":
+            self.calls.append(("draft", self._chat(request.peer), request.message, None))
+            self.dialog_state["draft"] = SimpleNamespace(message="an older draft")
+            return None
+        return await super().__call__(request)
+
+    async def pin_message(self, peer, message_id, **_):
+        self.calls.append(("pin_message", self._chat(peer), message_id))
+
+    async def send_read_acknowledge(self, peer, message=None, *, max_id=None, **_):
+        self.calls.append(("read", self._chat(peer)))
+        return True
+
+
+READBACK = {
+    "react": (["--id", "11", "--emoji", "🔥"], "reactions", [{"emoji": "🔥", "mine": True}]),
+    "unreact": (["--id", "13"], "reactions", []),
+    "pin": (["--id", "11"], "pinned", True),
+    "unpin": (["--id", "13"], "pinned", False),
+    "read": ([], "unread", {"count": 0, "marked": False}),
+    "unread": ([], "unread", {"count": 3, "marked": True}),
+    "draft": (["--text", "later: deploy", "--topic", "141"], "draft", "later: deploy"),
+}
+
+SHIPPED_KEYS = ("verb", "chat_id", "message_ids", "new_message_ids", "done", "dry_run", "cancelled")
+
+
+@pytest.mark.parametrize("verb", sorted(READBACK))
+def test_the_result_carries_the_server_state_beside_the_keys_that_already_shipped(run_cli, capsys, home, verb):
+    flags, key, expected = READBACK[verb]
+    code, out, _err, _fake = run_cli(["--json", "message", verb, "--chat", FORUM, *flags], capsys=capsys, answers=("y",))
+
+    assert code == 0, out
+    result = envelope_of(out)["result"]
+    assert result[key] == expected
+    assert all(shipped in result for shipped in SHIPPED_KEYS)
+
+
+DISAGREES = {
+    "react": (["--id", "13", "--emoji", "🔥"], "reactions", [{"emoji": "👍", "mine": True}]),
+    "pin": (["--id", "11"], "pinned", False),
+    "read": ([], "unread", {"count": 3, "marked": False}),
+    "draft": (["--text", "later: deploy"], "draft", "an older draft"),
+}
+
+
+@pytest.mark.parametrize("verb", sorted(DISAGREES))
+def test_when_the_server_disagrees_with_the_ask_the_result_reports_the_server(run_cli, capsys, home, verb):
+    flags, key, expected = DISAGREES[verb]
+    code, out, _err, _fake = run_cli(
+        ["--json", "message", verb, "--chat", FORUM, *flags], client=StubbornClient(), capsys=capsys, answers=("y",)
+    )
+
+    assert code == 0, out
+    envelope = envelope_of(out)
+    assert envelope["result"][key] == expected
+    # The argument is still there, and it is not what the readback says.
+    if verb == "react":
+        assert envelope["result"]["emoji"] == "🔥"
+    if verb == "draft":
+        assert envelope["result"]["text"] == "later: deploy"
+    assert envelope["evidence"]["readback"].startswith("unverified:"), envelope["evidence"]
+    assert audit_lines(home)[0]["evidence"]["readback"].startswith("unverified:")
+
+
+def test_a_reaction_takes_its_state_off_the_updates_instead_of_fetching_again(run_cli, capsys, home):
+    argv = ["--json", "message", "react", "--chat", FORUM, "--id", "11", "--emoji", "🔥"]
+
+    fetched = CountingClient()
+    code, _out, _err, _fake = run_cli(argv, client=fetched, capsys=capsys, answers=("y",))
+    assert code == 0
+
+    carried = CountingClient(answer_with_updates=True)
+    code, out, _err, _fake = run_cli(argv, client=carried, capsys=capsys, answers=("y",))
+
+    assert code == 0, out
+    assert envelope_of(out)["result"]["reactions"] == [{"emoji": "🔥", "mine": True}]
+    # The Updates already held the new set, so the readback fetch is not made.
+    assert carried.fetches == fetched.fetches - 1

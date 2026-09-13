@@ -16,7 +16,9 @@ to messages:
   answered blind. `@mentions` in outgoing text are named on their own line,
   because Telegram has no other mass-mention control;
 * **the call** -- one SDK call per verb, in `perform`, and one fetch per verb
-  in `read_back`, so the evidence says what actually happened.
+  in `read_back`, so the evidence says what actually happened. What that fetch
+  read is recorded on the outcome and reaches `result`, so a reader sees
+  Telegram's answer rather than the argument that asked for it.
 
 Nothing here decides who may run a verb: bot mode's list is `cli.py`'s, and
 the rights a verb needs are declared on its `Op` and checked by the caller.
@@ -194,6 +196,25 @@ def _reactions_of(message: Any) -> tuple[tuple[str, bool], ...]:
         if emoticon:
             found.append((str(emoticon), getattr(result, "chosen_order", None) is not None))
     return tuple(found)
+
+
+def _reaction_rows(reactions: Sequence[tuple[str, bool]]) -> list[dict[str, Any]]:
+    """The reactions a message carries, in the shape `result` reports them."""
+    return [{"emoji": emoticon, "mine": mine} for emoticon, mine in reactions]
+
+
+def _reactions_from_updates(updates: Any, message_id: int) -> tuple[tuple[str, bool], ...] | None:
+    """The new reaction set out of what `SendReactionRequest` already answered.
+
+    Telegram replies to a reaction with an `Updates` carrying
+    `UpdateMessageReactions` -- the whole set the message now holds -- so the
+    state is in hand and a second round trip would only ask for it again.
+    `None` means this answer did not carry one, and the readback fetches.
+    """
+    for update in getattr(updates, "updates", ()) or ():
+        if getattr(update, "msg_id", None) == message_id and getattr(update, "reactions", None) is not None:
+            return _reactions_of(update)
+    return None
 
 
 def brief_of(message: Any, *, me_id: int | None = None) -> Brief:
@@ -534,8 +555,12 @@ async def perform(client, request: Request, *, sleep=asyncio.sleep, bookmark_row
 
     if verb in ("react", "unreact"):
         reaction = [ReactionEmoji(emoticon=request.emoji)] if verb == "react" else []
-        await client(SendReactionRequest(peer=peer, msg_id=ids[0], reaction=reaction))
-        return Outcome(verb, request.chat_id, tuple(ids), extra={"emoji": request.emoji})
+        updates = await client(SendReactionRequest(peer=peer, msg_id=ids[0], reaction=reaction))
+        extra: dict[str, Any] = {"emoji": request.emoji}
+        carried = _reactions_from_updates(updates, ids[0])
+        if carried is not None:
+            extra["reactions"] = _reaction_rows(carried)
+        return Outcome(verb, request.chat_id, tuple(ids), extra=extra)
 
     if verb == "pin":
         await client.pin_message(peer, ids[0])
@@ -589,7 +614,13 @@ async def perform(client, request: Request, *, sleep=asyncio.sleep, bookmark_row
 
 
 async def read_back(client, request: Request, outcome: Outcome, *, where: str, destination: str | None = None) -> str:
-    """Fetch what the verb should have left behind and say it, or raise so the caller says `unverified`."""
+    """Fetch what the verb should have left behind and say it, or raise so the caller says `unverified`.
+
+    The state it read is recorded on the outcome as it is read -- `reactions`,
+    `pinned`, `unread`, `draft` -- so `result` carries Telegram's answer beside
+    the argument that asked for it, and still carries it when the two disagree
+    and the sentence below refuses to call the write verified.
+    """
     verb = request.verb
     peer = request.peer
 
@@ -620,8 +651,14 @@ async def read_back(client, request: Request, outcome: Outcome, *, where: str, d
         return f"{len(outcome.message_ids)} message(s) gone from {where}"
 
     if verb in ("react", "unreact"):
-        message = await client.get_messages(peer, ids=outcome.message_ids[0])
-        chosen = {emoticon for emoticon, mine in _reactions_of(message) if mine}
+        rows = outcome.extra.get("reactions")
+        if rows is None:
+            # Telegram's own answer carried no reaction set, so the message is
+            # the only place the new one exists: one cheap fetch of it.
+            message = await client.get_messages(peer, ids=outcome.message_ids[0])
+            rows = _reaction_rows(_reactions_of(message))
+            outcome.extra["reactions"] = rows
+        chosen = {row["emoji"] for row in rows if row["mine"]}
         if verb == "react" and request.emoji not in chosen:
             raise LookupError("the reaction is not on the message")
         if verb == "unreact" and (request.emoji in chosen if request.emoji else chosen):
@@ -631,8 +668,13 @@ async def read_back(client, request: Request, outcome: Outcome, *, where: str, d
         )
 
     if verb in ("pin", "unpin"):
+        # Telethon answers a pin with the service message Telegram posted -- and
+        # with notification off, with nothing at all -- never with the pinned
+        # flag itself, so one cheap fetch of the message is what says whether
+        # the chat holds it pinned now.
         message = await client.get_messages(peer, ids=outcome.message_ids[0])
         pinned = bool(getattr(message, "pinned", False))
+        outcome.extra["pinned"] = pinned
         if pinned != (verb == "pin"):
             raise LookupError("the pinned state did not change")
         return f"message {outcome.message_ids[0]} in {where} is {'pinned' if pinned else 'not pinned'}"
@@ -641,20 +683,25 @@ async def read_back(client, request: Request, outcome: Outcome, *, where: str, d
         raise LookupError("a typing status leaves nothing to read back")
 
     if verb in ("read", "unread", "draft"):
+        # All three are answered with a bare Bool, so the dialog is the only
+        # place the new state exists: one cheap fetch of it, shared by the three.
         dialogs = await client(GetPeerDialogsRequest(peers=[InputDialogPeer(peer=peer)]))
         dialog = (getattr(dialogs, "dialogs", None) or [None])[0]
         if dialog is None:
             raise LookupError("Telegram returned no dialog for the chat")
-        if verb == "read":
+        if verb in ("read", "unread"):
             unread = int(getattr(dialog, "unread_count", 0) or 0)
-            if unread:
-                raise LookupError(f"{unread} message(s) are still unread")
-            return f"{where} has no unread messages"
-        if verb == "unread":
-            if not getattr(dialog, "unread_mark", False):
+            marked = bool(getattr(dialog, "unread_mark", False))
+            outcome.extra["unread"] = {"count": unread, "marked": marked}
+            if verb == "read":
+                if unread:
+                    raise LookupError(f"{unread} message(s) are still unread")
+                return f"{where} has no unread messages"
+            if not marked:
                 raise LookupError("the chat is not marked unread")
             return f"{where} is marked unread"
         draft = getattr(getattr(dialog, "draft", None), "message", None)
+        outcome.extra["draft"] = None if draft is None else str(draft)
         if draft != (request.text or ""):
             raise LookupError("the draft does not read as the text")
         return f"the draft in {where} reads the text"
