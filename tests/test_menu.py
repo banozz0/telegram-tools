@@ -8,6 +8,7 @@ from telegram_tools._core.columns import width
 from telegram_tools.bots import IMPLICIT_OTHER_RIGHT, right_names
 from telegram_tools.config import ConfigError
 from telegram_tools.models import BotCommandInfo, BotInfo, ChatChoice, TopicInfo
+from telegram_tools.prompts import END_OF_MESSAGE
 
 
 def reader(*answers):
@@ -2473,6 +2474,56 @@ def test_react_stages_an_emoji_and_a_poll_stages_its_answers_and_topic():
     args = calls[0]
     assert (args.message_verb, args.topic, args.question, args.options, args.multiple) == ("poll", 141, "Ship it?", ["yes", "no"], True)
     assert "Answers      [yes / no]" in screens(output)
+
+
+def test_the_poll_question_is_asked_on_one_line_and_never_in_the_body_editor():
+    """Card agent-bo-95422215: a poll question is one line, so it is asked as one.
+
+    Telegram allows a question 255 characters on a single line. `ask_lines`, the
+    editor a message body gets, ends only on a lone `.`: a person who typed the
+    question there and pressed Enter would watch the prompt wait for more, and
+    the keystroke after it -- a menu number -- would be eaten as a second line
+    instead of choosing a row, which loses the poll. The prompts themselves are
+    read here, not just the field table, because only the prompt proves which
+    editor ran.
+    """
+    asked = []
+    keys = iter([*POLL, "1", "1", "2", "campaign 3.11 poll?", "3", "alpha", "beta", ".", "5", "", "0"])
+
+    def read(prompt):
+        asked.append(prompt)
+        return next(keys)
+
+    output = []
+    calls, runner = recorder()
+    code = asyncio.run(menu.run_menu(read=read, write=output.append, session=FakeSession(), runner=runner))
+
+    assert code == 0
+    assert menu.MESSAGE_FORMS["poll"][1] == ("question", "Question", "text")
+    assert "Question (blank cancels): " in asked
+    assert f"Question (blank cancels, {END_OF_MESSAGE} on its own line ends it):" not in screens(output)
+    # One Enter ended the question, so every keystroke after it was still a menu
+    # choice: the answers staged and the poll reached the runner whole.
+    args = calls[0]
+    assert (args.message_verb, args.question, args.options) == ("poll", "campaign 3.11 poll?", ["alpha", "beta"])
+    assert "Question     [campaign 3.11 poll?]" in screens(output)
+
+
+def test_a_typed_poll_question_is_accepted_and_only_a_bare_enter_cancels_the_row():
+    """The recovery keystroke must never be the one that loses the question.
+
+    `blank cancels` is the rule every text row carries, and it has to stay the
+    only way out: a question typed and entered stages, and Enter on the empty
+    prompt leaves the row as it was rather than staging an empty question.
+    """
+    # 2 = Question, Enter on the empty prompt cancels the row; 2 again, typed, stages.
+    answers = [POLL, "1", "1", "2", "", "2", "Ship it?", "3", "alpha", "beta", ".", "5", "", "0"]
+    code, calls, output = run_menu(answers)
+
+    assert code == 0
+    text = screens(output)
+    assert "Question     [(none)]" in text and "Question     [Ship it?]" in text
+    assert (calls[0].message_verb, calls[0].question, calls[0].options) == ("poll", "Ship it?", ["alpha", "beta"])
 
 
 def test_mark_read_needs_only_the_chat():
