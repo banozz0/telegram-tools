@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import re
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, time
-from typing import Any
+from typing import Any, Mapping
 
 
 def parse_date_bound(value: str | None, *, end_of_day: bool) -> datetime | None:
@@ -26,20 +28,274 @@ def topic_id_for_message(message: Any) -> int | None:
     return getattr(reply_to, "reply_to_top_id", None) or getattr(reply_to, "reply_to_msg_id", None)
 
 
-def message_to_record(message: Any, *, chat_id: int | None = None, topic_id: int | None = None) -> dict[str, Any]:
-    reply_to = getattr(message, "reply_to", None)
-    sender = getattr(message, "sender", None)
-    message_date = getattr(message, "date", None)
-    if isinstance(message_date, datetime):
-        if message_date.tzinfo is None:
-            message_date = message_date.replace(tzinfo=UTC)
-        date_value = message_date.astimezone(UTC).isoformat()
-    else:
-        date_value = None
+# -- what a message says about itself --------------------------------------
+#
+# A message's identifying text is not always the text it was typed with. A
+# poll carries its question and nothing else, and Telegram sends it as a
+# media, so it reached a listing as the same `[media]` placeholder a photo
+# does; a service message carries an action and no text at all, so it reached
+# a listing as a row with every column empty. Both reached the archive as an
+# empty `text` -- a row `messages_fts` indexes as nothing, which is a message
+# that cannot be found again.
+#
+# `message_body` is the one place that derivation happens. The printed line,
+# the export column and the archive row all read it, so a message says the
+# same thing about itself wherever it is shown. Its `extras` are record keys
+# added only when the message has them: an ordinary message's record, and the
+# CSV header derived from it, stays exactly what it was.
 
+
+@dataclass(frozen=True)
+class Body:
+    """A message's identifying text, and the additive keys that explain it."""
+
+    text: str
+    extras: dict[str, Any]
+
+
+# The derived text names its own kind, because that string is what the archive
+# stores, what FTS indexes and what every export column shows: a row that can
+# only be read on the screen it was printed on is the bug this fixes.
+POLL_MARKER = "[poll] "
+SERVICE_MARKER = "[event] "
+
+# Telegram's own action classes, as a phrase a person reads. Anything not
+# listed falls back to the class name with its words separated, which is never
+# wrong and never silent: a Telegram release that adds an action names it here
+# the day it arrives, and the row says what it is rather than nothing at all.
+SERVICE_LABELS = {
+    "topic_create": "topic created",
+    "topic_edit": "topic edited",
+    "pin_message": "message pinned",
+    "chat_create": "group created",
+    "channel_create": "channel created",
+    "chat_edit_title": "chat renamed",
+    "chat_edit_photo": "chat photo changed",
+    "chat_delete_photo": "chat photo removed",
+    "chat_add_user": "member added",
+    "chat_delete_user": "member removed",
+    "chat_joined_by_link": "joined by invite link",
+    "chat_joined_by_request": "join request approved",
+    "chat_migrate_to": "group upgraded to a supergroup",
+    "channel_migrate_from": "supergroup made from a group",
+    "history_clear": "history cleared",
+    "set_messages_ttl": "auto-delete timer changed",
+    "set_chat_theme": "chat theme changed",
+    "contact_sign_up": "joined Telegram",
+    "screenshot_taken": "screenshot taken",
+    "phone_call": "call",
+    "group_call": "group call",
+    "group_call_scheduled": "group call scheduled",
+}
+
+
+def _utc_iso(value: Any) -> str | None:
+    """A Telethon datetime as UTC ISO-8601, or None when there is not one."""
+    if not isinstance(value, datetime):
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return value.astimezone(UTC).isoformat()
+
+
+def _plain_text(value: Any) -> str:
+    """A `TextWithEntities` or the bare string an older layer carries, as a string."""
+    if value is None:
+        return ""
+    inner = getattr(value, "text", None)
+    return str(value if inner is None else inner)
+
+
+def poll_of(message: Any) -> dict[str, Any] | None:
+    """A poll's question and answers, or None when the message is not a poll.
+
+    Telegram hands a poll over as a media, which is why it wore the photo's
+    placeholder -- but the question and the answer texts arrive as plain
+    strings, so nothing is downloaded and no review-queue rule is involved.
+    """
+    poll = getattr(getattr(message, "media", None), "poll", None)
+    if poll is None:
+        return None
+    answers = [_plain_text(getattr(answer, "text", None)) for answer in (getattr(poll, "answers", None) or ())]
+    return {
+        "question": _plain_text(getattr(poll, "question", None)),
+        "answers": [answer for answer in answers if answer],
+    }
+
+
+def poll_text(poll: Mapping[str, Any]) -> str:
+    """`[poll] ship it? — yes / no`: the one line that names a poll and can be searched."""
+    line = (POLL_MARKER + str(poll.get("question") or "")).rstrip()
+    answers = " / ".join(poll.get("answers") or ())
+    return f"{line} — {answers}" if answers else line
+
+
+def _action_name(class_name: str) -> str:
+    """`MessageActionTopicCreate` as `topic_create`; `MessageActionSetMessagesTTL` as `set_messages_ttl`."""
+    stem = class_name.removeprefix("MessageAction") or class_name
+    return re.sub(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])", "_", stem).lower()
+
+
+def service_of(message: Any) -> dict[str, Any] | None:
+    """The event a service message *is*, or None for a message someone wrote.
+
+    Telegram writes its own events into a chat -- a topic created, a message
+    pinned, someone added -- and counts them in the numbering, which is why
+    dropping them would make the printed ids look gappy and would hide the
+    record of a topic being created. They carry no text of their own, so they
+    reached a listing as a row with every column empty and reached the store as
+    a row nothing can search for. The action is the text they have.
+    """
+    action = getattr(message, "action", None)
+    if action is None:
+        return None
+    name = _action_name(type(action).__name__)
+    record = {"action": name, "label": SERVICE_LABELS.get(name, name.replace("_", " "))}
+    # The one detail worth the row: what a created topic, a renamed chat or a
+    # new group is called. Everything else about an action stays on Telegram.
+    title = getattr(action, "title", None)
+    if isinstance(title, str) and title:
+        record["title"] = title
+    return record
+
+
+def service_text(service: Mapping[str, Any]) -> str:
+    """`[event] topic created: Deploys`: the named event a blank row used to be."""
+    line = SERVICE_MARKER + str(service.get("label") or "")
+    title = service.get("title")
+    return f"{line}: {title}" if title else line
+
+
+def _entity_label(entity: Any) -> str:
+    """A user or chat as a person reads it: `@username`, else a name, else a title."""
+    if entity is None:
+        return ""
+    username = getattr(entity, "username", None)
+    if username:
+        return f"@{username}"
+    name = " ".join(
+        part for part in (getattr(entity, "first_name", None), getattr(entity, "last_name", None)) if part
+    ).strip()
+    if name:
+        return name
+    return str(getattr(entity, "title", None) or "")
+
+
+def forward_of(message: Any) -> dict[str, Any] | None:
+    """Telegram's own attribution on a forwarded message, or None on one written here.
+
+    A copy is deliberately not a forward: `message copy` re-posts the text and
+    the links and drops the author, which is why the tool has both verbs. The
+    absence of this key is therefore a fact about the message and not a gap in
+    the record -- it is what tells a message written in a chat from one moved
+    there with its author attached.
+    """
+    forward = getattr(message, "forward", None)
+    if forward is None:
+        return None
+    sender_id = getattr(forward, "sender_id", None)
+    chat_id = getattr(forward, "chat_id", None)
+    sender = _entity_label(getattr(forward, "sender", None)) or None
+    chat = _entity_label(getattr(forward, "chat", None)) or None
+    # A hidden forward: the original author restricts forwards, so Telegram
+    # sends a display name and no id of any kind. The name is kept -- it is the
+    # only thing there is -- and flagged, and no id is invented for it, because
+    # an unresolvable name is exactly what `hidden` has to warn a reader about.
+    hidden = sender_id is None and chat_id is None
+    if hidden:
+        sender = str(getattr(forward, "from_name", None) or "") or None
+    record = {
+        "sender_id": None if sender_id is None else int(sender_id),
+        "sender": sender,
+        "chat_id": None if chat_id is None else int(chat_id),
+        "chat": chat,
+        "date": _utc_iso(getattr(forward, "date", None)),
+        "hidden": hidden,
+    }
+    record["label"] = forward_label(record)
+    return record
+
+
+def forward_label(forward: Mapping[str, Any]) -> str:
+    """How a forward reads at a glance: `@harry`, `Alerts`, `@harry in Alerts`, `Alice (hidden)`."""
+    sender = forward.get("sender") or ""
+    chat = forward.get("chat") or ""
+    who = f"{sender} in {chat}" if sender and chat else (sender or chat or "someone")
+    return f"{who} (hidden)" if forward.get("hidden") else who
+
+
+def message_body(message: Any) -> Body:
+    """The text this message is identified by, and what explains it.
+
+    The message's own text wins whenever it has one: a poll with a caption is
+    still that caption. The derivation only fills a body that would otherwise
+    be empty, so nothing a person typed is ever displaced.
+    """
     text = getattr(message, "raw_text", None)
     if text is None:
         text = getattr(message, "message", "") or ""
+    text = str(text)
+    extras: dict[str, Any] = {}
+
+    forward = forward_of(message)
+    if forward is not None:
+        extras["forwarded_from"] = forward
+
+    poll = poll_of(message)
+    if poll is not None:
+        extras["poll"] = poll
+        if not text.strip():
+            text = poll_text(poll)
+
+    service = service_of(message)
+    if service is not None:
+        extras["service"] = service
+        if not text.strip():
+            text = service_text(service)
+
+    return Body(text=text, extras=extras)
+
+
+def record_marks(record: Mapping[str, Any], *, media: bool = True) -> str:
+    """The bracketed marks a record's line carries, ready to sit in front of its text.
+
+    Outside any truncation, so a long caption can never push one off the row:
+    without it a photo with no caption prints as an empty line and reads as
+    "nothing was sent". The exports have carried `has_media` all along.
+
+    Provenance comes first and the kind second -- `[fwd @harry] [media] …` --
+    because who a message came from is read before what it carries.
+
+    A poll is marked by its kind rather than by `[media]`, which is the
+    placeholder that hid it. It is marked here only when its text is not the
+    derived one, which already opens with the marker -- a poll sent with a
+    caption shows the caption, so the line is the only place left to name it.
+
+    `media=False` is for the two export formats that carry a media column of
+    their own; the provenance and kind marks stay, because no column holds them.
+    """
+    marks: list[str] = []
+    text = str(record.get("text") or "")
+    forward = record.get("forwarded_from")
+    if forward:
+        marks.append(f"[fwd {forward_label(forward)}]")
+    if record.get("poll"):
+        if not text.startswith(POLL_MARKER):
+            marks.append(POLL_MARKER.strip())
+    elif record.get("service"):
+        if not text.startswith(SERVICE_MARKER):
+            marks.append(SERVICE_MARKER.strip())
+    elif media and record.get("has_media"):
+        marks.append("[media]")
+    return "".join(mark + " " for mark in marks)
+
+
+def message_to_record(message: Any, *, chat_id: int | None = None, topic_id: int | None = None) -> dict[str, Any]:
+    reply_to = getattr(message, "reply_to", None)
+    sender = getattr(message, "sender", None)
+    date_value = _utc_iso(getattr(message, "date", None))
+
+    body = message_body(message)
 
     return {
         "id": int(getattr(message, "id")),
@@ -51,7 +307,10 @@ def message_to_record(message: Any, *, chat_id: int | None = None, topic_id: int
         "reply_to_msg_id": getattr(reply_to, "reply_to_msg_id", None) if reply_to else None,
         "reply_to_top_id": getattr(reply_to, "reply_to_top_id", None) if reply_to else None,
         "has_media": bool(getattr(message, "media", None)),
-        "text": text,
+        "text": body.text,
+        # Last, and only when the message has them: the shipped keys keep their
+        # places and a plain message's CSV header is the header it always was.
+        **body.extras,
     }
 
 

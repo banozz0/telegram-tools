@@ -103,6 +103,24 @@ The terms this codebase uses, and the boundaries they imply.
 - **Copy** — `message copy` re-posts a message's text as the identity and, for
   an attachment, a link to the original (`messages.message_link`). Never the
   bytes: downloads belong to the review queue and its quarantine.
+- **Service message** — an event Telegram writes into a chat itself: a topic
+  created, a message pinned, a member added. `records.service_of` names it from
+  the action's own class (`SERVICE_LABELS`, else the class name with its words
+  separated), so the row reads `[event] topic created: Campaign` instead of
+  printing empty. They are **listed, not dropped**: Telegram counts them in the
+  message numbering, so hiding them would make the printed ids look gappy and
+  would lose the record of a topic being created. Filtering is a caller's job
+  over `service` in the envelope, never a default.
+- **Forward attribution** — `records.forward_of`, off Telethon's
+  `message.forward`: the original sender, chat and date of a forwarded message,
+  carried as the record's `forwarded_from` and marked `[fwd @harry in Alerts]`
+  on the row. A copy has none, and that absence is the answer to whether a
+  message was written in a chat or moved there with its author attached — which
+  is the distinction `forward` and `copy` exist to draw.
+- **Hidden forward** — an original author who restricts forwarding: Telegram
+  sends a display name (`from_name`) and no id of any kind. The name is kept,
+  `hidden` is true and the row reads `(hidden)`; no id is invented for it,
+  because an unresolvable name is exactly what a reader has to be warned about.
 - **Mentions line** — `Mentions @harry, @all (everyone in the chat)`, above the
   body of every posting preview (`mentions.py`). Telegram has no mass-mention
   control beyond the text, so naming them is the whole control.
@@ -187,6 +205,16 @@ The terms this codebase uses, and the boundaries they imply.
 - **Record** — the plain dict a message becomes (`records.py`): what `search`
   prints and what both export formats write. `has_media` keeps an
   attachment-only message from reading as empty.
+- **Body** — `records.message_body`: the text a message is *identified* by,
+  and the additive record keys that explain it. The message's own text always
+  wins; the derivation only fills a body that would otherwise be empty. One
+  seam, read by the printed line, the export columns and the archive row, so a
+  message says the same thing about itself wherever it is shown.
+- **Poll** — a `MessageMediaPoll`. Its question and answer texts arrive as
+  plain strings, so a poll's body is `[poll] <question> — <a> / <b>` with no
+  download; `record["poll"]` carries the question and the answers, and the
+  archive stores the same line as `text`, which is the only column
+  `messages_fts` indexes.
 - **Owned bot** — a bot the account created. `bots` edits name, bio and
   description through the account (BotFather's own API), and commands, photo
   and default admin rights through **that bot's** token from

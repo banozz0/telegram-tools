@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from telegram_tools.records import message_matches_filters, message_to_record, parse_date_bound
+from telegram_tools.records import (
+    message_matches_filters,
+    message_to_record,
+    parse_date_bound,
+    record_marks,
+)
 
 
 def _truncate(value: str, max_length: int = 80) -> str:
@@ -22,12 +27,11 @@ def format_message_records(records: list[dict[str, Any]]) -> str:
         topic = record.get("topic_id") or ""
         date = record.get("date") or ""
         text = _truncate(str(record.get("text") or ""))
-        # Outside the truncation, so a long caption can never push it off the row:
-        # without it a photo with no caption prints as an empty line and reads as
-        # "nothing was sent". The exports have carried `has_media` all along.
-        media = "[media] " if record.get("has_media") else ""
+        # `records.record_marks` is the one place a record's marks are derived,
+        # so this row and the export formats mark the same message the same way.
+        marks = record_marks(record)
         lines.append(
-            f"{record.get('id')}\t{date}\ttopic={topic}\tsender={sender}\t{media}{text}"
+            f"{record.get('id')}\t{date}\ttopic={topic}\tsender={sender}\t{marks}{text}"
         )
     return "\n".join(lines)
 

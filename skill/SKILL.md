@@ -384,6 +384,31 @@ names the files).
 - **`[media]` in a `search` row means a photo or file is attached.** A media-only
   message has no text at all, so without that marker the row looks empty and reads
   as "nothing is there". `--format json` carries the same fact as `has_media`.
+- **A poll is marked `[poll]` and shows its question.** A poll is a media, so it
+  used to wear the `[media]` placeholder and the one thing that identifies it went
+  nowhere. Its row now reads `[poll] ship it? — yes / no`; `--format json` carries
+  `poll` with the question and the answers, and the archive stores that same line
+  as the message's text, so `archive search` finds a poll by a word of its question.
+- **`[event] …` is one of Telegram's own service messages, and they are listed.**
+  A topic created, a message pinned, a member added: events Telegram writes into
+  the chat itself and *counts in the message numbering*. They carry no text, so
+  they used to print as rows with every column empty. They now name their action
+  — `[event] topic created: Campaign`, `[event] message pinned` — and are listed
+  by default, because dropping them would make the printed ids look gappy and
+  would hide the record of a topic being created. `--format json` carries
+  `service` (`action`, `label`, and `title` where there is one), and the archive
+  stores the same line as the text, so `archive search --query pinned` finds them.
+  There is no flag to hide them; filter on `service` in the envelope if you need
+  only what people wrote.
+- **`[fwd …]` on a row means Telegram's own attribution, which a copy never has.**
+  `[fwd @harry]`, `[fwd Alerts]` or `[fwd @harry in Alerts]`; a forward whose
+  original author restricts forwarding shows the display name Telegram sends and
+  is marked `[fwd Alice (hidden)]`, because there is no id behind that name to
+  resolve. `--format json` carries `forwarded_from` (`sender_id`, `sender`,
+  `chat_id`, `chat`, `date`, `hidden`, `label`) and the archive keeps it in the
+  row's `platform_json`. Its **absence is the answer** to "was this written here
+  or moved here": `message copy` drops the author on purpose, so a copy has no
+  such key and reads as a plain line.
 - **`archive search` is offline and `--query` is FTS5 syntax**: words, `"a phrase"`,
   `AND`, `OR`, `NOT`, `prefix*`. Punctuation inside a bare word (a hyphen, a dot) is
   syntax to FTS5, so quote it: `--query '"v3.4.1"'`. `--scope <rid>`, `--from
