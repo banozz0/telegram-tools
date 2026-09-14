@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time
 from typing import Any, Mapping
@@ -32,8 +33,10 @@ def topic_id_for_message(message: Any) -> int | None:
 # A message's identifying text is not always the text it was typed with. A
 # poll carries its question and nothing else, and Telegram sends it as a
 # media, so it reached a listing as the same `[media]` placeholder a photo
-# does and reached the archive as an empty `text` -- a row `messages_fts`
-# indexes as nothing, which is a message that cannot be found again.
+# does; a service message carries an action and no text at all, so it reached
+# a listing as a row with every column empty. Both reached the archive as an
+# empty `text` -- a row `messages_fts` indexes as nothing, which is a message
+# that cannot be found again.
 #
 # `message_body` is the one place that derivation happens. The printed line,
 # the export column and the archive row all read it, so a message says the
@@ -54,6 +57,36 @@ class Body:
 # stores, what FTS indexes and what every export column shows: a row that can
 # only be read on the screen it was printed on is the bug this fixes.
 POLL_MARKER = "[poll] "
+SERVICE_MARKER = "[event] "
+
+# Telegram's own action classes, as a phrase a person reads. Anything not
+# listed falls back to the class name with its words separated, which is never
+# wrong and never silent: a Telegram release that adds an action names it here
+# the day it arrives, and the row says what it is rather than nothing at all.
+SERVICE_LABELS = {
+    "topic_create": "topic created",
+    "topic_edit": "topic edited",
+    "pin_message": "message pinned",
+    "chat_create": "group created",
+    "channel_create": "channel created",
+    "chat_edit_title": "chat renamed",
+    "chat_edit_photo": "chat photo changed",
+    "chat_delete_photo": "chat photo removed",
+    "chat_add_user": "member added",
+    "chat_delete_user": "member removed",
+    "chat_joined_by_link": "joined by invite link",
+    "chat_joined_by_request": "join request approved",
+    "chat_migrate_to": "group upgraded to a supergroup",
+    "channel_migrate_from": "supergroup made from a group",
+    "history_clear": "history cleared",
+    "set_messages_ttl": "auto-delete timer changed",
+    "set_chat_theme": "chat theme changed",
+    "contact_sign_up": "joined Telegram",
+    "screenshot_taken": "screenshot taken",
+    "phone_call": "call",
+    "group_call": "group call",
+    "group_call_scheduled": "group call scheduled",
+}
 
 
 def _utc_iso(value: Any) -> str | None:
@@ -95,6 +128,42 @@ def poll_text(poll: Mapping[str, Any]) -> str:
     line = (POLL_MARKER + str(poll.get("question") or "")).rstrip()
     answers = " / ".join(poll.get("answers") or ())
     return f"{line} — {answers}" if answers else line
+
+
+def _action_name(class_name: str) -> str:
+    """`MessageActionTopicCreate` as `topic_create`; `MessageActionSetMessagesTTL` as `set_messages_ttl`."""
+    stem = class_name.removeprefix("MessageAction") or class_name
+    return re.sub(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])", "_", stem).lower()
+
+
+def service_of(message: Any) -> dict[str, Any] | None:
+    """The event a service message *is*, or None for a message someone wrote.
+
+    Telegram writes its own events into a chat -- a topic created, a message
+    pinned, someone added -- and counts them in the numbering, which is why
+    dropping them would make the printed ids look gappy and would hide the
+    record of a topic being created. They carry no text of their own, so they
+    reached a listing as a row with every column empty and reached the store as
+    a row nothing can search for. The action is the text they have.
+    """
+    action = getattr(message, "action", None)
+    if action is None:
+        return None
+    name = _action_name(type(action).__name__)
+    record = {"action": name, "label": SERVICE_LABELS.get(name, name.replace("_", " "))}
+    # The one detail worth the row: what a created topic, a renamed chat or a
+    # new group is called. Everything else about an action stays on Telegram.
+    title = getattr(action, "title", None)
+    if isinstance(title, str) and title:
+        record["title"] = title
+    return record
+
+
+def service_text(service: Mapping[str, Any]) -> str:
+    """`[event] topic created: Deploys`: the named event a blank row used to be."""
+    line = SERVICE_MARKER + str(service.get("label") or "")
+    title = service.get("title")
+    return f"{line}: {title}" if title else line
 
 
 def _entity_label(entity: Any) -> str:
@@ -178,6 +247,12 @@ def message_body(message: Any) -> Body:
         if not text.strip():
             text = poll_text(poll)
 
+    service = service_of(message)
+    if service is not None:
+        extras["service"] = service
+        if not text.strip():
+            text = service_text(service)
+
     return Body(text=text, extras=extras)
 
 
@@ -207,6 +282,9 @@ def record_marks(record: Mapping[str, Any], *, media: bool = True) -> str:
     if record.get("poll"):
         if not text.startswith(POLL_MARKER):
             marks.append(POLL_MARKER.strip())
+    elif record.get("service"):
+        if not text.startswith(SERVICE_MARKER):
+            marks.append(SERVICE_MARKER.strip())
     elif media and record.get("has_media"):
         marks.append("[media]")
     return "".join(mark + " " for mark in marks)

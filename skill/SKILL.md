@@ -389,6 +389,17 @@ names the files).
   nowhere. Its row now reads `[poll] ship it? — yes / no`; `--format json` carries
   `poll` with the question and the answers, and the archive stores that same line
   as the message's text, so `archive search` finds a poll by a word of its question.
+- **`[event] …` is one of Telegram's own service messages, and they are listed.**
+  A topic created, a message pinned, a member added: events Telegram writes into
+  the chat itself and *counts in the message numbering*. They carry no text, so
+  they used to print as rows with every column empty. They now name their action
+  — `[event] topic created: Campaign`, `[event] message pinned` — and are listed
+  by default, because dropping them would make the printed ids look gappy and
+  would hide the record of a topic being created. `--format json` carries
+  `service` (`action`, `label`, and `title` where there is one), and the archive
+  stores the same line as the text, so `archive search --query pinned` finds them.
+  There is no flag to hide them; filter on `service` in the envelope if you need
+  only what people wrote.
 - **`[fwd …]` on a row means Telegram's own attribution, which a copy never has.**
   `[fwd @harry]`, `[fwd Alerts]` or `[fwd @harry in Alerts]`; a forward whose
   original author restricts forwarding shows the display name Telegram sends and

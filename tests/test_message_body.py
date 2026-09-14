@@ -248,3 +248,69 @@ def test_the_human_export_formats_carry_the_forward_and_leave_the_media_column_t
     assert rows[0]["text"] == "[fwd @harry] campaign 3.1"
     assert rows[1]["text"] == "campaign 3.1", "a copy reads as what it is: a plain line"
     assert rows[2]["text"] == "" and rows[2]["media"] == 1, "the media column already says it"
+
+
+# -- a service message (card agent-bo-95422218) ----------------------------
+
+
+def service(name: str, **fields):
+    """A `MessageAction*`: the class name is the event, which is all Telegram sends."""
+    return type(name, (SimpleNamespace,), {})(**fields)
+
+
+def test_a_created_topic_and_a_pinned_message_name_their_event_instead_of_printing_blank():
+    created = fake_message(6, action=service("MessageActionTopicCreate", title="Campaign", icon_color=0))
+    pinned = fake_message(15, action=service("MessageActionPinMessage"))
+
+    created_record, created_text = printed(created)
+    assert created_record["service"] == {"action": "topic_create", "label": "topic created", "title": "Campaign"}
+    assert created_record["text"] == "[event] topic created: Campaign"
+    assert created_text.rstrip().endswith("[event] topic created: Campaign"), "the row ends in the event, not in nothing"
+
+    pinned_record, pinned_text = printed(pinned)
+    assert pinned_record["service"] == {"action": "pin_message", "label": "message pinned"}
+    assert "[event] message pinned" in pinned_text
+
+
+def test_a_service_message_reaches_the_archive_as_text_a_search_can_find(archive):
+    record = archived(archive, fake_message(15, action=service("MessageActionPinMessage")))
+
+    assert record["text"] == "[event] message pinned"
+    assert record["platform_json"]["service"]["action"] == "pin_message"
+
+    hits = archive.search('"pinned"')
+    assert [hit.message_id for hit in hits] == ["15"], "a row with no text is a row nothing can search for"
+
+
+def test_an_action_with_no_phrase_of_its_own_is_named_from_telegrams_own_class():
+    """A Telegram release that adds an action is named the day it arrives, never dropped."""
+    record, text = printed(fake_message(7, action=service("MessageActionGiftPremium", months=3)))
+
+    assert record["service"] == {"action": "gift_premium", "label": "gift premium"}
+    assert "[event] gift premium" in text
+
+
+def test_a_run_of_service_messages_leaves_no_blank_row_and_keeps_the_ids_honest():
+    """Section 2 row 2.1: four of ten rows of a fresh forum printed as empty lines."""
+    records = [
+        message_to_record(fake_message(6, action=service("MessageActionTopicCreate", title="General")), chat_id=CHAT_ID),
+        message_to_record(fake_message(7, action=service("MessageActionChatAddUser", users=[1])), chat_id=CHAT_ID),
+        message_to_record(fake_message(8, raw_text="campaign 3.1", message="campaign 3.1"), chat_id=CHAT_ID),
+    ]
+
+    rows = format_message_records(records).splitlines()[2:]
+
+    assert [row.split("\t")[0] for row in rows] == ["6", "7", "8"], "every event keeps its id; nothing is dropped"
+    assert not [row for row in rows if row.endswith("\t")], "no row ends in an empty text column"
+    assert "[event] topic created: General" in rows[0]
+    assert "[event] member added" in rows[1]
+
+
+def test_the_export_formats_show_the_same_named_event_the_screen_does():
+    from telegram_tools.exporters import live_rows
+
+    record = message_to_record(fake_message(6, action=service("MessageActionTopicCreate", title="Campaign")), chat_id=CHAT_ID)
+    row = live_rows([record], chat_title="Team Hermes")[0]
+
+    assert row["text"] == "[event] topic created: Campaign", "a file and a screen agree"
+    assert row["media"] == 0

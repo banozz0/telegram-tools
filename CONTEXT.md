@@ -103,6 +103,14 @@ The terms this codebase uses, and the boundaries they imply.
 - **Copy** — `message copy` re-posts a message's text as the identity and, for
   an attachment, a link to the original (`messages.message_link`). Never the
   bytes: downloads belong to the review queue and its quarantine.
+- **Service message** — an event Telegram writes into a chat itself: a topic
+  created, a message pinned, a member added. `records.service_of` names it from
+  the action's own class (`SERVICE_LABELS`, else the class name with its words
+  separated), so the row reads `[event] topic created: Campaign` instead of
+  printing empty. They are **listed, not dropped**: Telegram counts them in the
+  message numbering, so hiding them would make the printed ids look gappy and
+  would lose the record of a topic being created. Filtering is a caller's job
+  over `service` in the envelope, never a default.
 - **Forward attribution** — `records.forward_of`, off Telethon's
   `message.forward`: the original sender, chat and date of a forwarded message,
   carried as the record's `forwarded_from` and marked `[fwd @harry in Alerts]`
