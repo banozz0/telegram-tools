@@ -7,6 +7,7 @@ from typing import Any, Iterable
 
 from telegram_tools._core import export as _export
 from telegram_tools._core import rid as _rid
+from telegram_tools.records import record_marks
 
 # What `search --format` takes. `json` and `csv` are written here exactly as
 # they always were; the three that joined them on the archive card render
@@ -43,6 +44,11 @@ def live_rows(records: Iterable[dict[str, Any]], *, prefix: str = "tg", chat_tit
     in `json`, `csv` and `jsonl`, because scripts read them; the two human
     formats want a rid, a message id, a sender and a media count, which is
     this mapping.
+
+    Their columns are fixed, so the marks the printed line carries go in front
+    of the text here -- the same `records.record_marks`, minus the `[media]`
+    one, which is what the media column already says. A file and a screen then
+    tell a forward from a copy the same way.
     """
     rows = []
     for record in records:
@@ -61,7 +67,7 @@ def live_rows(records: Iterable[dict[str, Any]], *, prefix: str = "tg", chat_tit
                 "scope_title": chat_title,
                 "date": record.get("date"),
                 "author": record.get("sender_username") or ("" if record.get("sender_id") is None else str(record["sender_id"])),
-                "text": record.get("text") or "",
+                "text": record_marks(record, media=False) + (record.get("text") or ""),
                 "media": 1 if record.get("has_media") else 0,
             }
         )

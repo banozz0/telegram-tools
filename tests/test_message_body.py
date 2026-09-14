@@ -60,6 +60,18 @@ def fake_message(number: int, **fields):
     return SimpleNamespace(**base)
 
 
+def forwarded(sender=None, chat=None, from_name=None):
+    """`message.forward`: Telethon's attribution, with the ids a hidden forward never has."""
+    return SimpleNamespace(
+        sender_id=getattr(sender, "id", None),
+        sender=sender,
+        chat_id=getattr(chat, "id", None),
+        chat=chat,
+        from_name=from_name,
+        date=datetime(2026, 9, 11, 9, 0, tzinfo=UTC),
+    )
+
+
 def poll_media(question: str, *answers: str):
     """`MessageMediaPoll`, with the `TextWithEntities` the current layer wraps every string in."""
     return SimpleNamespace(
@@ -151,3 +163,88 @@ def test_a_photo_is_untouched_by_the_poll_derivation(archive):
     assert record["text"] == ""
     assert "[media]" in text
     assert "poll" not in archived(archive, message)["platform_json"]
+
+
+# -- a forward (card agent-bo-95422217) ------------------------------------
+
+ALERTS = SimpleNamespace(id=-1001000000003, title="Alerts", username=None)
+
+
+def test_a_forward_names_where_it_came_from_and_a_copy_names_nothing(archive):
+    forward = fake_message(13, raw_text="campaign 3.1", message="campaign 3.1", forward=forwarded(sender=SENDER))
+    copy = fake_message(14, raw_text="campaign 3.1", message="campaign 3.1")
+
+    record, text = printed(forward)
+    assert record["forwarded_from"]["sender_id"] == SENDER.id
+    assert record["forwarded_from"]["sender"] == "@harry"
+    assert record["forwarded_from"]["hidden"] is False
+    assert record["forwarded_from"]["date"] == "2026-09-11T09:00:00+00:00"
+    assert "[fwd @harry] campaign 3.1" in text
+
+    plain_record, plain_text = printed(copy)
+    assert "forwarded_from" not in plain_record, "a copy drops the author on purpose; the absent key is the fact"
+    assert "[fwd" not in plain_text
+
+    assert archived(archive, forward)["platform_json"]["forwarded_from"]["sender"] == "@harry"
+    assert "forwarded_from" not in archived(archive, copy)["platform_json"]
+    # The text is the text either way: a marker in front of it would rewrite
+    # what the person actually wrote, and the two rows must stay comparable.
+    assert archive.connection.execute(
+        "SELECT COUNT(*) FROM messages WHERE text = 'campaign 3.1'"
+    ).fetchone()[0] == 2
+
+
+def test_a_forwarded_channel_post_names_the_chat_and_a_signed_one_names_both():
+    from_channel = fake_message(20, raw_text="deploy is green", forward=forwarded(chat=ALERTS))
+    signed = fake_message(21, raw_text="deploy is green", forward=forwarded(sender=SENDER, chat=ALERTS))
+
+    record, text = printed(from_channel)
+    assert record["forwarded_from"]["chat_id"] == ALERTS.id and record["forwarded_from"]["sender"] is None
+    assert "[fwd Alerts]" in text
+
+    both, both_text = printed(signed)
+    assert both["forwarded_from"]["label"] == "@harry in Alerts"
+    assert "[fwd @harry in Alerts]" in both_text
+
+
+def test_a_hidden_forward_keeps_the_name_invents_no_id_and_says_it_is_hidden():
+    """Forwards restricted on the original author: Telegram sends a name and nothing else."""
+    message = fake_message(22, raw_text="leaked", forward=forwarded(from_name="Alice"))
+
+    record, text = printed(message)
+
+    assert record["forwarded_from"] == {
+        "sender_id": None,
+        "sender": "Alice",
+        "chat_id": None,
+        "chat": None,
+        "date": "2026-09-11T09:00:00+00:00",
+        "hidden": True,
+        "label": "Alice (hidden)",
+    }
+    assert "[fwd Alice (hidden)] leaked" in text
+
+
+def test_a_forwarded_photo_is_marked_by_both_where_it_came_from_and_what_it_carries():
+    message = fake_message(23, media=SimpleNamespace(photo=object()), forward=forwarded(sender=SENDER))
+
+    _record, text = printed(message)
+
+    assert "[fwd @harry] [media]" in text, "provenance first, then the kind"
+
+
+def test_the_human_export_formats_carry_the_forward_and_leave_the_media_column_to_say_media():
+    from telegram_tools.exporters import live_rows
+
+    rows = live_rows(
+        [
+            message_to_record(fake_message(13, raw_text="campaign 3.1", forward=forwarded(sender=SENDER)), chat_id=CHAT_ID),
+            message_to_record(fake_message(14, raw_text="campaign 3.1"), chat_id=CHAT_ID),
+            message_to_record(fake_message(23, media=SimpleNamespace(photo=object())), chat_id=CHAT_ID),
+        ],
+        chat_title="Team Hermes",
+    )
+
+    assert rows[0]["text"] == "[fwd @harry] campaign 3.1"
+    assert rows[1]["text"] == "campaign 3.1", "a copy reads as what it is: a plain line"
+    assert rows[2]["text"] == "" and rows[2]["media"] == 1, "the media column already says it"

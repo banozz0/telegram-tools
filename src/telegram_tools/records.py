@@ -56,6 +56,15 @@ class Body:
 POLL_MARKER = "[poll] "
 
 
+def _utc_iso(value: Any) -> str | None:
+    """A Telethon datetime as UTC ISO-8601, or None when there is not one."""
+    if not isinstance(value, datetime):
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return value.astimezone(UTC).isoformat()
+
+
 def _plain_text(value: Any) -> str:
     """A `TextWithEntities` or the bare string an older layer carries, as a string."""
     if value is None:
@@ -88,6 +97,64 @@ def poll_text(poll: Mapping[str, Any]) -> str:
     return f"{line} — {answers}" if answers else line
 
 
+def _entity_label(entity: Any) -> str:
+    """A user or chat as a person reads it: `@username`, else a name, else a title."""
+    if entity is None:
+        return ""
+    username = getattr(entity, "username", None)
+    if username:
+        return f"@{username}"
+    name = " ".join(
+        part for part in (getattr(entity, "first_name", None), getattr(entity, "last_name", None)) if part
+    ).strip()
+    if name:
+        return name
+    return str(getattr(entity, "title", None) or "")
+
+
+def forward_of(message: Any) -> dict[str, Any] | None:
+    """Telegram's own attribution on a forwarded message, or None on one written here.
+
+    A copy is deliberately not a forward: `message copy` re-posts the text and
+    the links and drops the author, which is why the tool has both verbs. The
+    absence of this key is therefore a fact about the message and not a gap in
+    the record -- it is what tells a message written in a chat from one moved
+    there with its author attached.
+    """
+    forward = getattr(message, "forward", None)
+    if forward is None:
+        return None
+    sender_id = getattr(forward, "sender_id", None)
+    chat_id = getattr(forward, "chat_id", None)
+    sender = _entity_label(getattr(forward, "sender", None)) or None
+    chat = _entity_label(getattr(forward, "chat", None)) or None
+    # A hidden forward: the original author restricts forwards, so Telegram
+    # sends a display name and no id of any kind. The name is kept -- it is the
+    # only thing there is -- and flagged, and no id is invented for it, because
+    # an unresolvable name is exactly what `hidden` has to warn a reader about.
+    hidden = sender_id is None and chat_id is None
+    if hidden:
+        sender = str(getattr(forward, "from_name", None) or "") or None
+    record = {
+        "sender_id": None if sender_id is None else int(sender_id),
+        "sender": sender,
+        "chat_id": None if chat_id is None else int(chat_id),
+        "chat": chat,
+        "date": _utc_iso(getattr(forward, "date", None)),
+        "hidden": hidden,
+    }
+    record["label"] = forward_label(record)
+    return record
+
+
+def forward_label(forward: Mapping[str, Any]) -> str:
+    """How a forward reads at a glance: `@harry`, `Alerts`, `@harry in Alerts`, `Alice (hidden)`."""
+    sender = forward.get("sender") or ""
+    chat = forward.get("chat") or ""
+    who = f"{sender} in {chat}" if sender and chat else (sender or chat or "someone")
+    return f"{who} (hidden)" if forward.get("hidden") else who
+
+
 def message_body(message: Any) -> Body:
     """The text this message is identified by, and what explains it.
 
@@ -101,6 +168,10 @@ def message_body(message: Any) -> Body:
     text = str(text)
     extras: dict[str, Any] = {}
 
+    forward = forward_of(message)
+    if forward is not None:
+        extras["forwarded_from"] = forward
+
     poll = poll_of(message)
     if poll is not None:
         extras["poll"] = poll
@@ -110,24 +181,33 @@ def message_body(message: Any) -> Body:
     return Body(text=text, extras=extras)
 
 
-def record_marks(record: Mapping[str, Any]) -> str:
+def record_marks(record: Mapping[str, Any], *, media: bool = True) -> str:
     """The bracketed marks a record's line carries, ready to sit in front of its text.
 
     Outside any truncation, so a long caption can never push one off the row:
     without it a photo with no caption prints as an empty line and reads as
     "nothing was sent". The exports have carried `has_media` all along.
 
+    Provenance comes first and the kind second -- `[fwd @harry] [media] …` --
+    because who a message came from is read before what it carries.
+
     A poll is marked by its kind rather than by `[media]`, which is the
     placeholder that hid it. It is marked here only when its text is not the
     derived one, which already opens with the marker -- a poll sent with a
     caption shows the caption, so the line is the only place left to name it.
+
+    `media=False` is for the two export formats that carry a media column of
+    their own; the provenance and kind marks stay, because no column holds them.
     """
     marks: list[str] = []
     text = str(record.get("text") or "")
+    forward = record.get("forwarded_from")
+    if forward:
+        marks.append(f"[fwd {forward_label(forward)}]")
     if record.get("poll"):
         if not text.startswith(POLL_MARKER):
             marks.append(POLL_MARKER.strip())
-    elif record.get("has_media"):
+    elif media and record.get("has_media"):
         marks.append("[media]")
     return "".join(mark + " " for mark in marks)
 
@@ -135,13 +215,7 @@ def record_marks(record: Mapping[str, Any]) -> str:
 def message_to_record(message: Any, *, chat_id: int | None = None, topic_id: int | None = None) -> dict[str, Any]:
     reply_to = getattr(message, "reply_to", None)
     sender = getattr(message, "sender", None)
-    message_date = getattr(message, "date", None)
-    if isinstance(message_date, datetime):
-        if message_date.tzinfo is None:
-            message_date = message_date.replace(tzinfo=UTC)
-        date_value = message_date.astimezone(UTC).isoformat()
-    else:
-        date_value = None
+    date_value = _utc_iso(getattr(message, "date", None))
 
     body = message_body(message)
 

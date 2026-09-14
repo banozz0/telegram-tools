@@ -103,6 +103,16 @@ The terms this codebase uses, and the boundaries they imply.
 - **Copy** — `message copy` re-posts a message's text as the identity and, for
   an attachment, a link to the original (`messages.message_link`). Never the
   bytes: downloads belong to the review queue and its quarantine.
+- **Forward attribution** — `records.forward_of`, off Telethon's
+  `message.forward`: the original sender, chat and date of a forwarded message,
+  carried as the record's `forwarded_from` and marked `[fwd @harry in Alerts]`
+  on the row. A copy has none, and that absence is the answer to whether a
+  message was written in a chat or moved there with its author attached — which
+  is the distinction `forward` and `copy` exist to draw.
+- **Hidden forward** — an original author who restricts forwarding: Telegram
+  sends a display name (`from_name`) and no id of any kind. The name is kept,
+  `hidden` is true and the row reads `(hidden)`; no id is invented for it,
+  because an unresolvable name is exactly what a reader has to be warned about.
 - **Mentions line** — `Mentions @harry, @all (everyone in the chat)`, above the
   body of every posting preview (`mentions.py`). Telegram has no mass-mention
   control beyond the text, so naming them is the whole control.

@@ -389,6 +389,15 @@ names the files).
   nowhere. Its row now reads `[poll] ship it? — yes / no`; `--format json` carries
   `poll` with the question and the answers, and the archive stores that same line
   as the message's text, so `archive search` finds a poll by a word of its question.
+- **`[fwd …]` on a row means Telegram's own attribution, which a copy never has.**
+  `[fwd @harry]`, `[fwd Alerts]` or `[fwd @harry in Alerts]`; a forward whose
+  original author restricts forwarding shows the display name Telegram sends and
+  is marked `[fwd Alice (hidden)]`, because there is no id behind that name to
+  resolve. `--format json` carries `forwarded_from` (`sender_id`, `sender`,
+  `chat_id`, `chat`, `date`, `hidden`, `label`) and the archive keeps it in the
+  row's `platform_json`. Its **absence is the answer** to "was this written here
+  or moved here": `message copy` drops the author on purpose, so a copy has no
+  such key and reads as a plain line.
 - **`archive search` is offline and `--query` is FTS5 syntax**: words, `"a phrase"`,
   `AND`, `OR`, `NOT`, `prefix*`. Punctuation inside a bare word (a hyphen, a dot) is
   syntax to FTS5, so quote it: `--query '"v3.4.1"'`. `--scope <rid>`, `--from
