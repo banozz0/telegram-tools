@@ -215,6 +215,23 @@ The terms this codebase uses, and the boundaries they imply.
   download; `record["poll"]` carries the question and the answers, and the
   archive stores the same line as `text`, which is the only column
   `messages_fts` indexes.
+- **Attachment** — what a message *carries*, named: `records.attachment_of`,
+  dispatched on Telegram's own media class. A file's name, an audio's title and
+  performer, a voice note, a sticker's emoji, a checklist, a shared contact's
+  name, a venue, an invoice, a game, a giveaway's prize, a dice's throw — each
+  is a plain string the message already carries, and each used to print as the
+  `[media]` placeholder and reach the store as an empty `text`. The body reads
+  `[file] report.pdf` and `record["attachment"]` carries `kind` and the fields
+  that kind has. A kind with nothing to name still says its kind (`[voice]`),
+  because that word is one an archive search can find and an empty row is not.
+  A photo, a geo point, a story, paid media, a video stream and a web page keep
+  `[media]`: none of them loses a string of its own, and a web page is a preview
+  of a link the person typed.
+- **Contact redaction** — a shared contact's `phone_number`, `vcard` and
+  `user_id` are never read out of the media at all. The printed row, the
+  archive's `text`, `platform_json` and every export column are places someone
+  else's number must not turn up, and not carrying it out of `_contact_of` is
+  the only way to guarantee that. A contact is its first and last name.
 - **Owned bot** — a bot the account created. `bots` edits name, bio and
   description through the account (BotFather's own API), and commands, photo
   and default admin rights through **that bot's** token from
