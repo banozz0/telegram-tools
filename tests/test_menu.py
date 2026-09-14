@@ -2322,6 +2322,7 @@ REPLY = ("3", "2")
 EDIT_MSG = ("3", "3")
 DELETE_MSGS = ("3", "4")
 FORWARD = ("3", "5")
+COPY = ("3", "6")
 REACT = ("3", "7")
 POLL = ("3", "11")
 MARK_READ = ("3", "13")
@@ -2450,15 +2451,81 @@ def test_delete_messages_needs_ids_or_a_query():
 
 
 def test_forward_picks_a_destination_chat_and_a_topic_there():
-    # 1 = ids, "11", 5 = Send them to > 2 = Channels > 1 = Alerts, 6 = Topic there, 141, 7 = Do it
-    answers = [FORWARD, "1", "1", "1", "11", "5", "2", "1", "6", "141", "7", "", "0"]
-    code, calls, output = run_menu(answers)
+    """Card agent-bo-95422214: the destination topic is picked, never typed blind.
+
+    The list is the destination chat's own, through the one helper every other
+    topic screen uses, so it carries the same id/title header and the same
+    lowest-id-first order -- and the row it sets is the field the typed id set.
+    """
+    session = FakeSession()
+    # 1 = ids, "11", 5 = Send them to > 2 = Channels > 1 = Alerts, 6 = Topic there > 1 = Deploys, 7 = Do it
+    answers = [FORWARD, "1", "1", "1", "11", "5", "2", "1", "6", "1", "7", "", "0"]
+    code, calls, output = run_menu(answers, session=session)
     assert code == 0
     args = calls[0]
     assert (args.message_verb, args.ids, args.to_chat, args.to_topic, args.limit, args.i_know) == (
         "forward", ["11"], "-100222", 141, None, False
     )
-    assert "Send them to [Alerts]" in screens(output)
+    text = screens(output)
+    assert "Send them to [Alerts]" in text
+    assert "Topic there  [141 Deploys]" in text
+    # The picker, not an int prompt: the header and the rows of every other
+    # topic screen, and the two rows that follow the list.
+    assert "Main \u203a Write \u203a Forward \u203a Hermes \u203a Topic there" in text
+    assert "   id      title" in text
+    assert "1. 141     Deploys" in text
+    assert "2. 217     Support" in text
+    assert f"3. {menu._NO_TOPIC}" in text
+    assert f"4. {menu._TYPE_A_TOPIC}" in text
+    # The topics listed are the destination's, asked for after the source's chat.
+    assert session.topic_calls[-1] == "-100222"
+
+
+def test_copy_picks_its_destination_topic_from_the_same_list():
+    """The other half of the pair: copy's row is forward's row, same helper."""
+    session = FakeSession()
+    # 1 = ids, "11", 5 = Copy them to > 2 = Channels > 1 = Alerts, 6 = Topic there > 2 = Support, 7 = Do it
+    answers = [COPY, "1", "1", "1", "11", "5", "2", "1", "6", "2", "7", "", "0"]
+    code, calls, output = run_menu(answers, session=session)
+    assert code == 0
+    args = calls[0]
+    assert (args.message_verb, args.ids, args.to_chat, args.to_topic) == ("copy", ["11"], "-100222", 217)
+    assert "Topic there  [217 Support]" in screens(output)
+    assert session.topic_calls[-1] == "-100222"
+
+
+def test_a_destination_topic_can_still_be_typed_by_id():
+    """A topic the picker has not loaded stays reachable, as on every chat picker.
+
+    Typing it sets the same field a picked row does, and it is the only way in
+    when the destination lists no topics at all -- which is why the empty list
+    offers the row instead of `pick`'s "Nothing to pick from.".
+    """
+    # 6 = Topic there > 4 = Type a topic ID, 9001
+    answers = [FORWARD, "1", "1", "1", "11", "5", "2", "1", "6", "4", "9001", "7", "", "0"]
+    code, calls, output = run_menu(answers)
+    assert code == 0 and calls[0].to_topic == 9001
+    assert "Topic there  [9001]" in screens(output)
+
+    # Nothing to list: the chat-itself row and the typed row are still offered.
+    answers = [FORWARD, "1", "1", "1", "11", "5", "2", "1", "6", "2", "9001", "7", "", "0"]
+    code, calls, output = run_menu(answers, session=FakeSession(topics=[]))
+    assert code == 0 and calls[0].to_topic == 9001
+    text = screens(output)
+    assert "That chat has no topics I can list." in text
+    assert f"1. {menu._NO_TOPIC}" in text
+    assert f"2. {menu._TYPE_A_TOPIC}" in text
+    assert "Nothing to pick from." not in text
+
+
+def test_picking_another_destination_chat_drops_the_topic_picked_in_the_last_one():
+    """A topic id means a different topic in a different chat, so it cannot ride along."""
+    # 6 = Topic there > 1 = Deploys, then 5 = Send them to > 3 = Direct chats > 1 = Mum
+    answers = [FORWARD, "1", "1", "1", "11", "5", "2", "1", "6", "1", "5", "3", "1", "7", "", "0"]
+    code, calls, output = run_menu(answers)
+    assert code == 0
+    assert (calls[0].to_chat, calls[0].to_topic) == ("333", None)
+    assert "Topic there  [(the chat itself)]" in screens(output)
 
 
 def test_react_stages_an_emoji_and_a_poll_stages_its_answers_and_topic():
