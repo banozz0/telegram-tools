@@ -614,6 +614,9 @@ async def _flow_search(*, session, runner, read, write) -> bool:
 
 
 _NO_TOPIC = "The chat itself (no topic)"
+# The topic picker's escape hatch, the one every chat picker already offers:
+# a destination topic the list has not loaded must stay reachable by its id.
+_TYPE_A_TOPIC = "Type a topic ID"
 
 
 def _preview_line(text: str | None, width: int = 40) -> str:
@@ -674,6 +677,46 @@ async def _ask_send_topic(picked, *, session, read, write, trail: str) -> Any:
     if chosen is BACK:
         return BACK
     return CLEAR if chosen == "chat" else chosen
+
+
+async def _ask_destination_topic(destination, *, session, read, write, trail: str) -> Any:
+    """A topic in the chat the messages go *to*, CLEAR for that chat itself.
+
+    Forward and copy are the only rows whose topic belongs to a chat other than
+    the one already picked, which is why this takes the destination rather than
+    reading `picked`. Same list, same order and same header as every other topic
+    screen; the typed-id row is here and nowhere else because a destination is
+    often a chat this account has never opened.
+    """
+    if destination is None:
+        write("Pick the chat they go to first.")
+        return BACK
+
+    topics = await _topics_in_order(session, destination.reference)
+    extras = (Extra("chat", _NO_TOPIC), Extra("typed", _TYPE_A_TOPIC))
+    title = crumb(trail, "Topic there")
+    if topics:
+        chosen = pick(topics, title=title, label=_topic_row, header=_TOPIC_COLUMNS, read=read, write=write, extras=extras)
+    else:
+        # `pick` bails out with "Nothing to pick from." before it renders the
+        # extras, and an unlisted topic is exactly the case the typed id is for,
+        # so offer the two rows on their own instead of losing the hatch.
+        write("That chat has no topics I can list.")
+        choice = choose([extra.label for extra in extras], title=title, read=read, write=write)
+        chosen = BACK if choice is BACK else extras[choice].key
+
+    if chosen is BACK:
+        return BACK
+    if chosen == "chat":
+        return CLEAR
+    if chosen == "typed":
+        return ask_int("Topic ID", read=read, write=write)
+    return chosen
+
+
+def _topic_id(value) -> int:
+    """The id of a staged topic, whether it was picked from the list or typed."""
+    return value if isinstance(value, int) else value.id
 
 
 async def _flow_send(*, session, runner, read, write) -> bool:
@@ -784,9 +827,10 @@ DELETE_FOR_REAL_ROW = "Delete for real"
 
 # What each verb's form stages, in row order: (namespace key, row label, kind).
 # Kinds: int, text, lines (a body ended by `.`), ids (comma-separated ids),
-# chat (a second chat picker), topic (a topic in the picked chat), toggle,
-# options (poll answers, one per line). The chat itself is always picked first,
-# and the last row is always the run.
+# chat (a second chat picker), topic (a topic in the picked chat), to_topic (a
+# topic in the chat a row's `chat` picked), toggle, options (poll answers, one
+# per line). The chat itself is always picked first, and the last row is always
+# the run.
 MESSAGE_FORMS = {
     "reply": (("message_id", "Reply to message", "int"), ("text", "Reply", "lines")),
     "edit": (("message_id", "Message", "int"), ("text", "New text", "lines")),
@@ -803,7 +847,7 @@ MESSAGE_FORMS = {
         ("limit", "Limit", "int"),
         ("i_know", "Allow more than 1000", "toggle"),
         ("to_chat", "Send them to", "chat"),
-        ("to_topic", "Topic there", "int"),
+        ("to_topic", "Topic there", "to_topic"),
     ),
     "copy": (
         ("ids", "Message ids", "ids"),
@@ -811,7 +855,7 @@ MESSAGE_FORMS = {
         ("limit", "Limit", "int"),
         ("i_know", "Allow more than 1000", "toggle"),
         ("to_chat", "Copy them to", "chat"),
-        ("to_topic", "Topic there", "int"),
+        ("to_topic", "Topic there", "to_topic"),
     ),
     "react": (("message_id", "Message", "int"), ("emoji", "Emoji", "text")),
     "unreact": (("message_id", "Message", "int"), ("emoji", "Emoji (none = every reaction of yours)", "text")),
@@ -876,7 +920,7 @@ def _staged_label(kind: str, value: Any) -> str:
         # Three states, not two: a flag left alone is not a flag set to off.
         return "leave alone" if value is None else ("on" if value else "off")
     if value in (None, "", [], ()):
-        return "(none)" if kind not in ("topic",) else "(the chat itself)"
+        return "(none)" if kind not in ("topic", "to_topic") else "(the chat itself)"
     if kind == "lines":
         return _preview_line(value)
     if kind == "ids":
@@ -887,10 +931,15 @@ def _staged_label(kind: str, value: Any) -> str:
         return value.title
     if kind == "topic":
         return f"{value.id} {value.title}"
+    if kind == "to_topic":
+        # Picked stages the topic and shows its title; typed stages the bare id.
+        return str(value) if isinstance(value, int) else f"{value.id} {value.title}"
     return str(value)
 
 
-async def _ask_message_field(key: str, label: str, kind: str, current: Any, *, picked, session, read, write, trail: str) -> Any:
+async def _ask_message_field(
+    key: str, label: str, kind: str, current: Any, *, picked, destination=None, session, read, write, trail: str
+) -> Any:
     """The new value for one row, CLEAR to empty it, or BACK to leave it alone."""
     if kind == "toggle":
         return not current
@@ -921,6 +970,8 @@ async def _ask_message_field(key: str, label: str, kind: str, current: Any, *, p
     if kind == "topic":
         answer = await _ask_send_topic(picked, session=session, read=read, write=write, trail=trail)
         return answer
+    if kind == "to_topic":
+        return await _ask_destination_topic(destination, session=session, read=read, write=write, trail=trail)
     raise ValueError(kind)
 
 
@@ -952,11 +1003,24 @@ def _flow_message(verb: str):
                 if key != "run":
                     _key, label, kind = fields[choice]
                     answer = await _ask_message_field(
-                        key, label, kind, staged[key], picked=picked, session=session, read=read, write=write, trail=form
+                        key,
+                        label,
+                        kind,
+                        staged[key],
+                        picked=picked,
+                        destination=staged.get("to_chat"),
+                        session=session,
+                        read=read,
+                        write=write,
+                        trail=form,
                     )
                     if answer is BACK:
                         continue
                     staged[key] = None if answer is CLEAR else answer
+                    if key == "to_chat" and "to_topic" in staged:
+                        # The destination topic was picked out of the old chat's
+                        # list; the same id in a new chat is a different topic.
+                        staged["to_topic"] = None
                     continue
 
                 missing = [label for key, label, _kind in fields if key in MESSAGE_REQUIRED[verb] and staged[key] in (None, "", [])]
@@ -971,6 +1035,8 @@ def _flow_message(verb: str):
                     values["to_chat"] = values["to_chat"].reference
                 if "topic" in values and values["topic"] is not None:
                     values["topic"] = values["topic"].id
+                if values.get("to_topic") is not None:
+                    values["to_topic"] = _topic_id(values["to_topic"])
                 if "ids" in values:
                     values["ids"] = [",".join(str(number) for number in values["ids"])] if values["ids"] else None
                 if "label" in values:

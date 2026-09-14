@@ -631,7 +631,9 @@ forget for the archive. Sync picks its scope from your live chats and topics, th
 picker Search uses; search, prune and forget pick from what the archive already holds.
 *Write* opens a screen of sixteen — Send, then one row per message verb — each picking
 the chat from your live chats and staging the verb's fields; Send's form has a *Reply to*
-row, and Delete's *Delete for real* toggle is its `--execute`. *Build* opens six rows: create,
+row, Forward and Copy pick their destination topic from the destination chat's own
+topic list — with a *Type a topic ID* row for one the list does not carry — and
+Delete's *Delete for real* toggle is its `--execute`. *Build* opens six rows: create,
 delete, then export a blueprint, diff one against a chat, apply one — the dry-run runs first,
 and the exact title is typed at the CLI's own prompt — and show an apply's remap table.
 *Manage* opens six screens: the five administration groups, a row per verb — the settings
