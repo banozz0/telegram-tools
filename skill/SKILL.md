@@ -381,9 +381,21 @@ names the files).
   writes that file and prints nothing. The envelope is the *global* flag, before
   the subcommand: `telegram-tools --json discover`. A bare `discover --json` with
   no path means the envelope too.
-- **`[media]` in a `search` row means a photo or file is attached.** A media-only
-  message has no text at all, so without that marker the row looks empty and reads
-  as "nothing is there". `--format json` carries the same fact as `has_media`.
+- **`[media]` in a `search` row means a photo, or another attachment with no name
+  of its own, is there.** A media-only message has no text at all, so without that
+  marker the row looks empty and reads as "nothing is there". `--format json`
+  carries the same fact as `has_media`.
+- **An attachment that has a name shows it, marked by its kind.** `[file]
+  report.pdf`, `[audio] Nightcall — Kavinsky`, `[voice]`, `[sticker] 🎉`,
+  `[checklist] Launch day — book venue / send invites`, `[contact] Alice Smith`,
+  `[venue] Trabuxu Bistro — 1 Strait Street`, `[invoice] Pro plan — a year of
+  everything`, `[game] Corsairs`, `[giveaway] a year of Premium`, `[dice] 🎲 6`.
+  `--format json` carries `attachment` (`kind`, plus the fields that kind has) and
+  the archive stores the same line as the message's text, so `archive search
+  --query quarterly` finds a file by its name. A caption wins over all of it, the
+  way it does for a poll: the row then shows the caption and the mark names the
+  kind. **A shared contact is its name only** — the phone number and the vCard are
+  never read, so no row, export or archived record carries one.
 - **A poll is marked `[poll]` and shows its question.** A poll is a media, so it
   used to wear the `[media]` placeholder and the one thing that identifies it went
   nowhere. Its row now reads `[poll] ship it? — yes / no`; `--format json` carries

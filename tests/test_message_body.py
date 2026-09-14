@@ -6,16 +6,19 @@ columns and the archive row all read those two, so a message says the same thing
 itself wherever it is shown.
 
 Every test here builds the message by hand -- a `SimpleNamespace` shaped like the
-Telethon object -- and drives the real archive, so the FTS proof is the store's own
-index and not a stand-in for it.
+Telethon object, or Telethon's own media class where the derivation is dispatched on
+that class -- and drives the real archive, so the FTS proof is the store's own index
+and not a stand-in for it.
 """
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
+from telethon.tl import types as tl
 
 from telegram_tools._core.archive import Archive, MessageRecord, ScopeListing
 from telegram_tools._core.identity import Identity, Target
@@ -314,3 +317,254 @@ def test_the_export_formats_show_the_same_named_event_the_screen_does():
 
     assert row["text"] == "[event] topic created: Campaign", "a file and a screen agree"
     assert row["media"] == 0
+
+
+# -- what a message carries (card agent-bo-95422219) -----------------------
+#
+# This section builds Telethon's own media classes rather than a namespace
+# shaped like one: `records.attachment_of` dispatches on the class Telegram
+# sends, so a stand-in named by hand would prove the dispatch works against the
+# stand-in and nothing about the name Telethon actually uses.
+
+PHONE = "+35679123478"
+VCARD = f"BEGIN:VCARD\nFN:Alice Smith\nTEL;TYPE=CELL:{PHONE}\nEND:VCARD"
+
+
+def document(*attributes):
+    """`MessageMediaDocument`: every name a file has is one of its attributes."""
+    return tl.MessageMediaDocument(
+        document=tl.Document(
+            id=7,
+            access_hash=7,
+            file_reference=b"",
+            date=None,
+            mime_type="application/octet-stream",
+            size=2048,
+            dc_id=2,
+            attributes=list(attributes),
+        )
+    )
+
+
+def checklist(title, *items):
+    """`MessageMediaToDo`, the poll's closest sibling, with the same wrapped strings."""
+    return tl.MessageMediaToDo(
+        todo=tl.TodoList(
+            title=tl.TextWithEntities(text=title, entities=[]),
+            list=[
+                tl.TodoItem(id=number, title=tl.TextWithEntities(text=item, entities=[]))
+                for number, item in enumerate(items, start=1)
+            ],
+        )
+    )
+
+
+FILE = document(tl.DocumentAttributeFilename(file_name="quarterly-report.pdf"))
+SONG = document(
+    tl.DocumentAttributeAudio(duration=210, title="Nightcall", performer="Kavinsky"),
+    tl.DocumentAttributeFilename(file_name="nightcall.mp3"),
+)
+VOICE = document(tl.DocumentAttributeAudio(duration=7, voice=True))
+STICKER = document(tl.DocumentAttributeSticker(alt="🎉", stickerset=tl.InputStickerSetEmpty()))
+CONTACT = tl.MessageMediaContact(phone_number=PHONE, first_name="Alice", last_name="Smith", vcard=VCARD, user_id=99)
+VENUE = tl.MessageMediaVenue(
+    geo=tl.GeoPointEmpty(),
+    title="Trabuxu Bistro",
+    address="1 Strait Street",
+    provider="foursquare",
+    venue_id="v1",
+    venue_type="bar",
+)
+INVOICE = tl.MessageMediaInvoice(
+    title="Pro plan", description="a year of everything", currency="EUR", total_amount=9900, start_param="p"
+)
+GAME = tl.MessageMediaGame(
+    game=tl.Game(id=1, access_hash=1, short_name="corsairs", title="Corsairs", description="sail", photo=tl.PhotoEmpty(id=0))
+)
+GIVEAWAY = tl.MessageMediaGiveaway(
+    channels=[CHAT_ID], quantity=5, until_date=None, prize_description="a year of Premium"
+)
+GIVEAWAY_RESULTS = tl.MessageMediaGiveawayResults(
+    channel_id=CHAT_ID,
+    launch_msg_id=2,
+    winners_count=5,
+    unclaimed_count=0,
+    winners=[SENDER.id],
+    until_date=None,
+    prize_description="a year of Premium",
+)
+DICE = tl.MessageMediaDice(value=6, emoticon="🎲")
+
+# The media, the line it is identified by, the additive `attachment` key, and a
+# word an archive search finds the row by. The three kinds whose only word is
+# the kind itself -- a voice note Telegram named nothing, a sticker whose name
+# is an emoji, a thrown dice -- are found by that word, which is the whole
+# reason the derived line carries it.
+CARRIED = [
+    (FILE, "[file] quarterly-report.pdf", {"kind": "file", "file_name": "quarterly-report.pdf"}, "quarterly"),
+    (
+        SONG,
+        "[audio] Nightcall — Kavinsky",
+        {"kind": "audio", "title": "Nightcall", "performer": "Kavinsky", "file_name": "nightcall.mp3"},
+        "Kavinsky",
+    ),
+    (VOICE, "[voice]", {"kind": "voice"}, "voice"),
+    (STICKER, "[sticker] 🎉", {"kind": "sticker", "emoji": "🎉"}, "sticker"),
+    (
+        checklist("Launch day", "book venue", "send invites"),
+        "[checklist] Launch day — book venue / send invites",
+        {"kind": "checklist", "title": "Launch day", "items": ["book venue", "send invites"]},
+        "invites",
+    ),
+    (CONTACT, "[contact] Alice Smith", {"kind": "contact", "first_name": "Alice", "last_name": "Smith"}, "Alice"),
+    (
+        VENUE,
+        "[venue] Trabuxu Bistro — 1 Strait Street",
+        {"kind": "venue", "title": "Trabuxu Bistro", "address": "1 Strait Street"},
+        "Trabuxu",
+    ),
+    (
+        INVOICE,
+        "[invoice] Pro plan — a year of everything",
+        {"kind": "invoice", "title": "Pro plan", "description": "a year of everything"},
+        "invoice",
+    ),
+    (GAME, "[game] Corsairs", {"kind": "game", "title": "Corsairs"}, "Corsairs"),
+    (GIVEAWAY, "[giveaway] a year of Premium", {"kind": "giveaway", "prize_description": "a year of Premium"}, "Premium"),
+    (
+        GIVEAWAY_RESULTS,
+        "[giveaway] a year of Premium",
+        {"kind": "giveaway", "prize_description": "a year of Premium"},
+        "Premium",
+    ),
+    (DICE, "[dice] 🎲 6", {"kind": "dice", "emoticon": "🎲", "value": 6}, "dice"),
+]
+
+
+@pytest.mark.parametrize(
+    "media, line, attachment, word",
+    CARRIED,
+    ids=[
+        "file",
+        "audio",
+        "voice-note",
+        "sticker",
+        "checklist",
+        "contact",
+        "venue",
+        "invoice",
+        "game",
+        "giveaway",
+        "giveaway-results",
+        "dice",
+    ],
+)
+def test_every_carried_kind_names_itself_on_the_screen_and_in_the_archive(archive, media, line, attachment, word):
+    message = fake_message(31, media=media)
+
+    record, text = printed(message)
+    assert record["attachment"] == attachment, "the structured form rides as an additive key"
+    assert record["text"] == line
+    assert line in text
+    assert "[media]" not in text, "the placeholder is what lost the name; the kind names itself"
+    assert record["has_media"] is True, "the shipped key keeps its meaning"
+
+    row = archived(archive, message)
+    assert row["text"] == line, "the screen and the one column messages_fts indexes agree"
+    assert row["platform_json"]["attachment"] == attachment
+
+    hits = archive.search(f'"{word}"')
+    assert [hit.message_id for hit in hits] == ["31"], "a word of it finds the row again"
+
+
+def test_a_contact_shows_the_name_and_its_phone_number_reaches_nothing(archive, tmp_path):
+    """The hard line on this card: the number Telegram sent lands in no place at all.
+
+    Not the printed row, not the archive's `text`, not `platform_json`, not the
+    store's FTS index and not one of the five export files. The sweep reads
+    every byte under `tmp_path` -- the sqlite file, its write-ahead log and each
+    export -- and proves it is looking at real content by finding the name.
+    """
+    from telegram_tools.exporters import live_rows, write_records
+
+    message = fake_message(32, media=CONTACT)
+
+    record, text = printed(message)
+    assert record["attachment"] == {"kind": "contact", "first_name": "Alice", "last_name": "Smith"}
+    assert record["text"] == "[contact] Alice Smith"
+
+    row = archived(archive, message)
+    rows = live_rows([record], chat_title="Team Hermes")
+    for fmt in ("json", "csv", "jsonl", "markdown", "html"):
+        write_records([record], tmp_path / f"export.{fmt}", fmt, chat_title="Team Hermes")
+
+    digits = PHONE.lstrip("+")
+    in_memory = json.dumps([record, row, rows, text], default=str, ensure_ascii=False)
+    assert PHONE not in in_memory and digits not in in_memory
+    assert "vcard" not in in_memory and "phone" not in in_memory
+
+    seen = b""
+    for path in sorted(tmp_path.rglob("*")):
+        if path.is_file():
+            blob = path.read_bytes()
+            assert digits.encode() not in blob, f"a phone number reached {path.name}"
+            seen += blob
+    assert b"Alice Smith" in seen, "the sweep read the store and the exports, not an empty directory"
+
+    assert [hit.message_id for hit in archive.search('"Alice"')] == ["32"]
+    assert list(archive.search(f'"{digits}"')) == [], "nothing indexed the number either"
+
+
+def test_a_file_with_a_caption_keeps_the_caption_and_the_line_names_the_kind():
+    message = fake_message(33, raw_text="here you go", message="here you go", media=FILE)
+
+    record, text = printed(message)
+
+    assert record["text"] == "here you go", "nothing a person typed is ever displaced"
+    assert record["attachment"]["file_name"] == "quarterly-report.pdf"
+    assert "[file] here you go" in text, "the caption is the text, so the line is where the kind is named"
+    assert "[media]" not in text
+
+
+def test_a_forwarded_file_is_marked_by_where_it_came_from_and_carries_its_name():
+    message = fake_message(34, media=FILE, forward=forwarded(sender=SENDER))
+
+    record, text = printed(message)
+
+    assert record["text"] == "[file] quarterly-report.pdf"
+    assert "[fwd @harry] [file] quarterly-report.pdf" in text, "provenance first, then the kind"
+
+
+def test_the_export_formats_show_the_same_name_the_screen_does():
+    from telegram_tools.exporters import live_rows
+
+    row = live_rows([message_to_record(fake_message(35, media=FILE), chat_id=CHAT_ID)], chat_title="Team Hermes")[0]
+
+    assert row["text"] == "[file] quarterly-report.pdf", "a file and a screen agree"
+    assert row["media"] == 1, "the media column still says there is one"
+
+
+@pytest.mark.parametrize(
+    "media",
+    [
+        tl.MessageMediaPhoto(photo=tl.PhotoEmpty(id=0)),
+        tl.MessageMediaGeo(geo=tl.GeoPointEmpty()),
+        tl.MessageMediaWebPage(webpage=tl.WebPageEmpty(id=1)),
+        tl.MessageMediaUnsupported(),
+    ],
+    ids=["photo", "geo", "web-page", "unsupported"],
+)
+def test_a_kind_with_no_name_of_its_own_keeps_the_media_placeholder(media):
+    """Out of scope on purpose: none of these has a string a search could find."""
+    record, text = printed(fake_message(36, media=media))
+
+    assert "attachment" not in record, "a key is added only for a message that has one"
+    assert record["text"] == ""
+    assert "[media]" in text
+
+
+def test_a_poll_is_still_a_poll_and_not_an_attachment():
+    """Additive: the key the poll card shipped keeps its name and its meaning."""
+    record, _text = printed(fake_message(37, media=poll_media("ship it?", "yes", "no")))
+
+    assert "poll" in record and "attachment" not in record
