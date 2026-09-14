@@ -384,6 +384,11 @@ names the files).
 - **`[media]` in a `search` row means a photo or file is attached.** A media-only
   message has no text at all, so without that marker the row looks empty and reads
   as "nothing is there". `--format json` carries the same fact as `has_media`.
+- **A poll is marked `[poll]` and shows its question.** A poll is a media, so it
+  used to wear the `[media]` placeholder and the one thing that identifies it went
+  nowhere. Its row now reads `[poll] ship it? — yes / no`; `--format json` carries
+  `poll` with the question and the answers, and the archive stores that same line
+  as the message's text, so `archive search` finds a poll by a word of its question.
 - **`archive search` is offline and `--query` is FTS5 syntax**: words, `"a phrase"`,
   `AND`, `OR`, `NOT`, `prefix*`. Punctuation inside a bare word (a hyphen, a dot) is
   syntax to FTS5, so quote it: `--query '"v3.4.1"'`. `--scope <rid>`, `--from

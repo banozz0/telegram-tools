@@ -52,7 +52,7 @@ from telegram_tools.adapters.account import ChatTargets, chat_title
 from telegram_tools.adapters.media import candidates_of
 from telegram_tools.discovery import classify_entity
 from telegram_tools.envelope import PLATFORM, PREFIX
-from telegram_tools.records import parse_date_bound
+from telegram_tools.records import message_body, parse_date_bound
 from telegram_tools.resolver import resolve_chat
 from telegram_tools.topics import get_forum_topics, get_forum_topics_by_ids
 
@@ -127,13 +127,15 @@ def message_record(message: Any, scope: _Scope, cursor: Cursor) -> dict[str, Any
     """One message as the store takes it, carrying the cursor to resume from."""
     reply_to = getattr(message, "reply_to", None)
     reply_id = getattr(reply_to, "reply_to_msg_id", None) if reply_to else None
-    text = getattr(message, "raw_text", None)
-    if text is None:
-        text = getattr(message, "message", "") or ""
+    # The same derivation the printed line and the exports use: a message whose
+    # only identifying text is not its `message` field reaches `text` -- the one
+    # column `messages_fts` indexes -- rather than landing here as an empty row
+    # nothing can search for again.
+    body = message_body(message)
     return {
         "message_id": str(int(getattr(message, "id"))),
         "date": _iso(getattr(message, "date", None)),
-        "text": text,
+        "text": body.text,
         "author": author_of(message),
         # Inside a topic every message replies to the topic's root, which is
         # the topic id itself; that is structure, not a reply worth recording.
@@ -143,6 +145,11 @@ def message_record(message: Any, scope: _Scope, cursor: Cursor) -> dict[str, Any
             "has_media": bool(getattr(message, "media", None)),
             "topic_id": scope.topic_id,
             "chat_id": scope.target.ids.get("chat"),
+            # Additive, and only for a message that has them: `platform_json`
+            # is the extension point the schema already carries, so no
+            # migration is needed and every row written before this stays as
+            # it is.
+            **body.extras,
         },
         "cursor": cursor.encode(),
     }

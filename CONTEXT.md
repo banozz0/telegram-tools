@@ -187,6 +187,16 @@ The terms this codebase uses, and the boundaries they imply.
 - **Record** — the plain dict a message becomes (`records.py`): what `search`
   prints and what both export formats write. `has_media` keeps an
   attachment-only message from reading as empty.
+- **Body** — `records.message_body`: the text a message is *identified* by,
+  and the additive record keys that explain it. The message's own text always
+  wins; the derivation only fills a body that would otherwise be empty. One
+  seam, read by the printed line, the export columns and the archive row, so a
+  message says the same thing about itself wherever it is shown.
+- **Poll** — a `MessageMediaPoll`. Its question and answer texts arrive as
+  plain strings, so a poll's body is `[poll] <question> — <a> / <b>` with no
+  download; `record["poll"]` carries the question and the answers, and the
+  archive stores the same line as `text`, which is the only column
+  `messages_fts` indexes.
 - **Owned bot** — a bot the account created. `bots` edits name, bio and
   description through the account (BotFather's own API), and commands, photo
   and default admin rights through **that bot's** token from
