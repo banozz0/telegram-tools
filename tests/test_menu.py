@@ -837,9 +837,9 @@ def test_bot_edit_unset_field_skips_the_keep_change_clear_screen():
     profile = BotInfo(id=12345, username="harrybot", name="Harry", bio=None, description=None, is_owned=True)
     session = FakeSession(profile=profile)
     # 4 = my bots, 1 = harrybot, 1 = edit, 2 = Bio (unset -> straight to the value
-    # prompt, no keep/change/clear screen), "hello" = the typed value, 8 = apply,
-    # Enter, 0 = exit.
-    answers = [BOTS_ROW, "1", "1", "2", "hello", "8", "", "0", "0"]
+    # prompt, no keep/change/clear screen), "hello" then `.` = the typed value,
+    # 8 = apply, Enter, 0 = exit.
+    answers = [BOTS_ROW, "1", "1", "2", "hello", ".", "8", "", "0", "0"]
     code, calls, output = run_menu(answers, session=session)
 
     assert code == 0
@@ -1026,8 +1026,8 @@ def test_send_shows_a_long_message_on_one_line():
 
 
 def test_create_group_asks_for_a_title_and_description():
-    # 4 = create, 1 = Group
-    answers = [CREATE, "1", "Hermes", "the agency", "", "0", "0"]
+    # 4 = create, 1 = Group; the description is the multi-line editor, so `.` ends it
+    answers = [CREATE, "1", "Hermes", "the agency", ".", "", "0", "0"]
     code, calls, _output = run_menu(answers)
 
     assert code == 0
@@ -2619,3 +2619,108 @@ def test_main_menu_after_a_message_verb_lands_on_the_root():
     _code, _calls, output = run_menu(answers)
     text = screens(output)
     assert text.count("Main › Write\n") == 1, "the group screen is drawn once, on the way in"
+
+
+# --- the three fields Telegram lets carry newlines ---------------------------
+# A chat's description (255 characters), a bot's about text (120) and a bot's
+# description (512) all keep their line breaks at Telegram, so all three are
+# asked with the multi-line editor. Asked on one line, `input()` would return
+# the first line of a paste and leave the rest in the buffer for the next read
+# -- a menu choice -- which is the defect these pin. A poll's question is the
+# counter-example above: single-line at Telegram, single-line here.
+
+
+def _multiline_header(label: str) -> str:
+    return f"{label} (blank cancels, {END_OF_MESSAGE} on its own line ends it):"
+
+
+def test_a_pasted_description_reaches_create_whole():
+    asked = []
+    keys = iter(["4", "1", "1", "Hermes", "the agency", "and its bots", ".", "", "0", "0"])
+
+    def read(prompt):
+        asked.append(prompt)
+        return next(keys)
+
+    output = []
+    calls, runner = recorder()
+    code = asyncio.run(menu.run_menu(read=read, write=output.append, session=FakeSession(), runner=runner))
+
+    assert code == 0
+    # Both lines are the description, and the keystrokes after the sentinel are
+    # still menu answers: a one-line read would have staged "the agency" alone
+    # and fed "and its bots" to the screen that asks next.
+    assert calls[0].about == "the agency\nand its bots"
+    assert _multiline_header("Description (blank for none)") in screens(output)
+    assert "Description (blank for none) (blank cancels): " not in asked
+
+
+def test_a_blank_first_line_still_means_no_description_on_create():
+    # The editor's own cancel is the same answer the one-line prompt gave: none.
+    _code, calls, _output = run_menu([CREATE, "2", "Hermes", "", "", "0", "0"])
+    assert (calls[0].forum, calls[0].about) == (True, None)
+
+
+def test_a_pasted_description_reaches_settings_set_whole():
+    # 2 = set, the chat, 3 = Description, two lines and the sentinel, 9 = Do it.
+    answers = [MANAGE_SETTINGS, "2", "1", "1", "3", "what we do", "and when", ".", "9", "", "0"]
+    _code, calls, output = run_menu(answers)
+
+    (args,) = calls
+    assert (args.command, args.settings_kind) == ("settings", "set")
+    assert args.about == "what we do\nand when"
+    assert _multiline_header("Description (the chat only)") in screens(output)
+    # The staged row stays one line of the numbered screen.
+    assert "[what we do / and when]" in screens(output)
+
+
+def test_a_pasted_bio_and_description_reach_a_bot_edit_whole():
+    # 2 = Bio, 2 = change, two lines and the sentinel; then 3 = Description the
+    # same way; 8 = review & apply.
+    answers = [
+        BOTS_ROW, "1", "1",
+        "2", "2", "Runs the agency", "asks first", ".",
+        "3", "2", "Ask me things", "then ask again", ".",
+        "8", "", "0", "0",
+    ]
+    _code, calls, output = run_menu(answers)
+
+    args = calls[0]
+    assert args.bio == "Runs the agency\nasks first"
+    assert args.description == "Ask me things\nthen ask again"
+    text = screens(output)
+    assert _multiline_header("Bio") in text and _multiline_header("Description") in text
+    # Neither staged value breaks the row it is shown on.
+    assert "[Runs the agency -> Runs the agency / asks first]" in text
+
+
+def test_a_bot_name_is_still_asked_on_one_line():
+    # Telegram gives a bot one name of 64 characters with no line breaks in it,
+    # so the row next to Bio keeps the one-line prompt.
+    asked = []
+    keys = iter(["8", "6", "1", "1", "1", "2", "Harry Two", "8", "", "0", "0"])
+
+    def read(prompt):
+        asked.append(prompt)
+        return next(keys)
+
+    output = []
+    calls, runner = recorder()
+    code = asyncio.run(menu.run_menu(read=read, write=output.append, session=FakeSession(), runner=runner))
+
+    assert code == 0
+    assert calls[0].name == "Harry Two"
+    assert "Name (blank cancels): " in asked
+    assert _multiline_header("Name") not in screens(output)
+
+
+def test_the_poll_answers_row_reopens_with_the_answers_already_staged():
+    # Every other kind hands the editor what is staged; answers used not to, so
+    # re-opening the row showed nothing and gave no hint that re-typing replaces
+    # the whole list. 3 = Answers, staged; 3 again, blank = keep them.
+    answers = [POLL, "1", "1", "3", "alpha", "beta", ".", "3", "", "2", "Ship it?", "5", "", "0"]
+    code, calls, output = run_menu(answers)
+
+    assert code == 0
+    assert calls[0].options == ["alpha", "beta"]
+    assert _multiline_header("Answers, one per line [alpha / beta]") in screens(output)

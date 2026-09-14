@@ -653,6 +653,9 @@ The menu is in colour when it is talking to a terminal, and plain text in a pipe
 
 The message box takes several lines — end it with a `.` on its own line — so pasting
 a multi-line message works instead of feeding its later lines to the menu as answers.
+A chat's description, a bot's bio and a bot's description are asked the same way, because
+Telegram keeps the line breaks in all three; a poll's question and a bot's name stay on one
+line, because Telegram gives them none.
 
 The safety gates are the same as the flags', not looser: clearing topic messages
 dry-runs first and still asks you to type `DELETE`, deleting a group, channel or topic
