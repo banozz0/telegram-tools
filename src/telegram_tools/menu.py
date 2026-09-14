@@ -623,8 +623,18 @@ def _preview_line(text: str | None, width: int = 40) -> str:
     """One line of a staged message: newlines shown, long bodies cut."""
     if not text:
         return "(nothing yet)"
-    flat = text.replace("\n", " / ")
+    flat = _one_line(text)
     return flat if len(flat) <= width else flat[: width - 1] + "…"
+
+
+def _one_line(text: str) -> str:
+    """A value Telegram lets carry newlines, on one row of a numbered screen.
+
+    Same spelling as `_preview_line`'s, uncut: the bot field list shows a whole
+    bio or description, and a real newline there would break the row the numbers
+    are counted on.
+    """
+    return text.replace("\n", " / ")
 
 
 def _files_label(files: list[str]) -> str:
@@ -960,7 +970,7 @@ async def _ask_message_field(
             write(str(exc))
             return BACK
     if kind == "options":
-        body = ask_lines("Answers, one per line", read=read, write=write)
+        body = ask_lines("Answers, one per line", read=read, write=write, current=_staged_label(kind, current) if current else None)
         if body is BACK:
             return BACK
         return [line.strip() for line in body.split("\n") if line.strip()]
@@ -1128,9 +1138,11 @@ async def _flow_create(*, session, runner, read, write) -> bool:
         title = ask_text(f"{label} name", read=read, write=write)
         if title is BACK:
             continue
-        # Blank cancels out of ask_text, which for an optional description is the
+        # Telegram keeps the line breaks in a chat description, so this is the
+        # multi-line editor and a pasted two-line description arrives whole. A
+        # blank first line cancels, which for an optional description is the
         # same answer as "leave it empty".
-        about = ask_text("Description (blank for none)", read=read, write=write)
+        about = ask_lines("Description (blank for none)", read=read, write=write)
         args = _namespace(
             command="create",
             create_kind=kind,
@@ -1388,7 +1400,8 @@ def _current_bot_value(profile, key: str) -> str:
         return "set" if profile.has_photo else "not set"
     if key in ("group_rights", "channel_rights"):
         return ", ".join(getattr(profile, key)) or "(none)"
-    return _shown(getattr(profile, key), "(not set)")
+    # Bio and description may hold newlines; name cannot, so this is a no-op there.
+    return _one_line(_shown(getattr(profile, key), "(not set)"))
 
 
 def _staged_bot_value(key: str, staged: dict) -> str | None:
@@ -1408,7 +1421,7 @@ def _staged_bot_value(key: str, staged: dict) -> str | None:
         return "(cleared)" if value == "none" else value
     if value == "":
         return "(cleared)"
-    return value
+    return _one_line(value)
 
 
 def _bot_field_is_set(profile, key: str) -> bool:
@@ -1498,6 +1511,11 @@ async def _flow_bot_edit(profile, *, session, runner, read, write, trail: str) -
             ask = lambda: _ask_rights(crumb(edit, title), getattr(profile, key), read=read, write=write)
         elif key in ("commands", "photo"):
             ask = lambda: ask_text(f"{title} file path", read=read, write=write)
+        elif key in ("bio", "description"):
+            # Telegram keeps the newlines in a bot's about text and in its
+            # description, so both are read to the sentinel: a pasted second
+            # line belongs to the value, not to the screen that asks next.
+            ask = lambda: ask_lines(title, read=read, write=write)
         else:
             ask = lambda: ask_text(title, read=read, write=write)
 
@@ -2610,7 +2628,7 @@ MANAGE_FORMS = {
     ("settings", "set"): (
         ("topic", "Change this topic instead of the chat (id)", "int"),
         ("title", "New name (the chat's, or the topic's)", "text"),
-        ("about", "Description (the chat only)", "text"),
+        ("about", "Description (the chat only)", "lines"),
         ("forum", "Topics on this group (off removes every topic)", "onoff"),
         ("slow_mode", "Slow mode seconds (0, 10, 30, 60, 300, 900, 3600)", "count"),
         ("icon_emoji_id", "Topic icon: custom-emoji document id, 0 removes it", "count"),
@@ -2747,6 +2765,8 @@ def _flow_manage_verb(group: str, verb: str, title: str):
                         continue
                     if kind in ("int", "count"):
                         answer = ask_int(label, read=read, write=write, current=staged[key], minimum=0 if kind == "count" else 1)
+                    elif kind == "lines":
+                        answer = ask_lines(label, read=read, write=write, current=_preview_line(staged[key]) if staged[key] else None)
                     else:
                         answer = ask_text(label, read=read, write=write, current=staged[key] or None)
                     if answer is BACK:
