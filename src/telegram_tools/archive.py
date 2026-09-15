@@ -223,7 +223,34 @@ def format_status(status: dict[str, Any]) -> str:
     for row in status["budgets"]:
         lines.append(f"budget    {row['budget']}: {row['used']} of {row['limit']} ({row['percent']}%)")
     lines.append(f"search    {'FTS5 available' if status['fts5'] else 'FTS5 missing'}")
+    lines.extend(format_rendering(status.get("rendering")))
     return "\n".join(lines)
+
+
+# How many stale scopes the screen names before it stops counting them out. The
+# rest are in the envelope; a person needs one rid to start with, not all of them.
+RENDERING_SHOWN = 5
+
+
+def format_rendering(rendering: dict[str, Any] | None) -> list[str]:
+    """What the store says about rows an older text rendering wrote, or nothing.
+
+    The archive's own answer, printed rather than acted on: a full sync refetches
+    every message in the scope, so it is offered here and never run for the
+    person. Absent when the store predates the rendering stamp, which is what a
+    copy of the shared tree older than this screen returns.
+    """
+    if not rendering or not rendering.get("summary"):
+        return []
+    lines = [f"rendering {rendering['summary']}"]
+    behind = rendering.get("behind") or []
+    for row in behind[:RENDERING_SHOWN]:
+        lines.append(f"          {row['rid']}\t{row['title']}\t{row['messages']} message(s)")
+    if len(behind) > RENDERING_SHOWN:
+        lines.append(f"          and {len(behind) - RENDERING_SHOWN} more")
+    if rendering.get("hint"):
+        lines.append(f"          {rendering['hint']}")
+    return lines
 
 
 def _context_line(row: dict[str, Any]) -> str:
