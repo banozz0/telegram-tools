@@ -4,6 +4,10 @@ All notable changes to this project will be documented here.
 
 This project follows a practical changelog style: user-visible changes, safety changes, and release notes belong here; active task tracking belongs outside the repo.
 
+## 3.26.0 - 2026-09-15
+
+- **`archive status` says when stored rows predate a rendering fix.** Releases 3.23.0 and 3.24.0 taught the tool to derive text for a poll, a forward, a service row and ten attachment kinds, and that text lands in the archive's `text` column — the one `messages_fts` indexes. But `archive sync` resumes from a cursor and never revisits a row it already holds, so every message archived before those releases kept the empty text it was stored with, could not be found by any archive search, and nothing said so. The status screen now names the scopes an older rendering wrote, how many messages that is, and the command that rebuilds them; the first five are listed and the rest counted, with the whole list in the `--json` envelope. It counts and never rewrites — a full re-sync refetches every message in the scope from Telegram, so it is offered rather than run for you. **The line stays absent until the shared archive tree is synced in at v0.11 or later**, and on a store written before the stamp, because reporting nothing is the honest answer where nothing was recorded.
+
 ## 3.25.0 - 2026-09-15
 
 Five defects the live verification of 3.22.0 to 3.24.0 turned up. Two carry a decision worth knowing about: `Target` on a forward now means the destination, and a whole-chat keyword search reads the chat itself as well as asking Telegram.
