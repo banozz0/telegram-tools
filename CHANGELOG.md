@@ -4,6 +4,11 @@ All notable changes to this project will be documented here.
 
 This project follows a practical changelog style: user-visible changes, safety changes, and release notes belong here; active task tracking belongs outside the repo.
 
+## 3.28.0 - 2026-09-15
+
+- **An archived row carries the same marks the live row does.** 3.27.0 brought the extras a sync stored back out of the store and onto the hit, and then printed a row that used none of them: an archived forward showed its text with no `[fwd @harry]` in front of it, and an archived row and the same message read live disagreed about what it was. The `archive search` table now derives its marks from `records.record_marks` — the one place the live line and the export formats derive theirs — so a forward, a captioned poll, a captioned file, a service row and a plain photo say what they are from the archive exactly as they do from the chat, and a forward and a copy of the same text stop printing as one row twice. The marks sit outside the highlight, so a long body can never push one off the row. Nothing about what is stored changed, and no re-sync is needed: the keys have been in `platform_json` since they were first written.
+- **Left as it was, on purpose:** `archive export --format markdown` and `--format html` still render named columns with the text unmarked. Those two writers take columns and cannot show a mark; giving them one means mapping hits to pre-marked rows before the writer sees them, which would also change what the `json`, `jsonl` and `csv` exports carry. That is a decision of its own, not a detail of this fix.
+
 ## 3.27.0 - 2026-09-15
 
 - **The shared archive tree is in at v0.11, so the two screens 3.25.0 and 3.26.0 built now have something to show.** An archived row carries the extras a sync stored about it — a forward's origin, a poll's question, a service row's event, an attachment's name — because `Archive.search()` selects `platform_json` and merges it onto the hit after the columns. Until now an archived forward and a copy of the same text came back as two rows nothing could tell apart. `archive search --json` and the `json`, `jsonl` and `csv` exports carry the keys from this release. `archive status` gains its `rendering` line, which on a store written before the stamp says so plainly rather than guessing.

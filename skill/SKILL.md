@@ -1,7 +1,7 @@
 ---
 name: telegram-tools
 description: "Use when you need the real numeric ID of a Telegram chat, channel, group or forum topic — 'what's the ID of that topic?', 'which chat is -100…?', 'where do I send this?' — when the user wants their own Telegram messages searched or exported (JSON, CSV, JSONL, Markdown, HTML), when a history question can be answered from the local archive instead of a fresh fetch, when a message must be posted to a chat or topic the user has allowlisted, when a message the user named should get a reply, a reaction, a pin, or be forwarded, copied or bookmarked, when the user asks who the admins of a chat are, who is waiting to join, which invite links exist, what a chat's or a topic's settings are, or which chat folders they have, or when they want a message posted at a set time or a rule that alerts them when something happens in a chat."
-version: 1.19.0
+version: 1.20.0
 author: banozz0
 license: MIT
 platforms: [macos]
@@ -433,7 +433,9 @@ names the files).
   syntax to FTS5, so quote it: `--query '"v3.4.1"'`. `--scope <rid>`, `--from
   tg:user:<id>`, `--since`/`--until`, `--regex` and `--context N` narrow or widen it;
   `result.messages[].highlight` carries the match marked `«…»`, `context_before` and
-  `context_after` the neighbours. An empty answer on a fresh machine usually means
+  `context_after` the neighbours. Its printed rows carry the same marks a live
+  `search` row does — `[fwd …]`, `[poll]`, `[file] …`, `[event] …`, `[media]` —
+  so a message says the same thing about itself read back as it did read live. An empty answer on a fresh machine usually means
   no sync has run: `archive status` says, and `result.coverage` on a sync names every
   scope it could not read and why.
 - **`archive sync` is the one archive command that connects.** It reads history and

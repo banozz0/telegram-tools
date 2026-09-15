@@ -27,6 +27,7 @@ from telegram_tools._core.export import FORMATS as EXPORT_FORMATS
 from telegram_tools._core.paths import ToolPaths, make_private_dir, open_private
 from telegram_tools._core.plan import Plan
 from telegram_tools import profiles as profile_store
+from telegram_tools.records import record_marks
 from telegram_tools.surface import execute_hint
 
 CONFIG_FILE = "config.json"
@@ -265,7 +266,13 @@ def format_hits(hits: Sequence[SearchHit]) -> str:
     lines = ["Messages", "--------------------------------------------"]
     for hit in hits:
         shown = " ".join((hit.highlight or hit.text).split())
-        lines.append(f"{hit.rid}\t{hit.message_id}\t{hit.date or ''}\tsender={hit.sender}\t{shown}")
+        # `to_dict` merges the extras the sync stored onto the row, which is the
+        # shape `records.record_marks` reads -- the same one place the live line
+        # and the exports derive their marks from, so a message read back out of
+        # the archive says what it is the way reading it live does. Outside the
+        # highlight, as record_marks documents, so nothing can push a mark off.
+        marks = record_marks(hit.to_dict())
+        lines.append(f"{hit.rid}\t{hit.message_id}\t{hit.date or ''}\tsender={hit.sender}\t{marks}{shown}")
         for row in hit.context_before:
             lines.append(_context_line(row))
         for row in hit.context_after:

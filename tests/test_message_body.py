@@ -14,6 +14,7 @@ and not a stand-in for it.
 from __future__ import annotations
 
 import json
+import re
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
@@ -23,6 +24,7 @@ from telethon.tl import types as tl
 from telegram_tools._core.archive import Archive, MessageRecord, ScopeListing
 from telegram_tools._core.identity import Identity, Target
 from telegram_tools.adapters.archive import Cursor, _Scope, message_record
+from telegram_tools.archive import format_hits
 from telegram_tools.records import message_to_record
 from telegram_tools.search import format_message_records
 
@@ -568,3 +570,77 @@ def test_a_poll_is_still_a_poll_and_not_an_attachment():
     record, _text = printed(fake_message(37, media=poll_media("ship it?", "yes", "no")))
 
     assert "poll" in record and "attachment" not in record
+
+
+# -- the archive's printed table (card agent-bo-95422242) ------------------
+#
+# The archive stores what a message is and hands it back on the hit; these are
+# about the last step, the screen. A row read out of the store must carry the
+# same marks the same message carries when it is read live, or two messages
+# that differ only by being a forward print as one row twice.
+
+
+def searched(store, query: str) -> list[str]:
+    """The hit rows `archive search` prints, without the table's own two lines."""
+    printed_table = format_hits(store.search(query))
+    return [line for line in printed_table.splitlines() if line.startswith(SCOPE.target.rid)]
+
+
+def test_an_archived_forward_and_a_copy_of_the_same_text_print_as_two_rows(archive):
+    archived(archive, fake_message(13, raw_text="campaign 3.1", message="campaign 3.1", forward=forwarded(sender=SENDER)))
+    archived(archive, fake_message(14, raw_text="campaign 3.1", message="campaign 3.1"))
+
+    rows = searched(archive, "campaign")
+
+    assert len(rows) == 2
+    forward_row = next(row for row in rows if "\t13\t" in row)
+    copy_row = next(row for row in rows if "\t14\t" in row)
+    assert "[fwd @harry]" in forward_row
+    assert "[fwd" not in copy_row, "a copy names nobody, and that is the whole difference"
+    assert forward_row != copy_row
+
+
+def test_an_archived_captioned_poll_and_captioned_file_carry_their_marks(archive):
+    archived(archive, fake_message(41, raw_text="closes friday", message="closes friday", media=poll_media("ship it?", "yes", "no")))
+    archived(archive, fake_message(42, raw_text="numbers inside", message="numbers inside", media=FILE))
+
+    poll_row = searched(archive, "friday")[0]
+    file_row = searched(archive, "numbers")[0]
+
+    # The body is the highlight, so the matched word arrives wrapped in «»; the
+    # mark sits in front of all of it either way.
+    assert "\t[poll] closes «friday»" in poll_row, "the caption is the text, so the line is the only place left to name it"
+    assert "\t[file] «numbers» inside" in file_row
+
+
+def marks_of(line: str) -> str:
+    """The bracketed run a printed row opens its body with, in either table.
+
+    Both tables end the row with the body, and the marks sit in front of it, so
+    the last tab-separated field is what these two disagree about or not.
+    """
+    return "".join(re.findall(r"^(?:\[[^\]]*\] )*", line.rsplit("\t", 1)[-1]))
+
+
+@pytest.mark.parametrize(
+    "media, forward, word, expected",
+    [
+        (None, forwarded(sender=SENDER), "campaign", "[fwd @harry] "),
+        (poll_media("ship it?", "yes", "no"), None, "friday", "[poll] "),
+        (FILE, None, "numbers", "[file] "),
+        (SimpleNamespace(photo=object()), None, "photo", "[media] "),
+        (None, None, "plain", ""),
+    ],
+    ids=["forward", "captioned-poll", "captioned-file", "photo", "plain"],
+)
+def test_an_archived_row_and_a_live_row_for_one_message_carry_the_same_marks(archive, media, forward, word, expected):
+    """The point of the card: the archive is a second way to read the same message."""
+    text = {"campaign": "campaign 3.1", "friday": "closes friday", "numbers": "numbers inside", "photo": "a photo of it", "plain": "just a plain line"}[word]
+    message = fake_message(61, raw_text=text, message=text, media=media, forward=forward)
+
+    archived(archive, message)
+    _record, live = printed(message)
+    row = searched(archive, word)[0]
+
+    assert marks_of(live) == expected
+    assert marks_of(row) == marks_of(live)
