@@ -530,7 +530,13 @@ The terms this codebase uses, and the boundaries they imply.
   `reactions`, `pinned`, `unread` and `draft` (`messages.read_back`). One that
   cannot be fetched reads `unverified: <reason>` and is never presented as
   verified; the key it read is still reported, so a write the platform
-  accepted and did not apply says so rather than echoing the request.
+  accepted and did not apply says so rather than echoing the request. It is
+  said out loud in both modes: `Reporter.set_evidence` prints `Read back:
+  <sentence>` in human mode, verified or not, and machine mode leaves it to
+  `evidence` in the envelope. Both cases print, because an `unverified:` line
+  nobody has seen the verified form of is a line a reader cannot place.
+  `unverified` never moves the status or the exit code — it says how much a
+  run could confirm, not that it failed.
 - **Audit line** — one redacted JSON line per *executed* write in
   `~/.telegram-tools/audit.jsonl`, from the menu exactly as from a flag. Dry
   runs and cancellations leave nothing.

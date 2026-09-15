@@ -575,3 +575,58 @@ def test_discover_orders_a_forums_topics_by_id_whatever_order_telegram_served(ru
     envelope = envelope_of(out)
     assert (code, envelope["status"]) == (0, "ok")
     assert [topic["id"] for topic in envelope["result"]["chats"][0]["topics"]] == [1, 2, 4, 6]
+# -- the readback a person reads ------------------------------------------
+
+
+class SilentReadbackClient(FakeClient):
+    """Telegram accepted the write and will not say what it holds afterwards."""
+
+    async def get_messages(self, _peer, ids=None):
+        return None
+
+
+def test_a_human_send_prints_the_readback_it_verified(run_cli, monkeypatch, capsys):
+    monkeypatch.setenv("TELEGRAM_SEND_ALLOWLIST", str(CHAT_ID))
+
+    code, out, _err, _fake = run_cli(
+        ["send", "--chat", str(CHAT_ID), "--text", "ship it", "--yes"], capsys=capsys
+    )
+
+    # The same sentence `--json` ships as evidence.readback, in the plain output.
+    assert "Read back: message 9001 is in Agency" in out
+    assert code == 0
+
+
+def test_a_readback_that_failed_says_so_in_human_mode_and_still_exits_0(run_cli, home, monkeypatch, capsys):
+    monkeypatch.setenv("TELEGRAM_SEND_ALLOWLIST", str(CHAT_ID))
+
+    code, out, _err, _fake = run_cli(
+        ["send", "--chat", str(CHAT_ID), "--text", "ship it", "--yes"],
+        client=SilentReadbackClient(),
+        capsys=capsys,
+    )
+
+    # The doubt reaches the person, not only the envelope: the send happened, so
+    # the run did what it was asked and the exit code stays 0. `unverified` is a
+    # fact about how much could be confirmed, never a failure.
+    assert "Read back: unverified: the sent message could not be read back (LookupError)" in out
+    assert code == 0
+    assert '"sent": true' in out
+
+    line = json.loads((home / ".telegram-tools" / "audit.jsonl").read_text(encoding="utf-8").splitlines()[0])
+    assert line["status"] == "ok"
+    assert line["evidence"]["readback"].startswith("unverified:")
+
+
+def test_the_readback_sentence_stays_off_stdout_under_json(run_cli, monkeypatch, capsys):
+    monkeypatch.setenv("TELEGRAM_SEND_ALLOWLIST", str(CHAT_ID))
+
+    code, out, err, _fake = run_cli(
+        ["--json", "send", "--chat", str(CHAT_ID), "--text", "ship it", "--yes"], capsys=capsys
+    )
+
+    envelope = envelope_of(out)
+    assert (code, envelope["status"]) == (0, "ok")
+    assert envelope["evidence"]["readback"] == "message 9001 is in Agency"
+    # stdout is one envelope; the sentence is in it, not printed beside it.
+    assert "Read back:" not in out and "Read back:" not in err

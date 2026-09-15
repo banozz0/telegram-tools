@@ -315,7 +315,28 @@ class Reporter:
         self._plan = plan
 
     def set_evidence(self, evidence: Evidence) -> None:
+        """The readback, kept for the envelope and said out loud to a person.
+
+        `evidence.readback` is the one sentence that says what the tool read
+        after the write, and a readback it could not fetch begins
+        `unverified:`. Under `--json` an agent gets it as `evidence.readback`;
+        in human mode the envelope is not there to read, so it is printed --
+        otherwise the doubt reaches only the reader who least needs help, and a
+        result mapping saying `done: true` beside a value the tool knows it
+        never confirmed looks like a success.
+
+        It prints on every write, verified or not. A line that appears only
+        when something went wrong has no shape a reader recognises: the person
+        meeting `unverified:` for the first time cannot tell whether it is a
+        warning or a word this tool always prints. Seeing the verified sentence
+        on the writes that worked is what makes the unverified one legible.
+
+        Machine mode prints nothing here: stdout is one envelope, and it
+        already carries this.
+        """
         self._evidence = evidence
+        if not self.machine:
+            self.info(f"Read back: {evidence.readback}")
 
     def warn(self, text: str) -> None:
         if text not in self._warnings:
