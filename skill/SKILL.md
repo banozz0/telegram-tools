@@ -495,6 +495,10 @@ names the files).
   `Acting as: <label> · account · Target: <path> (<ids>)`, and `--json` carries the
   same two as fields. When the user has several profiles, say which one answered.
   A bot-mode run reads `Acting as: @alertsbot · bot (via <account>) · Target: …`.
+  `Target` is where the run **writes**, so on `message forward` and `message copy`
+  it is `--to`/`--to-topic`, not `--chat` — the same chat their `--yes` needs
+  allowlisted. The source is the preview's `Chat` line, and the envelope's
+  `plan.targets` still carries both, source first.
 - **A bot only reaches chats it is in.** Under `--as-bot`, `--chat` takes a numeric
   id or an `@username` (never a link), and a chat the bot is not a member of is
   refused with `PERMISSION_DENIED` before the preview. That is not a reason to
