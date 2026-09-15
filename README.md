@@ -344,8 +344,10 @@ and `unreact` carry the reaction set the message now holds (`result.reactions`),
 and `unpin` its pinned flag (`result.pinned`), `read` and `unread` the chat's unread
 count and mark (`result.unread`), and `draft` the draft Telegram saved
 (`result.draft`) — beside the emoji or the text the argument named, never instead of
-it. When the two disagree, `evidence.readback` reads `unverified:` and the key still
-says what the server holds, so a silent no-op no longer looks like a success.
+it. When the two disagree, the readback reads `unverified:` and the key still
+says what the server holds, so a silent no-op no longer looks like a success —
+printed as a `Read back:` line in plain output and carried as `evidence.readback`
+under `--json`.
 
 **`delete` is `clear-messages`' gate on a selection.** It lists every id it would
 remove and stops; `--execute` asks you to type `DELETE`, and there is no `--yes`.
@@ -816,7 +818,12 @@ does anything, and refuses by name when one it needs is missing. Once you have
 answered the gate, the target is resolved a second time and compared with the
 one you were shown: a chat renamed or replaced in that window refuses rather
 than acting on whatever now holds the name. Afterwards the result is read back
-and reported, and one redacted line per executed write is appended to
+and reported: one `Read back:` line saying what the tool found — or, when it
+could not look, `Read back: unverified: …` and the reason. It prints on every
+write in plain output and rides as `evidence` under `--json`, so the doubt
+reaches whoever is reading. `unverified` is not a failure and does not change
+the exit code or the status; it says how much of the result was confirmed. One
+redacted line per executed write is appended to
 `~/.telegram-tools/audit.jsonl` (from the menu exactly as from a flag). No
 token, phone number, API hash or session path can reach that file — the same
 redaction pass covers it, every envelope and every error message.

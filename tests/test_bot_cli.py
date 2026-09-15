@@ -14,6 +14,16 @@ from telegram_tools.models import BotCommandInfo, BotInfo
 BOT_TOKEN_SECRET = "12345:AAsecretvalue"
 
 
+def split_run(out):
+    """The heading, the readback sentence, and the JSON blob a `bots` run printed.
+
+    Every write says what it read back afterwards (`Reporter.set_evidence`), so
+    the human block is heading, readback, payload -- in that order.
+    """
+    heading, readback, blob = out.split("\n", 2)
+    return heading, readback, blob
+
+
 def namespace(*, json_output=None, **kwargs):
     defaults = dict(
         bot=None,
@@ -119,8 +129,9 @@ def test_run_bots_skips_the_prompt_with_yes(monkeypatch, capsys):
     monkeypatch.setattr("telegram_tools.cli.confirm_bot_edits", lambda _plan: pytest.fail("--yes must not prompt"))
 
     assert _run_and_capture(namespace(bot="harry", name="Harry Two", yes=True), fake_config()) == 0
-    heading, _, json_blob = capsys.readouterr().out.partition("\n")
+    heading, readback, json_blob = split_run(capsys.readouterr().out)
     assert heading == "Editing @harrybot (12345)"
+    assert readback == "Read back: bot 12345 now reads name='Harry', applied name"
     result = json.loads(json_blob)
     assert result["applied"] == ["name"]
 
@@ -147,9 +158,13 @@ def test_run_bots_writes_the_edit_result_to_json_when_requested(monkeypatch, tmp
     exit_code = asyncio.run(_run_bots(account_client(), args, fake_config()))
 
     assert exit_code == 0
-    # The JSON result goes to the file only; the identifying heading still goes to
-    # stdout, since it prints on every edit run regardless of --json or --yes.
-    assert capsys.readouterr().out == "Editing @harrybot (12345)\n"
+    # The JSON result goes to the file only; the identifying heading and the
+    # readback sentence still go to stdout, since both print on every edit run
+    # regardless of --json or --yes.
+    assert capsys.readouterr().out == (
+        "Editing @harrybot (12345)\n"
+        "Read back: bot 12345 now reads name='Harry', applied name\n"
+    )
     result = json.loads(output_path.read_text())
     assert result["applied"] == ["name"]
 
@@ -371,8 +386,9 @@ def test_run_bots_reports_the_owner_edit_that_landed_before_the_bot_rail_failed(
     with pytest.raises(RuntimeError, match="rights failed"):
         _run_and_capture(args, fake_config(harry=BOT_TOKEN_SECRET))
 
-    heading, _, json_blob = capsys.readouterr().out.partition("\n")
+    heading, readback, json_blob = split_run(capsys.readouterr().out)
     assert heading == "Editing @harrybot (12345)"
+    assert readback.startswith("Read back: bot 12345 now reads ")
     result = json.loads(json_blob)
     assert result["applied"] == ["name"]
     assert result["bot_id"] == 12345
