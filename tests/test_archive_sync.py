@@ -467,6 +467,68 @@ def test_archive_status_opens_no_connection_and_prints_no_path(run_cli, capsys, 
     assert code == 0 and "messages  52" in out and "FTS5 available" in out
 
 
+BEHIND = {
+    "version": 2,
+    "scopes": 2,
+    "messages": 5300,
+    "behind": [
+        {"rid": "tg:chat:-1001234567890", "title": "Agency", "version": None, "messages": 5000},
+        {"rid": "tg:topic:-1001234567890:141", "title": "Deploys", "version": 1, "messages": 300},
+    ],
+    "summary": "2 scope(s) holding 5300 message(s) have not been walked whole since text rendering 2",
+    "hint": (
+        "their text is whatever an earlier rendering stored and a search cannot find"
+        " what a row does not hold; rebuild one with `archive sync --full --scope RID`"
+    ),
+}
+
+
+def test_status_says_which_scopes_an_older_text_rendering_wrote():
+    """A poll, a forward, a system row and a file got their text in 3.23 and 3.24;
+    the rows archived before them kept the empty text they were stored with, and
+    a resume never goes back for them. The screen is what says so."""
+    lines = archive_store.format_rendering(BEHIND)
+    assert lines[0] == (
+        "rendering 2 scope(s) holding 5300 message(s) have not been walked whole since text rendering 2"
+    )
+    assert lines[1] == "          tg:chat:-1001234567890\tAgency\t5000 message(s)"
+    assert lines[2] == "          tg:topic:-1001234567890:141\tDeploys\t300 message(s)"
+    assert lines[3].endswith("rebuild one with `archive sync --full --scope RID`")
+    assert len(lines) == 4
+
+
+def test_a_long_list_of_stale_scopes_is_counted_out_rather_than_printed(home):
+    many = dict(BEHIND, behind=[dict(BEHIND["behind"][0], rid=f"tg:chat:-100{n}") for n in range(9)])
+    lines = archive_store.format_rendering(many)
+    assert lines[6] == "          and 4 more"
+
+
+def test_a_store_that_reports_nothing_about_the_rendering_prints_nothing():
+    """The screen carries the answer of the shared store it was given, and a copy
+    older than the stamp has none: an absent block is not a claim that all is well."""
+    assert archive_store.format_rendering(None) == []
+    assert archive_store.format_rendering({}) == []
+    assert "rendering" not in archive_store.format_status(
+        {
+            "scopes": 1, "messages": 1, "deleted": 0, "oldest": None, "newest": None,
+            "bytes": 1, "disk": {"files": 1}, "coverage": {"visible": 1, "skipped": 0, "reasons": {}},
+            "budgets": [], "fts5": True,
+        }
+    )
+
+
+def test_a_rendering_nothing_is_behind_on_is_still_said_out_loud():
+    """The truth without a person having to ask the question, either way round."""
+    current = {
+        "version": 2, "scopes": 0, "messages": 0, "behind": [],
+        "summary": "every scope holding messages has been walked whole since text rendering 2",
+        "hint": "",
+    }
+    assert archive_store.format_rendering(current) == [
+        "rendering every scope holding messages has been walked whole since text rendering 2"
+    ]
+
+
 def test_archive_search_and_all_five_export_formats_agree_on_ids_and_order(run_cli, capsys, home):
     """The P3 fixture on this tool's command line."""
     run_cli(["archive", "sync"], capsys=capsys)
