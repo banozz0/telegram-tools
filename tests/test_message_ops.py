@@ -494,7 +494,8 @@ def test_declining_the_prompt_does_nothing_and_leaves_no_audit_line(run_cli, cap
     assert code == 1
     envelope = envelope_of(out)
     assert envelope["status"] == "cancelled"
-    assert envelope["target"]["path"][0] == "Team Hermes"
+    # The target is where the verb writes, so on the two that post elsewhere it is `--to`.
+    assert envelope["target"]["path"][0] == ("Alerts" if verb in ops.DESTINATION_VERBS else "Team Hermes")
     # The preview named the chat, and the message where the verb has one.
     assert "Team Hermes" in err
     if "--id" in flags or "--to" in flags[:1] or "--ids" in flags:
@@ -568,12 +569,57 @@ def test_forward_into_a_topic_uses_the_raw_request_with_the_topic(run_cli, capsy
 
 
 @pytest.mark.parametrize("verb", ["forward", "copy"])
-def test_the_destination_line_names_the_topics_own_id(run_cli, capsys, home, verb):
-    """A topic title is not an id, and the id in the parentheses is the chat's.
+def test_the_banner_names_where_a_forward_lands_and_the_to_line_agrees(run_cli, capsys, home, verb):
+    """`Target` is where the command writes, so on a two-ended verb it is `--to`.
 
-    Topic 141 here is titled "Deploys"; a topic titled "2" whose id is 4 is what
-    found this. Without the topic's own id the confirmation screen names nothing
-    the target can be checked against. Same shape as the source `Topic` line.
+    Every other verb's banner names the chat the effect lands in; forward and
+    copy are the only ones whose effect lands somewhere else, and naming the
+    source there made the screen disagree with itself -- the banner said no
+    topic was in play while the `To` line below it said one was. The two lines
+    are now the same string, because they name the same thing.
+    """
+    code, out, _err, _fake = run_cli(
+        ["message", verb, "--chat", CHANNEL, "--ids", "300", "--to", FORUM, "--to-topic", "141"], capsys=capsys, answers=("y",)
+    )
+
+    assert code == 0
+    where = f"Team Hermes › Deploys ({FORUM_ID}:141)"
+    banner = next(line for line in out.splitlines() if line.startswith("Acting as:"))
+    to_line = next(line for line in out.splitlines() if line.startswith("To      "))
+    assert banner.endswith(f" · Target: {where}")
+    assert to_line == f"To      {where}"
+    # The source is not lost: the `Chat` line above still names where they came from.
+    assert f"Chat    Alerts ({CHANNEL_ID})" in out
+
+
+@pytest.mark.parametrize("verb", ["forward", "copy"])
+def test_the_banner_and_the_to_line_agree_when_no_topic_was_named(run_cli, capsys, home, verb):
+    """The same rule with the chat itself as the destination: one rid, one line."""
+    code, out, _err, _fake = run_cli(
+        ["message", verb, "--chat", FORUM, "--ids", "11", "--to", CHANNEL], capsys=capsys, answers=("y",)
+    )
+
+    assert code == 0
+    where = f"Alerts ({CHANNEL_ID})"
+    banner = next(line for line in out.splitlines() if line.startswith("Acting as:"))
+    to_line = next(line for line in out.splitlines() if line.startswith("To      "))
+    assert banner.endswith(f" · Target: {where}")
+    assert to_line == f"To      {where}"
+
+
+@pytest.mark.parametrize("verb", ["forward", "copy"])
+def test_the_destination_line_carries_the_topics_rid_not_the_chats_id(run_cli, capsys, home, verb):
+    """A change of mind about a documented tradeoff, not a bug found.
+
+    The line used to print the chat's id in the parentheses and prefix the
+    topic's id to the title to compensate -- topic 141 here is titled
+    "Deploys", and a topic titled "2" whose id is 4 is what found this, so a
+    bare title names nothing the target can be checked against. The compromise
+    was right while the parentheses could only hold a chat id. They hold the
+    destination's own rid id now, `<chat>:<topic>`, which carries the topic
+    without borrowing the title's place, so the prefix has nothing left to do.
+    The source `Topic` line keeps its id-first shape: it has no rid of its own
+    beside it, and this line now follows the banner it has to match.
     """
     code, out, _err, _fake = run_cli(
         ["message", verb, "--chat", CHANNEL, "--ids", "300", "--to", FORUM, "--to-topic", "141"], capsys=capsys, answers=("y",)
@@ -581,7 +627,8 @@ def test_the_destination_line_names_the_topics_own_id(run_cli, capsys, home, ver
 
     assert code == 0
     to_line = next(line for line in out.splitlines() if line.startswith("To      "))
-    assert to_line == f"To      Team Hermes › 141 Deploys ({FORUM_ID})"
+    assert to_line == f"To      Team Hermes › Deploys ({FORUM_ID}:141)"
+    assert f"({FORUM_ID})" not in to_line, "the bare chat id is what made the line ambiguous"
 
 
 def test_a_yes_run_is_gated_by_the_allowlist_on_the_chat_it_lands_in(run_cli, capsys, home, monkeypatch):

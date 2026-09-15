@@ -1565,7 +1565,20 @@ async def _run_message(client, args, config, *, report: Reporter | None = None) 
     topic_flag = getattr(args, "topic", None)
     resolved, chat, topic, target = await _resolve_destination(client, report, args.chat, topic_flag)
     peer = resolved.input_entity
-    report.set_target(target)
+
+    # -- a destination, for the verbs that post elsewhere -------------------
+    to_resolved = to_target = None
+    if verb in message_ops.DESTINATION_VERBS:
+        to_resolved, _to_chat, _to_topic, to_target = await _resolve_destination(client, report, args.to_chat, getattr(args, "to_topic", None))
+
+    # `Target` is where the command writes. For fifteen of the verbs that is
+    # the chat they act in, and `forward` and `copy` are the only ones whose
+    # effect lands somewhere else -- the same somewhere else `--yes` asks the
+    # allowlist about. Banner the source there and the screen contradicts
+    # itself, because `forward` has no `--topic`: the banner said no topic was
+    # in play while the `To` line below it named one. The source is still on
+    # the screen, as the `Chat` line the preview has always printed.
+    report.set_target(to_target if to_target is not None else target)
     report.show_banner()
 
     # -- what the verb acts on ------------------------------------------
@@ -1589,12 +1602,7 @@ async def _run_message(client, args, config, *, report: Reporter | None = None) 
         required.append("delete_messages")
     rights = await _rights(client, report, peer)
 
-    # -- a destination, for the verbs that post elsewhere -------------------
-    to_resolved = to_chat = to_topic = to_target = None
-    to_rights = rights
-    if verb in message_ops.DESTINATION_VERBS:
-        to_resolved, to_chat, to_topic, to_target = await _resolve_destination(client, report, args.to_chat, getattr(args, "to_topic", None))
-        to_rights = await _rights(client, report, to_resolved.input_entity)
+    to_rights = rights if to_resolved is None else await _rights(client, report, to_resolved.input_entity)
 
     execute = bool(getattr(args, "execute", False))
     yes = bool(getattr(args, "yes", False))
@@ -1666,17 +1674,18 @@ async def _run_message(client, args, config, *, report: Reporter | None = None) 
     if verb == "copy":
         details.append("Copy    text only; an attachment becomes a link to the original")
     topic_line = None if topic is None else f"{topic.id} {topic.display_title}"
-    # The destination names its topic the way the source line does, id first. A
-    # topic's title can be anything -- including a number that is not its id --
-    # and the id in the parentheses is the chat's, so without this the screen
-    # names nothing the person can check the target against.
+    # The destination line is the banner's twin: same display, same rid id, so
+    # the two lines about one place are one string. It used to print the chat's
+    # id in the parentheses and prefix the topic's id to the title to make up
+    # for it -- a topic title can be anything, including a number that is not
+    # its id, so a bare title names nothing the target can be checked against.
+    # That was the right trade while the parentheses could only hold a chat id.
+    # The topic's own rid id, `<chat>:<topic>`, carries the topic without
+    # borrowing the title's place, so the prefix has nothing left to do. The
+    # source `Topic` line keeps its id-first shape: it has no rid beside it.
     to_line = None
     if to_target is not None:
-        where = (
-            to_target.display if to_topic is None
-            else " › ".join([*to_chat.path, f"{to_topic.id} {to_topic.display_title}"])
-        )
-        to_line = f"{where} ({to_resolved.id})"
+        to_line = f"{to_target.display} ({_rid.parse(to_target.rid).id})"
     preview = message_ops.format_preview(
         op,
         actor=actor,
