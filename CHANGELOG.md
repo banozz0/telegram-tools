@@ -4,6 +4,11 @@ All notable changes to this project will be documented here.
 
 This project follows a practical changelog style: user-visible changes, safety changes, and release notes belong here; active task tracking belongs outside the repo.
 
+## 3.27.0 - 2026-09-15
+
+- **The shared archive tree is in at v0.11, so the two screens 3.25.0 and 3.26.0 built now have something to show.** An archived row carries the extras a sync stored about it — a forward's origin, a poll's question, a service row's event, an attachment's name — because `Archive.search()` selects `platform_json` and merges it onto the hit after the columns. Until now an archived forward and a copy of the same text came back as two rows nothing could tell apart. `archive search --json` and the `json`, `jsonl` and `csv` exports carry the keys from this release. `archive status` gains its `rendering` line, which on a store written before the stamp says so plainly rather than guessing.
+- **Still to come, named here so it is not mistaken for done:** the printed `archive search` table renders a hit's text with no marks, so a forward read back from the archive shows its text without `[fwd …]` in front of it even though the key is now there. The keys arrive; the renderer has not been taught to use them yet.
+
 ## 3.26.0 - 2026-09-15
 
 - **`archive status` says when stored rows predate a rendering fix.** Releases 3.23.0 and 3.24.0 taught the tool to derive text for a poll, a forward, a service row and ten attachment kinds, and that text lands in the archive's `text` column — the one `messages_fts` indexes. But `archive sync` resumes from a cursor and never revisits a row it already holds, so every message archived before those releases kept the empty text it was stored with, could not be found by any archive search, and nothing said so. The status screen now names the scopes an older rendering wrote, how many messages that is, and the command that rebuilds them; the first five are listed and the rest counted, with the whole list in the `--json` envelope. It counts and never rewrites — a full re-sync refetches every message in the scope from Telegram, so it is offered rather than run for you. **The line stays absent until the shared archive tree is synced in at v0.11 or later**, and on a store written before the stamp, because reporting nothing is the honest answer where nothing was recorded.
