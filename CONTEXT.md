@@ -210,6 +210,22 @@ The terms this codebase uses, and the boundaries they imply.
   wins; the derivation only fills a body that would otherwise be empty. One
   seam, read by the printed line, the export columns and the archive row, so a
   message says the same thing about itself wherever it is shown.
+- **Keyword match** — `records.message_search_text`: the string a live
+  `--keyword` is tested against, which is the printed line itself —
+  `record_marks` in front of `message_body`. A keyword that read `raw_text`
+  alone could only ever find what somebody typed, so every body the tool
+  derived was invisible to `search` while `archive search`, which stores that
+  body, found all of them.
+- **Read pass** — the second pass a whole-chat `--keyword` makes. Telegram
+  answers `search=` out of its own index, so it finds a typed word at any depth
+  of a chat and can never return `[poll] ship it?` or `[file] flange.pdf`,
+  strings it was never sent. The read pass asks for no word and filters here
+  instead, and it is the one with a cost, so it is bounded: `search.DERIVED_SCAN`
+  messages, newest first, about ten requests. The server pass is untouched and
+  still unbounded, both answers merge by message id, and the merged list is
+  newest first — what is bounded is only how far back a derived body is looked
+  for. A `--topic` search has no read pass because it never had a server pass:
+  that path has always filtered every message itself.
 - **Poll** — a `MessageMediaPoll`. Its question and answer texts arrive as
   plain strings, so a poll's body is `[poll] <question> — <a> / <b>` with no
   download; `record["poll"]` carries the question and the answers, and the

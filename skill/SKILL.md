@@ -1,7 +1,7 @@
 ---
 name: telegram-tools
 description: "Use when you need the real numeric ID of a Telegram chat, channel, group or forum topic — 'what's the ID of that topic?', 'which chat is -100…?', 'where do I send this?' — when the user wants their own Telegram messages searched or exported (JSON, CSV, JSONL, Markdown, HTML), when a history question can be answered from the local archive instead of a fresh fetch, when a message must be posted to a chat or topic the user has allowlisted, when a message the user named should get a reply, a reaction, a pin, or be forwarded, copied or bookmarked, when the user asks who the admins of a chat are, who is waiting to join, which invite links exist, what a chat's or a topic's settings are, or which chat folders they have, or when they want a message posted at a set time or a rule that alerts them when something happens in a chat."
-version: 1.18.0
+version: 1.19.0
 author: banozz0
 license: MIT
 platforms: [macos]
@@ -441,6 +441,17 @@ names the files).
   Narrow with `--topic`, `--keyword`, `--from-user` (a username, an ID, or `me`),
   `--since` / `--until` (ISO dates), and `--limit`. With no `--output` it prints a
   readable table, which is usually what you want to summarise from.
+- **`--keyword` matches the printed line, not just what somebody typed.** A poll's
+  question and answers, a file's name, a forward's author and a service row's event
+  are text this tool derives — `[file] flange-spec.pdf`, `[event] message pinned`,
+  `[fwd @harry]` — and a keyword finds them. Telegram's index never held them, so a
+  whole-chat keyword search asks Telegram *and* reads the chat's most recent **1000
+  messages** itself: roughly ten more requests and a few seconds, and it always
+  honours `--limit` by stopping as soon as that many matches are held. Nothing that
+  was found before stops being found — the server pass is unchanged and still reaches
+  any depth of history for a typed word. When a derived body may be older than that
+  window, use `archive sync` once and then `archive search`, which has no window at
+  all.
 - **`send` needs `--yes` from an agent session, and `--yes` needs the allowlist.**
   Without `--yes` it prints the message and waits for a `y/N` nobody is there to
   type. With `--yes` it refuses anything outside `TELEGRAM_SEND_ALLOWLIST` and the
