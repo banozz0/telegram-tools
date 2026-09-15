@@ -250,6 +250,15 @@ ALLOWED_ADDITIONS = {
     # The member-kick card (agent-bo-95422192): one new verb in the `member`
     # group, between ban and unban.
     "member": ("kick Remove a person from the chat without banning them: they may rejoin (dry-run by default)",),
+    # The topic-drafts card (agent-bo-95422233): `draft` could write into a live
+    # chat and never take it back, so it gained the word for taking it back.
+    # Its own flag and not an empty `--text`: an unexpanded shell variable is an
+    # empty string, and in the menu a blank line already means cancel. `--text`
+    # keeps its name, its metavar and its help line; the two are now one
+    # required group, which is the rewrite below.
+    "message-draft": (
+        "--clear Remove the draft this chat or topic holds instead of writing one",
+    ),
     # The archive card gave the live `search` a switch that is the documented
     # alias of `archive search`.
     "search": (
@@ -320,6 +329,12 @@ ALLOWED_REWRITES = {
     # The member-kick card (agent-bo-95422192): the choice list grew by one
     # verb, in the middle, because ban and kick belong side by side.
     "member": (("{list,ban,kick,unban,mute,unmute,restrict}", "{list,ban,unban,mute,unmute,restrict}"),),
+    # The topic-drafts card (agent-bo-95422233). `--text` was the only way to
+    # run `draft`, so it was required on its own; it and `--clear` are now a
+    # required mutually exclusive group, which argparse spells with parentheses
+    # and a bar. Nothing was removed: `--text TEXT` is still there, still
+    # required unless the run is a clear, and still the same words.
+    "message-draft": (("(--text TEXT | --clear)", "--text TEXT"),),
     # The folders-and-settings card (agent-bo-95421954). `settings set` used to
     # change one thing, so `--slow-mode` was required; now it changes any of a
     # chat's or a topic's fields and each is optional, which argparse spells

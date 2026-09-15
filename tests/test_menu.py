@@ -2614,6 +2614,60 @@ def test_send_stages_a_reply_to_and_can_clear_it_again():
     assert "Reply to  [(nothing - a new message)]" in screens(output)
 
 
+DRAFT = ("3", "16")
+
+
+def test_the_draft_row_stages_a_draft_and_runs_it():
+    # 1 1 = forum groups > Hermes, 2 = Draft, the body, ., 4 = Do it
+    answers = [DRAFT, "1", "1", "2", "later: deploy", ".", "4", "", "0"]
+    code, calls, output = run_menu(answers)
+
+    assert code == 0
+    args = calls[0]
+    assert (args.command, args.message_verb, args.text, args.clear) == ("message", "draft", "later: deploy", False)
+    assert "3. Clear it     [no]" in screens(output)
+
+
+def test_taking_a_draft_back_is_its_own_row_and_never_a_blank_line():
+    """Card agent-bo-95422233 against card agent-bo-95422220's pinned contract.
+
+    A blank first line means cancel on every row that shares the multi-line
+    editor, so it cannot also mean "take the draft back": the two readings are
+    the same keystroke. Clearing is its own toggle, and the blank line on this
+    very row still cancels and leaves the staged draft alone.
+    """
+    # 3 = Clear it, 4 = Do it: nothing is staged as text, and it still runs.
+    answers = [DRAFT, "1", "1", "3", "4", "", "0"]
+    code, calls, output = run_menu(answers)
+    assert code == 0
+    assert (calls[0].message_verb, calls[0].clear, calls[0].text) == ("draft", True, None)
+    assert "3. Clear it     [yes]" in screens(output)
+
+    # 2 = Draft, the body, .; 2 again and a blank first line cancels the editor,
+    # which leaves the draft staged and Clear it off.
+    answers = [DRAFT, "1", "1", "2", "later: deploy", ".", "2", "", "4", "", "0"]
+    code, calls, _output = run_menu(answers)
+    assert code == 0
+    assert (calls[0].text, calls[0].clear) == ("later: deploy", False)
+
+    # The two rows are one question: staging a draft after toggling Clear it
+    # turns the toggle off, and toggling it on drops the staged draft.
+    answers = [DRAFT, "1", "1", "3", "2", "later: deploy", ".", "4", "", "0"]
+    code, calls, _output = run_menu(answers)
+    assert code == 0 and (calls[0].text, calls[0].clear) == ("later: deploy", False)
+
+    answers = [DRAFT, "1", "1", "2", "later: deploy", ".", "3", "4", "", "0"]
+    code, calls, _output = run_menu(answers)
+    assert code == 0 and (calls[0].text, calls[0].clear) == (None, True)
+
+
+def test_the_draft_row_still_refuses_to_run_with_nothing_staged():
+    answers = [DRAFT, "1", "1", "4", "0", "0", "0", "0"]
+    code, calls, output = run_menu(answers)
+    assert code == 0 and calls == []
+    assert "Fill in first: Draft." in screens(output)
+
+
 def test_main_menu_after_a_message_verb_lands_on_the_root():
     answers = [MARK_READ, "2", "1", "1", "", "0"]
     _code, _calls, output = run_menu(answers)

@@ -33,6 +33,7 @@ from typing import Any, Callable, Sequence
 
 from telethon.tl.functions.messages import (
     ForwardMessagesRequest,
+    GetForumTopicsByIDRequest,
     GetPeerDialogsRequest,
     MarkDialogUnreadRequest,
     SaveDraftRequest,
@@ -445,6 +446,10 @@ class Request:
     multiple: bool = False
     seconds: int = 5
     label: str = ""
+    # `draft` only: take the draft back rather than write one. Its own field and
+    # not an empty `text`, because an empty string is what a shell hands over
+    # when a variable failed to expand, and that must never wipe a live draft.
+    clear: bool = False
     # Where a copied attachment points: the original message's link.
     links: dict[int, str] = field(default_factory=dict)
 
@@ -511,6 +516,38 @@ def _reply_to(topic_id: int | None, message_id: int | None = None):
     if topic_id is not None:
         return InputReplyToMessage(reply_to_msg_id=topic_id, top_msg_id=topic_id)
     return None
+
+
+async def _dialog_of(client, peer):
+    dialogs = await client(GetPeerDialogsRequest(peers=[InputDialogPeer(peer=peer)]))
+    dialog = (getattr(dialogs, "dialogs", None) or [None])[0]
+    if dialog is None:
+        raise LookupError("Telegram returned no dialog for the chat")
+    return dialog
+
+
+async def _draft_in(client, peer, topic_id: int | None) -> str | None:
+    """The draft Telegram holds in the scope the write named, or None for no draft.
+
+    A forum keeps a draft per topic. `SaveDraftRequest` carries the topic in
+    `reply_to`, and that is where Telegram stores it -- the chat-level dialog
+    keeps its own, separate one. So a readback that asked for a topic has to
+    read the topic, or it compares the write against a scope it never wrote to
+    and calls every topic draft unverified. A topic's draft rides on the
+    `ForumTopic` itself, which is one call.
+
+    An empty draft and no draft are the same state here: Telegram answers a
+    cleared scope with `DraftMessageEmpty`, which carries no message at all.
+    """
+    if topic_id is None:
+        held = getattr(getattr(await _dialog_of(client, peer), "draft", None), "message", None)
+    else:
+        result = await client(GetForumTopicsByIDRequest(peer=peer, topics=[int(topic_id)]))
+        rows = [row for row in getattr(result, "topics", None) or [] if int(getattr(row, "id", 0)) == int(topic_id)]
+        if not rows:
+            raise LookupError("Telegram returned no topic for the draft")
+        held = getattr(getattr(rows[0], "draft", None), "message", None)
+    return str(held) if held else None
 
 
 async def perform(client, request: Request, *, sleep=asyncio.sleep, bookmark_row: Callable[[int], None] | None = None) -> Outcome:
@@ -608,8 +645,14 @@ async def perform(client, request: Request, *, sleep=asyncio.sleep, bookmark_row
         return Outcome(verb, request.chat_id, tuple(ids), new_ids, extra={"label": request.label})
 
     if verb == "draft":
-        await client(SaveDraftRequest(peer=peer, message=request.text or "", reply_to=_reply_to(request.topic_id)))
-        return Outcome(verb, request.chat_id, extra={"text": request.text})
+        # An empty message is how Telegram removes a draft: it answers the same
+        # Bool and leaves the scope holding nothing.
+        text = "" if request.clear else (request.text or "")
+        await client(SaveDraftRequest(peer=peer, message=text, reply_to=_reply_to(request.topic_id)))
+        extra: dict[str, Any] = {"text": None if request.clear else request.text}
+        if request.clear:
+            extra["cleared"] = True
+        return Outcome(verb, request.chat_id, extra=extra)
 
     raise ValueError(f"Unknown message verb: {verb}")
 
@@ -683,29 +726,28 @@ async def read_back(client, request: Request, outcome: Outcome, *, where: str, d
     if verb == "typing":
         raise LookupError("a typing status leaves nothing to read back")
 
-    if verb in ("read", "unread", "draft"):
-        # All three are answered with a bare Bool, so the dialog is the only
-        # place the new state exists: one cheap fetch of it, shared by the three.
-        dialogs = await client(GetPeerDialogsRequest(peers=[InputDialogPeer(peer=peer)]))
-        dialog = (getattr(dialogs, "dialogs", None) or [None])[0]
-        if dialog is None:
-            raise LookupError("Telegram returned no dialog for the chat")
-        if verb in ("read", "unread"):
-            unread = int(getattr(dialog, "unread_count", 0) or 0)
-            marked = bool(getattr(dialog, "unread_mark", False))
-            outcome.extra["unread"] = {"count": unread, "marked": marked}
-            if verb == "read":
-                if unread:
-                    raise LookupError(f"{unread} message(s) are still unread")
-                return f"{where} has no unread messages"
-            if not marked:
-                raise LookupError("the chat is not marked unread")
-            return f"{where} is marked unread"
-        draft = getattr(getattr(dialog, "draft", None), "message", None)
-        outcome.extra["draft"] = None if draft is None else str(draft)
-        if draft != (request.text or ""):
-            raise LookupError("the draft does not read as the text")
-        return f"the draft in {where} reads the text"
+    if verb in ("read", "unread"):
+        # Both are answered with a bare Bool, so the dialog is the only place
+        # the new state exists: one cheap fetch of it, shared by the two.
+        dialog = await _dialog_of(client, peer)
+        unread = int(getattr(dialog, "unread_count", 0) or 0)
+        marked = bool(getattr(dialog, "unread_mark", False))
+        outcome.extra["unread"] = {"count": unread, "marked": marked}
+        if verb == "read":
+            if unread:
+                raise LookupError(f"{unread} message(s) are still unread")
+            return f"{where} has no unread messages"
+        if not marked:
+            raise LookupError("the chat is not marked unread")
+        return f"{where} is marked unread"
+
+    if verb == "draft":
+        held = await _draft_in(client, peer, request.topic_id)
+        outcome.extra["draft"] = held
+        wanted = None if request.clear else (request.text or None)
+        if held != wanted:
+            raise LookupError("the draft is still there" if wanted is None else "the draft does not read as the text")
+        return f"{where} holds no draft" if wanted is None else f"the draft in {where} reads the text"
 
     if verb == "bookmark":
         found = await client.get_messages("me", ids=list(outcome.new_ids))
