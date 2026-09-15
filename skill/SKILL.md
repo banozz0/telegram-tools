@@ -1,7 +1,7 @@
 ---
 name: telegram-tools
 description: "Use when you need the real numeric ID of a Telegram chat, channel, group or forum topic — 'what's the ID of that topic?', 'which chat is -100…?', 'where do I send this?' — when the user wants their own Telegram messages searched or exported (JSON, CSV, JSONL, Markdown, HTML), when a history question can be answered from the local archive instead of a fresh fetch, when a message must be posted to a chat or topic the user has allowlisted, when a message the user named should get a reply, a reaction, a pin, or be forwarded, copied or bookmarked, when the user asks who the admins of a chat are, who is waiting to join, which invite links exist, what a chat's or a topic's settings are, or which chat folders they have, or when they want a message posted at a set time or a rule that alerts them when something happens in a chat."
-version: 1.18.0
+version: 1.19.0
 author: banozz0
 license: MIT
 platforms: [macos]
@@ -331,7 +331,7 @@ names the files).
 | "react to it with 🔥" / "pin it" (they named it, allowlisted) | `telegram-tools --json message react --chat <id> --id <msg-id> --emoji 🔥 --yes`, `message pin --chat <id> --id <msg-id> --yes` |
 | "forward that to the releases channel" (both named, allowlisted) | `telegram-tools --json message forward --chat <id> --ids <msg-id> --to <chat> --yes` (`copy` re-posts the text; an attachment becomes a link) |
 | "save that message" / "bookmark it" | `telegram-tools --json message bookmark --chat <id> --id <msg-id> --label "..." --yes` — Saved Messages plus an archive row |
-| "mark it read" / "draft this for me" | `telegram-tools --json message read --chat <id> --yes`, `message draft --chat <id> --text "..." --yes` |
+| "mark it read" / "draft this for me" | `telegram-tools --json message read --chat <id> --yes`, `message draft --chat <id> --text "..." --yes` (add `--topic <id>` for a forum thread; `--clear` instead of `--text` takes the draft back) |
 | "delete those messages" | hand them `telegram-tools message delete --chat <id> --ids <a>,<b> --execute` — rule 10, they type DELETE |
 | "save this forum's layout" / "what does that chat's setup look like?" | `telegram-tools --json structure export --chat <id> --output /path/hermes.json` — reads only; the file holds no people or messages |
 | "how does that chat differ from the blueprint?" | `telegram-tools --json structure diff --blueprint /path/hermes.json --chat <id>` — reads only |
@@ -454,7 +454,9 @@ names the files).
   set the message now holds in `result.reactions`, `pin`/`unpin` the message's pinned
   flag in `result.pinned`, `read`/`unread` the chat's unread count and mark in
   `result.unread`, and `draft` the saved draft in `result.draft` — all read back from
-  Telegram after the call, beside the `emoji` or `text` that was asked for. When they
+  Telegram after the call, beside the `emoji` or `text` that was asked for. A draft is
+  read back in the scope it was written to, so `--topic` reads the topic's own draft
+  and a cleared one comes back as `null` in `result.draft`. When they
   disagree the run is still `ok` but `evidence.readback` starts `unverified:`: the
   write did not take, so say so rather than reporting success.
 - **`send --topic` is the difference between delivered and lost.** Omitting it posts

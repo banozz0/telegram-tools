@@ -569,7 +569,11 @@ def build_parser() -> argparse.ArgumentParser:
     verb_parsers["typing"].add_argument("--seconds", type=positive_int, default=5, help="How long to show it (default 5)")
     verb_parsers["bookmark"].add_argument("--label", default="", help="A label for the archive's bookmark row")
     verb_parsers["draft"].add_argument("--topic", type=positive_int, help="Topic ID the draft belongs to; omit for the chat itself")
-    verb_parsers["draft"].add_argument("--text", required=True, help="The draft text, or - to read it from stdin")
+    # A draft is written or taken back, never both, and taking one back is its
+    # own word: an empty --text is what an unexpanded shell variable looks like.
+    draft_body = verb_parsers["draft"].add_mutually_exclusive_group(required=True)
+    draft_body.add_argument("--text", help="The draft text, or - to read it from stdin")
+    draft_body.add_argument("--clear", action="store_true", help="Remove the draft this chat or topic holds instead of writing one")
     for verb, verb_parser in verb_parsers.items():
         if verb == "delete":
             # Deleting messages is typed_delete: --execute plus DELETE at the
@@ -1570,7 +1574,8 @@ async def _run_message(client, args, config, *, report: Reporter | None = None) 
 
     # -- what the verb acts on ------------------------------------------
     text = None
-    if verb in ("reply", "edit", "draft"):
+    clear = bool(getattr(args, "clear", False))
+    if verb in ("reply", "edit", "draft") and not clear:
         text = _message_text(args.text, has_files=False)
     if verb in message_ops.BULK_VERBS:
         ids = _selection_ids(args, lambda connection: _archive_scope_rids(connection, str(resolved.id), None))
@@ -1617,6 +1622,8 @@ async def _run_message(client, args, config, *, report: Reporter | None = None) 
             params["seconds"] = int(args.seconds)
         if verb == "bookmark":
             params["label"] = args.label or ""
+        if clear:
+            params["clear"] = True
         return params
 
     def build(chat_target, dest_target, message_ids):
@@ -1665,6 +1672,10 @@ async def _run_message(client, args, config, *, report: Reporter | None = None) 
         details.append(f"Label   {args.label}")
     if verb == "copy":
         details.append("Copy    text only; an attachment becomes a link to the original")
+    if verb == "draft" and clear:
+        # There is no outgoing text block to show, so the screen has to say in
+        # words that the draft that is there is about to stop existing.
+        details.append("Draft   remove the draft this chat or topic holds")
     topic_line = None if topic is None else f"{topic.id} {topic.display_title}"
     # The destination names its topic the way the source line does, id first. A
     # topic's title can be anything -- including a number that is not its id --
@@ -1748,6 +1759,7 @@ async def _run_message(client, args, config, *, report: Reporter | None = None) 
         multiple=bool(getattr(args, "multiple", False)),
         seconds=int(getattr(args, "seconds", 5) or 5),
         label=getattr(args, "label", "") or "",
+        clear=clear,
         links={
             brief.id: message_ops.message_link(resolved.id, brief.id, username=username, topic_id=brief.topic_id)
             for brief in briefs

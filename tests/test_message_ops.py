@@ -89,7 +89,11 @@ class FakeClient:
         )
         self.calls: list[tuple] = []
         self.next_id = 5000
+        # Telegram keeps a draft per scope: one on the chat's dialog, one on
+        # each forum topic. The fake keeps them apart for the same reason the
+        # readback has to read the one it wrote to.
         self.dialog_state = {"unread_count": 3, "unread_mark": False, "draft": None}
+        self.topic_drafts: dict[int, object] = {}
         self.saved: dict[int, object] = {}
         self.disconnected = False
 
@@ -210,7 +214,8 @@ class FakeClient:
         name = type(request).__name__
         if name == "GetForumTopicsByIDRequest":
             found = [topic for topic in self.topics.get(request.peer.chat_id, []) if topic.id in request.topics]
-            return SimpleNamespace(topics=found, count=len(found))
+            rows = [SimpleNamespace(**{**vars(topic), "draft": self.topic_drafts.get(topic.id)}) for topic in found]
+            return SimpleNamespace(topics=rows, count=len(rows))
         if name == "GetForumTopicsRequest":
             topics = self.topics.get(request.peer.chat_id, [])
             return SimpleNamespace(topics=topics, count=len(topics))
@@ -228,8 +233,14 @@ class FakeClient:
             self.dialog_state["unread_mark"] = True
             return None
         if name == "SaveDraftRequest":
-            self.calls.append(("draft", self._chat(request.peer), request.message, getattr(request.reply_to, "top_msg_id", None)))
-            self.dialog_state["draft"] = SimpleNamespace(message=request.message)
+            top = getattr(request.reply_to, "top_msg_id", None)
+            self.calls.append(("draft", self._chat(request.peer), request.message, top))
+            # An empty message removes the draft, which is what Telegram does.
+            held = SimpleNamespace(message=request.message) if request.message else None
+            if top is None:
+                self.dialog_state["draft"] = held
+            else:
+                self.topic_drafts[int(top)] = held
             return None
         if name == "GetPeerDialogsRequest":
             return SimpleNamespace(dialogs=[SimpleNamespace(**self.dialog_state)])
@@ -788,6 +799,106 @@ def test_when_the_server_disagrees_with_the_ask_the_result_reports_the_server(ru
         assert envelope["result"]["text"] == "later: deploy"
     assert envelope["evidence"]["readback"].startswith("unverified:"), envelope["evidence"]
     assert audit_lines(home)[0]["evidence"]["readback"].startswith("unverified:")
+
+
+# -- a draft: the scope it is read back from, and taking it back --------------
+#
+# Telegram keeps a forum's drafts on its topics, never one per chat. The write
+# has always carried the topic in `reply_to`; the readback fetched the
+# chat-level dialog, so every `--topic` run compared the write against a scope
+# it had not written to and reported `unverified:`. The second half is that a
+# draft written into a live chat had no way back: `--text` was required and an
+# empty one refused.
+
+
+def _drafting_client():
+    """A forum whose chat and whose topic each hold a draft of their own."""
+    fake = FakeClient()
+    fake.dialog_state["draft"] = SimpleNamespace(message="the chat's own draft")
+    fake.topic_drafts[141] = SimpleNamespace(message="the topic's own draft")
+    return fake
+
+
+def test_a_topic_draft_is_read_back_from_the_topic_and_not_from_the_chat(run_cli, capsys, home):
+    fake = _drafting_client()
+    code, out, _err, _f = run_cli(
+        ["--json", "message", "draft", "--chat", FORUM, "--topic", "141", "--text", "later: deploy"],
+        client=fake, capsys=capsys, answers=("y",),
+    )
+
+    assert code == 0, out
+    envelope = envelope_of(out)
+    assert envelope["result"]["draft"] == "later: deploy"
+    assert envelope["evidence"]["readback"] == "the draft in Team Hermes › Deploys reads the text"
+    assert envelope["evidence"]["readback"] not in ("", None) and not envelope["evidence"]["readback"].startswith("unverified:")
+    # The chat's own draft is a different string, was not written to, and is not
+    # what the readback compared against.
+    assert fake.dialog_state["draft"].message == "the chat's own draft"
+    assert fake.topic_drafts[141].message == "later: deploy"
+    assert audit_lines(home)[0]["evidence"]["readback"].startswith("the draft in")
+
+
+def test_a_chat_draft_is_still_read_back_from_the_chat(run_cli, capsys, home):
+    """The guard on the other side: a run with no --topic reads the dialog."""
+    fake = _drafting_client()
+    code, out, _err, _f = run_cli(
+        ["--json", "message", "draft", "--chat", FORUM, "--text", "later: deploy"],
+        client=fake, capsys=capsys, answers=("y",),
+    )
+
+    assert code == 0, out
+    envelope = envelope_of(out)
+    assert envelope["result"]["draft"] == "later: deploy"
+    assert not envelope["evidence"]["readback"].startswith("unverified:")
+    # The topic's draft is untouched, and is not what was read.
+    assert fake.topic_drafts[141].message == "the topic's own draft"
+
+
+def test_clearing_a_chat_draft_takes_it_back_and_reads_back_as_none(run_cli, capsys, home):
+    fake = _drafting_client()
+    code, out, err, _f = run_cli(
+        ["--json", "message", "draft", "--chat", FORUM, "--clear"],
+        client=fake, capsys=capsys, answers=("y",),
+    )
+
+    assert code == 0, out
+    envelope = envelope_of(out)
+    assert envelope["result"]["cleared"] is True and envelope["result"]["text"] is None
+    assert envelope["result"]["draft"] is None
+    assert envelope["evidence"]["readback"] == "Team Hermes holds no draft"
+    # Telegram is told the empty message, which is how a draft is removed, and
+    # the screen says in words what the empty text block cannot.
+    assert fake.calls[-1] == ("draft", FORUM_ID, "", None)
+    assert fake.dialog_state["draft"] is None
+    assert "Draft   remove the draft this chat or topic holds" in err
+    # The topic's draft is a different scope and is left alone.
+    assert fake.topic_drafts[141].message == "the topic's own draft"
+
+
+def test_clearing_a_topic_draft_leaves_the_chat_draft_alone(run_cli, capsys, home):
+    fake = _drafting_client()
+    code, out, _err, _f = run_cli(
+        ["--json", "message", "draft", "--chat", FORUM, "--topic", "141", "--clear"],
+        client=fake, capsys=capsys, answers=("y",),
+    )
+
+    assert code == 0, out
+    envelope = envelope_of(out)
+    assert envelope["result"]["draft"] is None and envelope["result"]["cleared"] is True
+    assert envelope["evidence"]["readback"] == "Team Hermes › Deploys holds no draft"
+    assert fake.calls[-1] == ("draft", FORUM_ID, "", 141)
+    assert fake.topic_drafts[141] is None
+    assert fake.dialog_state["draft"].message == "the chat's own draft"
+
+
+def test_a_draft_is_written_or_taken_back_and_never_both_or_neither(run_cli, capsys, home):
+    """Clearing is its own word, and the two words are one required choice."""
+    for flags in ([], ["--text", "later: deploy", "--clear"]):
+        code, _out, _err, fake = run_cli(
+            ["--json", "message", "draft", "--chat", FORUM, *flags], capsys=capsys, answers=("y",)
+        )
+        assert code == 2, flags
+        assert fake.calls == []
 
 
 def test_a_reaction_takes_its_state_off_the_updates_instead_of_fetching_again(run_cli, capsys, home):

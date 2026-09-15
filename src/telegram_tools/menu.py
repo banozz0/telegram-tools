@@ -881,7 +881,10 @@ MESSAGE_FORMS = {
     "read": (),
     "unread": (),
     "bookmark": (("message_id", "Message", "int"), ("label", "Label", "text")),
-    "draft": (("topic", "Topic", "topic"), ("text", "Draft", "lines")),
+    # `Clear it` is its own row and not a blank Draft: a blank first line in the
+    # editor means cancel on every row that shares it, and one keystroke cannot
+    # mean both "never mind" and "take the draft back".
+    "draft": (("topic", "Topic", "topic"), ("text", "Draft", "lines"), ("clear", "Clear it", "toggle")),
 }
 # What has to be staged before the run row does anything.
 MESSAGE_REQUIRED = {
@@ -1027,13 +1030,25 @@ def _flow_message(verb: str):
                     if answer is BACK:
                         continue
                     staged[key] = None if answer is CLEAR else answer
+                    if verb == "draft" and key in ("text", "clear"):
+                        # The two rows are the two answers to the same question,
+                        # so the later one replaces the earlier rather than
+                        # letting a staged text ride along with a clear.
+                        if key == "clear" and staged["clear"]:
+                            staged["text"] = None
+                        elif key == "text" and staged["text"]:
+                            staged["clear"] = False
                     if key == "to_chat" and "to_topic" in staged:
                         # The destination topic was picked out of the old chat's
                         # list; the same id in a new chat is a different topic.
                         staged["to_topic"] = None
                     continue
 
-                missing = [label for key, label, _kind in fields if key in MESSAGE_REQUIRED[verb] and staged[key] in (None, "", [])]
+                needed = MESSAGE_REQUIRED[verb]
+                if verb == "draft" and staged.get("clear"):
+                    # Clearing is the whole ask; there is no draft to fill in.
+                    needed = ()
+                missing = [label for key, label, _kind in fields if key in needed and staged[key] in (None, "", [])]
                 if verb in message_ops.BULK_VERBS and not staged.get("ids") and not staged.get("from_search"):
                     missing.append("Message ids or an archive query")
                 if missing:
