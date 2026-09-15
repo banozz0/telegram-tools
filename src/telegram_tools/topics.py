@@ -26,6 +26,20 @@ def topic_from_telethon(raw_topic, icons: dict[int, str] | None = None) -> Topic
     )
 
 
+def in_id_order(topics: Iterable[TopicInfo]) -> list[TopicInfo]:
+    """Topics lowest id first -- the one order that holds still.
+
+    Telegram serves a forum's topics in most-recent-activity order, so a single
+    message reorders the next read of the same chat: a menu picker's keys move
+    under the reader, and `discover`'s envelope hands an agent a different list
+    for a chat nothing changed about. An id never moves, General is always 1 so
+    it leads, and a rename leaves the list alone -- which sorting by title would
+    not. Every surface that lists a whole forum comes through here, so none of
+    them sorts its own.
+    """
+    return sorted(topics, key=lambda topic: topic.id)
+
+
 async def resolve_icon_emoji(client, raw_topics) -> dict[int, str]:
     """Map every icon_emoji_id in a page of raw topics to its plain-emoji character.
 

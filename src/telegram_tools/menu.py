@@ -30,7 +30,7 @@ from telegram_tools import surface
 from telegram_tools import review as review_ops
 from telegram_tools import structure as structure_ops
 from telegram_tools import manage as manage_ops
-from telegram_tools.topics import get_forum_topics
+from telegram_tools.topics import get_forum_topics, in_id_order
 from telegram_tools import ui
 from telegram_tools.ui import crumb
 
@@ -444,16 +444,13 @@ _TOPIC_COLUMNS = f"{'id':<6}  title"
 
 
 async def _topics_in_order(session, reference: str):
-    """Every topic of a chat, lowest id first -- the one order that holds still.
+    """Every topic of a chat, in `topics.in_id_order` -- one sort, not two.
 
-    Telegram serves a forum's topics in most-recent-activity order, so a message
-    sent from this menu reorders the next render of the same picker: the key
-    that picked a topic last time picks a different one now, with nothing on
-    screen saying so. An id never moves, General is always 1 so it leads, and a
-    rename leaves the list alone -- which sorting by title would not. Every
-    screen that lists topics comes through here, so none of them sorts its own.
+    Every screen that lists topics comes through here, so none of them sorts its
+    own; the order itself is the shared helper's, which `discover` reads too, so
+    the menu and the envelope can never drift apart.
     """
-    return sorted(await session.topics(reference), key=lambda topic: topic.id)
+    return in_id_order(await session.topics(reference))
 
 
 def _shown(value, empty: str) -> str:

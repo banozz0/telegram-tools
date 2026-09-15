@@ -320,10 +320,13 @@ The terms this codebase uses, and the boundaries they imply.
 - **Topic order** — none, on Telegram: the app sorts topics by activity and a
   client cannot set a position. The port therefore lists topics by title (ties
   by id), so position is a function of the names on both sides and two forums
-  holding the same topics never differ in order. The menu answers the same
-  question differently: `menu._topics_in_order` sorts every topic picker by id,
-  lowest first, because there the row number is what a person presses again
-  tomorrow and an id is the one key neither a post nor a rename moves.
+  holding the same topics never differ in order. Everywhere a whole forum is
+  listed to a reader answers the question differently, through one helper:
+  `topics.in_id_order` sorts by id, lowest first, so General leads. The menu's
+  pickers (`menu._topics_in_order`) use it because the row number is what a
+  person presses again tomorrow, and `discover` uses it — table and `--json`
+  envelope alike — because an agent reading the list twice must get the same
+  list. An id is the one key neither a post nor a rename moves.
 - **Chat kind** — what a blueprint calls the container: `supergroup`, `forum`
   or `channel` (`adapters/blueprint.chat_kind`). Checked before an apply is
   planned (`TARGET_KIND_MISMATCH`) and never changed by one. A basic group has

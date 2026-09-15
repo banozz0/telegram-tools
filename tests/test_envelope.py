@@ -536,3 +536,42 @@ def test_bots_under_json_lists_what_the_table_listed(run_cli, monkeypatch, capsy
     envelope = envelope_of(out)
     assert (code, envelope["status"]) == (0, "ok")
     assert envelope["result"]["bots"][0]["id"] == 12345
+
+
+def test_discover_orders_a_forums_topics_by_id_whatever_order_telegram_served(run_cli, monkeypatch, capsys):
+    """Both surfaces sort; neither follows the server.
+
+    Telegram serves a forum's topics most-recent-activity first, so the same
+    chat read twice is a different list -- proven live, where one posted message
+    moved a topic to the front between two `discover` runs. The table and the
+    `--json` envelope come off the same list, and an agent's envelope is the
+    half that has nobody to notice, so both are pinned here.
+    """
+    from telegram_tools import discovery
+    from telegram_tools.models import TopicInfo
+
+    forum = dialog(title="Agency")
+    forum.entity.forum = True
+    # Activity order, exactly as the live chat served it after a write.
+    served = [
+        TopicInfo(id=6, title="3", top_message=6),
+        TopicInfo(id=2, title="1", top_message=2),
+        TopicInfo(id=4, title="2", top_message=4),
+        TopicInfo(id=1, title="General", top_message=1),
+    ]
+
+    async def fake_get_forum_topics(_client, _peer, **_kwargs):
+        return list(served)
+
+    monkeypatch.setattr(discovery, "get_forum_topics", fake_get_forum_topics)
+
+    code, out, _err, _fake = run_cli(["discover"], client=FakeClient([forum]), capsys=capsys)
+    assert code == 0
+    rows = out.splitlines()
+    start = rows.index("Topics") + 2
+    assert rows[start:start + 4] == ["1  General", "2  1", "4  2", "6  3"]
+
+    code, out, _err, _fake = run_cli(["--json", "discover"], client=FakeClient([forum]), capsys=capsys)
+    envelope = envelope_of(out)
+    assert (code, envelope["status"]) == (0, "ok")
+    assert [topic["id"] for topic in envelope["result"]["chats"][0]["topics"]] == [1, 2, 4, 6]

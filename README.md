@@ -10,7 +10,7 @@ Built on [Telethon](https://github.com/LonamiWebs/Telethon). Everything runs on 
 
 ## What it does
 
-- **`discover`** — lists your chats, channels, and forum groups with their exact numeric IDs and every forum topic ID. The fastest way to answer "what is this chat's `-100…` ID and what are its topic IDs?"
+- **`discover`** — lists your chats, channels, and forum groups with their exact numeric IDs and every forum topic ID, topics ordered by ID so the same chat reads the same way twice. The fastest way to answer "what is this chat's `-100…` ID and what are its topic IDs?"
 - **`search`** — searches messages by text, sender, date range, or topic, and prints a table or exports JSON, CSV, JSON lines, Markdown or HTML. A row is marked by what it is: `[media]` for a photo or another attachment with no name of its own, `[file] report.pdf` for a file, `[audio] Nightcall — Kavinsky`, `[sticker] 🎉`, `[contact] Alice Smith` (never a phone number), and the same for a checklist, a venue, an invoice, a game, a giveaway and a dice; a poll shows its question and answers, a forwarded message is marked `[fwd …]` with where it came from — which a copy, having dropped the author on purpose, never is — and Telegram's own service messages name their event (`[event] topic created: Campaign`) rather than printing as blank rows. `search --archive` answers the same flags from the local archive, offline.
 - **`archive`** — a local, searchable copy of everything your account can read: `archive sync` fills it and resumes where it stopped, `archive search` is full-text search over it with no connection, `archive export` writes one search in five formats, `archive status` says what it holds, and `archive retention` / `archive forget` prune it behind the same typed-title gate `delete` has. See [The local archive](#the-local-archive).
 - **`review`** — the links and files the archive has seen, in one queue, and the only way anything is ever downloaded: `review list` shows them (asking nothing of any host), `review approve` fetches the ones you pick into quarantine after a `y/N`, the built-in checks and an optional local ClamAV give each a verdict, and `review accept` moves a file into `~/.telegram-tools/media/` after showing that verdict, behind a second `y/N`. Neither gate has a `--yes`. See [The review queue](#the-review-queue).
@@ -310,10 +310,17 @@ Admin: yes
 
 Topics
 --------------------------------------------
+16    General
 141   💻 Deploys
 217   🔎 Support
-16    General
 ```
+
+Topics come out lowest topic ID first — General leads, because it is always
+topic 1 in a forum Telegram made — in the table and in the `--json` envelope
+alike. Telegram itself serves a forum's topics in most-recent-activity order,
+so one message would otherwise reorder the list between two runs; sorting by ID
+means reading the same chat twice gives the same list, and a rename does not
+move a row either.
 
 ## Message tools
 
