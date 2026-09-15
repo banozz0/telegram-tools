@@ -540,6 +540,26 @@ def message_to_record(message: Any, *, chat_id: int | None = None, topic_id: int
     }
 
 
+def message_search_text(message: Any) -> str:
+    """Everything a message's printed line says about it, as one string to match against.
+
+    The two seams the row is built from -- `message_body` for the text and
+    `record_marks` for what sits in front of it -- so a live `--keyword` reads
+    the line a person reads. Without it a keyword could only ever match what
+    somebody typed, and `[poll] ship it?`, `[file] flange.pdf`,
+    `[event] message pinned` and `[fwd @harry]` -- strings this tool derives
+    and Telegram has never heard of -- were invisible to the live search while
+    the archive, which stores the derived body, found every one of them.
+    """
+    body = message_body(message)
+    record = {
+        "text": body.text,
+        "has_media": bool(getattr(message, "media", None)),
+        **body.extras,
+    }
+    return record_marks(record) + body.text
+
+
 def message_matches_filters(
     message: Any,
     *,
@@ -561,7 +581,6 @@ def message_matches_filters(
     if from_user_id is not None and getattr(message, "sender_id", None) != from_user_id:
         return False
     if keyword:
-        text = (getattr(message, "raw_text", None) or getattr(message, "message", "") or "").lower()
-        if keyword.lower() not in text:
+        if keyword.lower() not in message_search_text(message).lower():
             return False
     return True

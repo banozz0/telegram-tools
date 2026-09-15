@@ -10,6 +10,19 @@ from telegram_tools.records import (
 )
 
 
+# How deep a whole-chat keyword search reads for a body this tool derived.
+#
+# Telegram answers `search=` out of its own index, so it finds a typed word at
+# any depth of a chat -- and it can never find `[poll] ship it?`,
+# `[file] flange.pdf` or `[event] message pinned`, strings that exist only
+# here. So a keyword search asks Telegram *and* reads the chat itself, and the
+# reading pass is the one with a cost: this many messages, newest first, about
+# ten requests at Telethon's hundred a page. The server pass is unchanged and
+# still unbounded, so nothing that was found before stops being found; what is
+# bounded is only how far back a derived body is looked for.
+DERIVED_SCAN = 1000
+
+
 def _truncate(value: str, max_length: int = 80) -> str:
     value = " ".join(value.split())
     if len(value) <= max_length:
@@ -86,4 +99,31 @@ async def search_messages(
         if message_matches_filters(message, keyword=keyword, since=since_dt, until=until_dt):
             records.append(message_to_record(message, chat_id=chat_id))
 
-    return records
+    if not keyword:
+        return records
+
+    # The second pass: the same window with no `search=`, filtered here instead,
+    # because a derived body is text Telegram was never sent and cannot match.
+    # Bounded by `DERIVED_SCAN` messages read, and stopped early once it holds
+    # as many matches as were asked for -- both passes come back newest first,
+    # so a match dropped by that stop is older than `limit` matches already
+    # held and could not have made the answer anyway.
+    found = {record["id"]: record for record in records}
+    scan = {key: value for key, value in kwargs.items() if key != "search"}
+    scan["limit"] = None
+    read = 0
+    matched = 0
+    async for message in client.iter_messages(chat, **scan):
+        read += 1
+        if message_matches_filters(message, keyword=keyword, since=since_dt, until=until_dt):
+            matched += 1
+            message_id = int(getattr(message, "id"))
+            if message_id not in found:
+                found[message_id] = message_to_record(message, chat_id=chat_id)
+            if limit is not None and matched >= limit:
+                break
+        if read >= DERIVED_SCAN:
+            break
+
+    # Newest first, the order one pass returned, and never more rows than asked.
+    return sorted(found.values(), key=lambda record: record["id"], reverse=True)[:limit]
