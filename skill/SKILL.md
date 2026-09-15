@@ -310,7 +310,7 @@ names the files).
 | The ask | Run |
 |---|---|
 | "what's the ID of that chat/group/channel?" | `telegram-tools discover` |
-| "what are the topic IDs in that group?" | `telegram-tools discover` (topics are listed under their forum) |
+| "what are the topic IDs in that group?" | `telegram-tools discover` (topics are listed under their forum, lowest ID first) |
 | "include the chats I'm just a member of" | `telegram-tools discover --all` |
 | "give me that as a file" | `telegram-tools discover --json /path/out.json` |
 | "find where X was discussed" | `telegram-tools search --chat <id> --keyword "X"` |
@@ -377,6 +377,13 @@ names the files).
 - **`discover` defaults to admin/managed chats only** — the ones the user runs. Add
   `--all` only when the chat you want is one they merely belong to; it is a much
   longer walk through their dialog list.
+- **`discover` lists a forum's topics lowest topic ID first**, in the table and in
+  `result.chats[].topics` alike, so General leads — it is topic 1 in every forum
+  Telegram made. Telegram serves them in most-recent-activity order instead, so
+  without that sort one posted message reorders the list between two runs; you can
+  read the same chat twice and compare the results, and position N is the same
+  topic each time. It is an ordering promise, not a numbering one: match a topic by
+  its `id`, never by where it sat in the list.
 - **`--json` after a subcommand still takes a path.** `discover --json out.json`
   writes that file and prints nothing. The envelope is the *global* flag, before
   the subcommand: `telegram-tools --json discover`. A bare `discover --json` with

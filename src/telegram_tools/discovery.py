@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from telegram_tools.models import ChatChoice, ChatInfo, TopicInfo
-from telegram_tools.topics import get_forum_topics
+from telegram_tools.topics import get_forum_topics, in_id_order
 
 
 def classify_entity(entity: Any) -> str:
@@ -129,7 +129,9 @@ async def discover_chats(client) -> list[ChatInfo]:
         topics: list[TopicInfo] = []
         if getattr(entity, "forum", False):
             peer = getattr(dialog, "input_entity", entity)
-            topics = await get_forum_topics(client, peer)
+            # `discover`'s table and its envelope are the same list, so the one
+            # sort here is what makes both deterministic for a caller.
+            topics = in_id_order(await get_forum_topics(client, peer))
 
         chats.append(
             dialog_to_chat_info(
