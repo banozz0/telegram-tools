@@ -308,6 +308,25 @@ def test_an_action_error_prints_and_returns_to_the_menu():
     assert screens(output).count("0. Exit") == 2
 
 
+def test_a_refusals_hint_lands_under_its_message_on_the_menu():
+    # The menu has no --json to read a hint from, so the way out is printed
+    # on its own line under the message, and the landing is the usual one.
+    _calls, runner = recorder(
+        error=CommandError(
+            "Telegram does not let the creator of a group leave it: campaign 4.7 (-100) stays this account's.",
+            code="PLATFORM_UNSUPPORTED",
+            hint="Transfer ownership in Telegram, or run `telegram-tools delete group --chat -100 --execute`.",
+        )
+    )
+    code, _unused, output = run_menu([DOCTOR, "", "0"], runner=runner)
+
+    assert code == 0
+    lines = screens(output).splitlines()
+    at = lines.index("error: Telegram does not let the creator of a group leave it: campaign 4.7 (-100) stays this account's.")
+    assert lines[at + 1] == "hint: Transfer ownership in Telegram, or run `telegram-tools delete group --chat -100 --execute`."
+    assert screens(output).count("0. Exit") == 2
+
+
 def test_a_session_acquisition_error_is_caught_and_returns_to_the_menu():
     # client() raising before the runner is ever called must still print and
     # loop, not escape run_menu — this covers _call's try around session.client()

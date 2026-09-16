@@ -203,8 +203,18 @@ async def _call(args, *, session, runner, write, connect: bool = True, execute_r
         with surface.menu_row(execute_row):
             return await runner(args, client=client, config=config)
     except MENU_ERRORS as exc:
-        write(f"error: {exc}")
+        write_error(write, exc)
         return None
+
+
+def write_error(write, exc: BaseException) -> None:
+    """The error line every catch in here prints, and under it the hint when
+    the refusal carries one: the menu has no envelope to read a hint from, and
+    the hint is the way out (transfer ownership, run delete, ask an admin)."""
+    write(f"error: {exc}")
+    hint = getattr(exc, "hint", None)
+    if hint:
+        write(f"hint: {hint}")
 
 
 # After-run row keys. AGAIN is answered inside _act. STAY is the flow's own next
@@ -1618,7 +1628,7 @@ async def _flow_bots(*, session, runner, read, write) -> bool:
         except MENU_ERRORS as exc:
             # A typo in a typed username is this screen to redo, not a reason
             # to drop to the root menu.
-            write(f"error: {exc}")
+            write_error(write, exc)
             continue
 
         result = await _flow_bot_screen(profile, session=session, runner=runner, read=read, write=write, trail=trail)
@@ -3128,7 +3138,7 @@ async def run_menu(*, read=None, write=None, session=None, runner=None, profile=
             except MENU_ERRORS as exc:
                 # A picker's own fetch can fail too: a flood-wait, an expired
                 # session, a chat that vanished. The menu says so and stays open.
-                write(f"error: {exc}")
+                write_error(write, exc)
                 keep_going = after_action(read=read, write=write)
             if not keep_going:
                 return 0

@@ -242,6 +242,42 @@ def test_main_exits_130_on_a_keyboard_interrupt(monkeypatch):
     assert cli.main([]) == 130
 
 
+def test_main_prints_a_refusals_hint_and_no_usage_line(monkeypatch, capsys):
+    # A refusal is not a usage mistake: the person gets the message and the way
+    # out, never argparse's usage text, and the exit is the envelope's own.
+    from telegram_tools.envelope import CommandError
+
+    async def refuse(args, *, report):
+        raise CommandError(
+            "Telegram does not let the creator of a group leave it: campaign 4.7 (-100) stays this account's.",
+            code="PLATFORM_UNSUPPORTED",
+            hint="Transfer ownership in Telegram, or run `telegram-tools delete group --chat -100 --execute`.",
+        )
+
+    monkeypatch.setattr(cli, "run", refuse)
+
+    assert cli.main(["leave", "--chat", "-100"]) == 2
+
+    err = capsys.readouterr().err
+    assert "usage:" not in err
+    assert err.splitlines() == [
+        "error: Telegram does not let the creator of a group leave it: campaign 4.7 (-100) stays this account's.",
+        "hint: Transfer ownership in Telegram, or run `telegram-tools delete group --chat -100 --execute`.",
+    ]
+
+
+def test_main_prints_a_refusal_without_a_hint_as_one_line(monkeypatch, capsys):
+    from telegram_tools.envelope import CommandError
+
+    async def refuse(args, *, report):
+        raise CommandError("Cannot resolve chat 'nope'.", code="TARGET_NOT_FOUND")
+
+    monkeypatch.setattr(cli, "run", refuse)
+
+    assert cli.main(["leave", "--chat", "nope"]) == 2
+    assert capsys.readouterr().err.splitlines() == ["error: Cannot resolve chat 'nope'."]
+
+
 @pytest.mark.filterwarnings("ignore::RuntimeWarning")
 def test_main_exits_130_when_input_ends(monkeypatch):
     monkeypatch.setattr(cli.sys, "stdin", SimpleNamespace(isatty=lambda: True))
