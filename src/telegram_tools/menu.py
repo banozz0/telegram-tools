@@ -2019,7 +2019,7 @@ async def _flow_structure_export(*, session, runner, read, write) -> bool:
         if picked is BACK:
             return True
         # Blank cancels out of ask_text, which for an optional path is "print it".
-        output = ask_text("Write it to (blank prints it here)", read=read, write=write)
+        output = ask_text("Write it to", read=read, write=write, blank="prints it here")
         args = _namespace(command="structure", structure_kind="export", chat=picked.reference, output=None if output is BACK else output)
         result = await _act(args, session=session, runner=runner, read=read, write=write, trail=crumb(trail, picked.title), rows=(RUN_AGAIN, (STAY, "Export another chat")))
         if result is not STAY:

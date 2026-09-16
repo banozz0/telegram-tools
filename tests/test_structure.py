@@ -421,6 +421,20 @@ def test_export_writes_a_blueprint_inside_the_allowlist_and_prints_the_banner(ru
     assert not fake.world.mutations()
 
 
+def test_export_and_diff_expand_a_tilde_in_the_path(run_cli, capsys, home, monkeypatch):
+    """A typed `~/x` means the home directory, never a folder named `~` under the cwd."""
+    monkeypatch.setenv("HOME", str(home))
+    (home / "cwd").mkdir()
+    monkeypatch.chdir(home / "cwd")
+    code, out, _err, fake = run_cli(["--json", "structure", "export", "--chat", "@teamhermes", "--output", "~/exports/hermes.json"], capsys=capsys)
+    assert code == 0, out
+    assert envelope_of(out)["result"]["output"] == str(home / "exports" / "hermes.json")
+    assert (home / "exports" / "hermes.json").is_file()
+    assert not (home / "cwd" / "~").exists()
+    code, out, _err, _fake = run_cli(["--json", "structure", "diff", "--blueprint", "~/exports/hermes.json", "--chat", "@teamhermes"], client=fake, capsys=capsys)
+    assert code == 0, out
+
+
 def test_export_prints_the_blueprint_when_no_output_is_given(run_cli, capsys):
     code, out, _err, _fake = run_cli(["structure", "export", "--chat", str(CHANNEL_ID)], capsys=capsys)
     assert code == 0

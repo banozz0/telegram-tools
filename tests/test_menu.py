@@ -1817,6 +1817,24 @@ def test_structure_export_with_a_blank_path_prints_the_blueprint():
     assert args.output is None
 
 
+def test_structure_export_asks_for_a_path_with_one_hint_because_blank_prints():
+    """Row 4.3 is the one text row where blank does not cancel: it prints the blueprint.
+    The prompt says so once, and the shared `(blank cancels)` suffix is not appended
+    after it, because two hints that contradict leave the person guessing."""
+    asked = []
+    keys = iter([*STRUCTURE_EXPORT, "1", "1", "", "", "0"])
+
+    def read(prompt):
+        asked.append(prompt)
+        return next(keys)
+
+    calls, runner = recorder()
+    asyncio.run(menu.run_menu(read=read, write=lambda _: None, session=FakeSession(), runner=runner))
+
+    assert "Write it to (blank prints it here): " in asked
+    assert not [prompt for prompt in asked if "blank prints" in prompt and "blank cancels" in prompt]
+
+
 def test_structure_diff_asks_for_the_file_then_the_chat():
     _code, calls, _output = run_menu([STRUCTURE_DIFF, "/tmp/hermes.json", "2", "1", "", "0"])
     (args,) = calls

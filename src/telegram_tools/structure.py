@@ -89,9 +89,9 @@ def approval_for(answered: bool) -> Approval:
 
 
 def read_blueprint(path: str | Path) -> dict[str, Any]:
-    """The blueprint at `path`, checked against the allowlist before anything is resolved."""
+    """The blueprint at `path` (`~/…` expanded), checked against the allowlist before anything is resolved."""
     try:
-        text = Path(path).read_text(encoding="utf-8")
+        text = Path(path).expanduser().read_text(encoding="utf-8")
     except OSError as exc:
         raise CommandError(f"Cannot read the blueprint {path}: {exc.strerror or exc}.", code="CONFIG_INVALID") from exc
     try:
@@ -109,7 +109,8 @@ def read_blueprint(path: str | Path) -> dict[str, Any]:
 
 
 def write_blueprint(path: str | Path, blueprint: Mapping[str, Any]) -> Path:
-    output = Path(path)
+    """The blueprint at `path`, a typed `~/…` meaning the home directory."""
+    output = Path(path).expanduser()
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(dumps(blueprint), encoding="utf-8")
     return output

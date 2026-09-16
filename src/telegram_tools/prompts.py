@@ -237,10 +237,15 @@ def pick_many(
         selected.symmetric_difference_update({number - 1 for number in numbers})
 
 
-def ask_text(label: str, *, read, write, current: str | None = None) -> Any:
-    """Free text. Blank cancels and returns BACK — keeping and clearing are their own rows."""
+def ask_text(label: str, *, read, write, current: str | None = None, blank: str = "cancels") -> Any:
+    """Free text. Blank cancels and returns BACK — keeping and clearing are their own rows.
+
+    `blank` is the one hint the prompt carries about an empty answer. A row where
+    blank means something else (an optional path: "prints it here") names it, so the
+    prompt never says two things at once.
+    """
     suffix = f" [{current}]" if current else ""
-    value = read(f"{label}{suffix} (blank cancels): ").strip()
+    value = read(f"{label}{suffix} (blank {blank}): ").strip()
     return value or BACK
 
 

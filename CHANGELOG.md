@@ -4,6 +4,11 @@ All notable changes to this project will be documented here.
 
 This project follows a practical changelog style: user-visible changes, safety changes, and release notes belong here; active task tracking belongs outside the repo.
 
+## 3.30.0 - 2026-09-16
+
+- **The export row asks for its path with one hint.** Menu row 4.3 prompted `Write it to (blank prints it here) (blank cancels)`: the row's own hint and the one every text prompt appends, contradicting each other. On this row blank prints the blueprint on screen, so the prompt now says only that. Every other text row still says `(blank cancels)`.
+- **A typed `~/x` is the home directory.** `structure export --output ~/exports/x.json`, from the menu or the CLI, wrote a file under a folder literally named `~` in the working directory, and `structure diff`/`apply --blueprint ~/x` could not find a file that was there. Both expand the tilde now. Every other export already did.
+
 ## 3.29.0 - 2026-09-16
 
 - **An apply that made every topic it planned says `ok`.** Creating one topic on an existing forum came back `partial` (exit 1) with two position changes pending, and no rerun could clear them: Telegram lists topics by title and gives a client no way to set their order, so a new topic the file placed after General read back before it. The dry-run never counted that order and the readback did. The shared tree is in at v0.12, whose allowlist can name a section as unordered; topics are, so `structure diff`, the apply dry-run and the readback all ignore topic order, and a blueprint still lists topics by title.
