@@ -46,14 +46,14 @@ def confirm_clear_topic_messages(*, read=input, write=print) -> str:
 
 
 async def _collect_topic_message_ids(client, chat: Any, topic: TopicInfo) -> list[int]:
+    # Only the opener stays: it is the topic's own id, and deleting it deletes
+    # the topic. `top_message` is Telegram's *newest* message in the topic, a
+    # real message like any other, so it is cleared with the rest. The General
+    # topic has no opener; its id 1 is the chat's own first message, kept too.
     ids: list[int] = []
-    skip_ids = {topic.id}
-    if topic.top_message is not None:
-        skip_ids.add(topic.top_message)
-
     async for message in client.iter_messages(chat, reply_to=topic.id, wait_time=1):
         message_id = int(getattr(message, "id"))
-        if message_id not in skip_ids:
+        if message_id != topic.id:
             ids.append(message_id)
     return ids
 

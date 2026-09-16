@@ -66,6 +66,35 @@ def test_dry_run_collects_topic_messages_without_deleting():
     assert client.deleted_batches == []
 
 
+def test_the_newest_message_is_cleared_too_and_only_the_opener_stays():
+    # Telegram's ForumTopic.top_message is the topic's newest message, not the
+    # one that opened it. Topic 4 of the live campaign held the opener 4 and
+    # four real messages, the poll 21 newest; the dry-run counted 3.
+    client = FakeClient(
+        [
+            SimpleNamespace(id=21),
+            SimpleNamespace(id=13),
+            SimpleNamespace(id=9),
+            SimpleNamespace(id=5),
+            SimpleNamespace(id=4),
+        ]
+    )
+
+    result = asyncio.run(
+        delete_topic_messages(
+            client,
+            "@group",
+            [TopicInfo(id=4, title="testing grounds", top_message=21)],
+            execute=True,
+            confirm=lambda: "DELETE",
+        )
+    )
+
+    assert result.matched == 4
+    assert result.deleted == 4
+    assert client.deleted_batches == [[21, 13, 9, 5]]
+
+
 def test_execute_requires_delete_confirmation():
     client = FakeClient([SimpleNamespace(id=11)])
 
