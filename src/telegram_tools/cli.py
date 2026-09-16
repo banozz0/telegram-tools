@@ -52,6 +52,9 @@ from telegram_tools.delete import (
     confirm_delete,
     delete_chat,
     delete_topic,
+    format_creator_hint,
+    format_creator_refusal,
+    format_leave_outcome,
     leave_chat,
     leave_kind_for_type,
     delete_topic_messages,
@@ -2041,10 +2044,10 @@ async def _gone(client, peer, result) -> str:
 async def _run_leave(client, args, *, report: Reporter | None = None) -> int:
     """`leave`: this account out of a group or channel, behind `delete`'s gate.
 
-    Nothing is deleted and no right is needed -- anyone may leave -- but a
-    chat the account created and left is one it may not get back into, so
-    the dry-run names that and the real thing takes the chat's exact title at
-    a terminal, in either mode, with no `--yes`. A bot may leave too.
+    Nothing is deleted and no right is needed -- anyone but the creator may
+    leave -- so the real thing takes the chat's exact title at a terminal, in
+    either mode, with no `--yes`. A creator is refused in both modes: Telegram
+    does not let one out of its own chat. A bot may leave too.
     """
     report = report or Reporter()
     resolved = await _resolve(client, report, args.chat)
@@ -2064,6 +2067,16 @@ async def _run_leave(client, args, *, report: Reporter | None = None) -> int:
         )
     rights = await _rights(client, report, peer)
     creator = bool(getattr(resolved.entity, "creator", False)) or "is_creator" in rights.held
+    if creator:
+        # Telegram has no call that takes a creator out of its own supergroup,
+        # channel or basic group: it answers the leave and changes nothing. A
+        # refusal here is the only honest answer, and the dry-run gives it too,
+        # so the menu never offers the row that would run it for real.
+        raise CommandError(
+            format_creator_refusal(kind, title, resolved.id),
+            code="PLATFORM_UNSUPPORTED",
+            hint=format_creator_hint(kind, chat_type, args.chat),
+        )
 
     report.show_banner()
     plan, warnings = build_plan(
@@ -2113,12 +2126,19 @@ async def _run_leave(client, args, *, report: Reporter | None = None) -> int:
     )
 
     status = "dry_run" if result.dry_run else "cancelled" if result.cancelled else "ok"
+    payload = result.to_dict()
     if status == "ok":
         evidence = await read_back("the left " + result.kind, lambda: _left(client, result))
+        # A readback that cannot confirm is not an `ok`: `structure apply` reports
+        # the same shape when its own readback comes back unverified.
+        if not evidence.is_verified:
+            status = "partial"
+            payload["left"] = "unverified"
+        report.info(format_leave_outcome(result.kind, result.title, result.id, confirmed=evidence.is_verified))
         report.set_evidence(evidence)
         report.audit(plan, status=status, evidence=evidence)
-    report.printed_result(result.to_dict(), status=status)
-    return 1 if result.cancelled else 0
+    report.printed_result(payload, status=status)
+    return 1 if result.cancelled or status == "partial" else 0
 
 
 async def _left(client, result) -> str:

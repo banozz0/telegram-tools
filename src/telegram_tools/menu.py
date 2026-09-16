@@ -2116,8 +2116,9 @@ async def _flow_leave(*, session, runner, read, write) -> bool:
         where = crumb(trail, picked.title)
         dry_run = _namespace(command="leave", chat=picked.reference, execute=False)
 
-        # The dry-run always runs first, and it is where the creator note is
-        # said: the menu must never be a shorter path out of a chat than the flags are.
+        # The dry-run always runs first, and it is where a refusal is said -- a
+        # creator cannot leave at all: the menu must never be a shorter path out
+        # of a chat than the flags are.
         row = "Leave it for real"
         if await _call(dry_run, session=session, runner=runner, write=write, execute_row=row) is None:
             return _leave_action(after_action(read=read, write=write))

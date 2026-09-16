@@ -7,6 +7,7 @@ from telegram_tools import surface
 from telegram_tools._core.columns import width
 from telegram_tools.bots import IMPLICIT_OTHER_RIGHT, right_names
 from telegram_tools.config import ConfigError
+from telegram_tools.envelope import CommandError
 from telegram_tools.models import BotCommandInfo, BotInfo, ChatChoice, TopicInfo
 from telegram_tools.prompts import END_OF_MESSAGE
 
@@ -2796,3 +2797,21 @@ def test_the_poll_answers_row_reopens_with_the_answers_already_staged():
     assert code == 0
     assert calls[0].options == ["alpha", "beta"]
     assert _multiline_header("Answers, one per line [alpha / beta]") in screens(output)
+
+
+def test_the_leave_flow_never_offers_the_real_row_when_the_dry_run_refuses():
+    """A creator's leave is refused in the dry-run, so the row that runs it for
+    real is never drawn: the menu cannot be a shorter path out of a chat than
+    the flags are. Leave > Forum groups > Hermes, then out."""
+    refusal = CommandError(
+        "Telegram does not let the creator of a group leave it.",
+        code="PLATFORM_UNSUPPORTED",
+        hint="Transfer ownership in Telegram.",
+    )
+    calls, runner = recorder(error=refusal)
+    _code, _calls, output = run_menu([LEAVE, "1", "1", "0", "0", "0"], runner=runner)
+
+    assert [call.execute for call in calls] == [False]
+    text = screens(output)
+    assert "Telegram does not let the creator of a group leave it." in text
+    assert "Leave it for real" not in text

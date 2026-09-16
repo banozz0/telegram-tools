@@ -310,12 +310,6 @@ GONE: Your seat in it: its messages stop reaching you, and you stop
 NOTE: Getting back in takes an invite link, a public username, or
       someone still inside adding you."""
 
-CREATOR_NOTE = """\
-NOTE: You created this chat. Leaving does not delete it and does not
-      hand it to anyone: it keeps running without an owner, and you
-      cannot come back as its creator. If it has no other admin, no
-      one can run it afterwards."""
-
 
 def leave_kind_for_type(type_name: str) -> str | None:
     """Which `leave` noun owns a chat type, or None if this tool cannot leave it."""
@@ -325,25 +319,18 @@ def leave_kind_for_type(type_name: str) -> str | None:
     return None
 
 
-def _leave_lines(kind: str, *, creator: bool) -> list[str]:
-    lines = [LEAVE_CONSEQUENCES]
-    if creator:
-        lines.append(CREATOR_NOTE)
-    return lines
-
-
-def format_leave_summary(kind: str, title: str, chat_id: int, *, creator: bool) -> str:
+def format_leave_summary(kind: str, title: str, chat_id: int) -> str:
     """The dry-run's version: what would be left and what that costs, without the banner."""
     return "\n".join(
         [
             f"Dry-run: leave {kind} {title} ({chat_id}).",
-            *_leave_lines(kind, creator=creator),
+            LEAVE_CONSEQUENCES,
             f"Nothing has changed. {execute_hint('leave for real', flag='Re-run with --execute')}.",
         ]
     )
 
 
-def format_leave_preview(kind: str, title: str, chat_id: int, *, creator: bool) -> str:
+def format_leave_preview(kind: str, title: str, chat_id: int) -> str:
     """What is about to be left, so the typed title is an informed answer."""
     lines = [
         "====================================================",
@@ -356,10 +343,36 @@ def format_leave_preview(kind: str, title: str, chat_id: int, *, creator: bool) 
         f"Title   {title}",
         f"Chat    {chat_id}",
         RULE,
-        *_leave_lines(kind, creator=creator),
+        LEAVE_CONSEQUENCES,
         "====================================================",
     ]
     return "\n".join(lines)
+
+
+def format_creator_refusal(kind: str, title: str, chat_id: int) -> str:
+    """Why a creator's leave is refused before anything is sent."""
+    return (
+        f"Telegram does not let the creator of a {kind} leave it: "
+        f"{title} ({chat_id}) stays this account's, and `channels.leaveChannel` from its creator "
+        "returns without an error and without effect."
+    )
+
+
+def format_creator_hint(kind: str, chat_type: str, reference: str) -> str:
+    """The two things that do work instead. A basic group has no `delete` here, so it names Telegram."""
+    if chat_type not in DELETE_KIND_TYPES[kind]:
+        return "Transfer ownership in Telegram, or delete the chat in Telegram itself."
+    return f"Transfer ownership in Telegram, or run `telegram-tools delete {kind} --chat {reference} --execute`."
+
+
+def format_leave_outcome(kind: str, title: str, chat_id: int, *, confirmed: bool) -> str:
+    """The human line after the call: what Telegram confirmed, not what was asked."""
+    if confirmed:
+        return f"Left {kind} {title} ({chat_id})"
+    return (
+        f"The leave could not be confirmed: Telegram still lists this account in {kind} {title} ({chat_id}). "
+        "Nothing was deleted; run `leave` again to check."
+    )
 
 
 async def leave_chat(
@@ -384,10 +397,10 @@ async def leave_chat(
     progress = progress or (lambda _message: None)
 
     if not execute:
-        progress(format_leave_summary(kind, title, chat_id, creator=creator))
+        progress(format_leave_summary(kind, title, chat_id))
         return LeaveResult(kind=kind, id=chat_id, title=title, creator=creator, dry_run=True)
 
-    preview = format_leave_preview(kind, title, chat_id, creator=creator)
+    preview = format_leave_preview(kind, title, chat_id)
 
     if not _titles_match(confirm(preview, title), title):
         progress(f"Leave {kind} cancelled - the typed title did not match.")
@@ -402,5 +415,6 @@ async def leave_chat(
         await client(DeleteChatUserRequest(chat_id=peer.chat_id, user_id=InputUserSelf()))
     else:
         await client(LeaveChannelRequest(channel=peer))
-    progress(f"Left {kind} {title} ({chat_id})")
+    # Whether this account is really out is the readback's word, not the call's:
+    # the caller says it, once it has read Telegram back.
     return LeaveResult(kind=kind, id=chat_id, title=title, creator=creator, dry_run=False, left=True)
