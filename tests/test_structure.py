@@ -535,6 +535,33 @@ def test_apply_to_an_existing_forum_makes_the_missing_topics_and_leaves_its_extr
     assert after["counts"] == {"add": 0, "change": 0, "remove": 1}
 
 
+def test_apply_of_a_topic_the_title_order_places_elsewhere_is_ok(run_cli, capsys, tmp_path):
+    """Row 4.5 of the live campaign: a hand-written topic after General, which Telegram's
+    title order ranks before it. The dry-run and the readback agree, and a key the
+    hand-written object leaves out is not an extra the apply could never remove."""
+    _source, fake = export_to(run_cli, capsys, tmp_path / "hermes.json", "@teamhermes")
+    blueprint = json.loads((tmp_path / "hermes.json").read_text())
+    blueprint["objects"].append(
+        {"handle": "topic:campaign-4-5", "kind": "topic", "source_rid": None, "position": 4, "fields": {"name": "campaign 4.5"}}
+    )
+    (tmp_path / "campaign.json").write_text(json.dumps(blueprint))
+
+    code, out, _err, fake = run_cli(["--json", "structure", "diff", "--blueprint", str(tmp_path / "campaign.json"), "--chat", "@teamhermes"], client=fake, capsys=capsys)
+    assert code == 0
+    assert envelope_of(out)["result"]["counts"] == {"add": 1, "change": 0, "remove": 0}
+
+    code, out, _err, fake = run_cli(
+        ["--json", "structure", "apply", "--blueprint", str(tmp_path / "campaign.json"), "--chat", "@teamhermes", "--execute"],
+        client=fake, capsys=capsys, isatty=True, answer="Team Hermes",
+    )
+    assert code == 0, out
+    result = envelope_of(out)["result"]
+    assert result["status"] == "ok" and result["error"] is None
+    assert [step["handle"] for step in result["made"]] == ["topic:campaign-4-5"]
+    assert result["readback"]["counts"] == {"add": 0, "change": 0, "remove": 0} and result["extras"] == []
+    assert ("campaign 4.5", None) in fake.world.topics_of(FORUM_ID)
+
+
 # -- the gate -----------------------------------------------------------------
 
 

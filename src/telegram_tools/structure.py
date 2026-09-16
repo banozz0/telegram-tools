@@ -55,6 +55,9 @@ ALLOWLIST = register(
         # Admins are people holding rights; a linked discussion group is another
         # chat; an invite link is a credential to a chat. None transfers.
         excluded=("admins", "invite_links", "linked_chat"),
+        # Telegram keeps topics in no order a client can set, so a topic's
+        # position orders the blueprint and is never a change to make.
+        unordered={"topics"},
     )
 )
 
