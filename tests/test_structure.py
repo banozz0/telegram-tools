@@ -576,6 +576,37 @@ def test_apply_of_a_topic_the_title_order_places_elsewhere_is_ok(run_cli, capsys
     assert ("campaign 4.5", None) in fake.world.topics_of(FORUM_ID)
 
 
+def test_the_remap_of_an_apply_names_the_topic_it_made_from_a_hand_written_entry(run_cli, capsys, tmp_path):
+    """A blueprint entry written by hand carries no source rid, and the object it describes
+    is exactly the one the apply had to make: its minted id belongs in that apply's remap,
+    keyed by the handle, or the only record of what was created is nowhere."""
+    _source, fake = export_to(run_cli, capsys, tmp_path / "hermes.json", "@teamhermes")
+    blueprint = json.loads((tmp_path / "hermes.json").read_text())
+    blueprint["objects"].append(
+        {"handle": "topic:campaign-4-5-rerun", "kind": "topic", "source_rid": None, "position": 5, "fields": {"name": "campaign 4.5 rerun"}}
+    )
+    (tmp_path / "campaign.json").write_text(json.dumps(blueprint))
+
+    code, out, _err, fake = run_cli(
+        ["--json", "structure", "apply", "--blueprint", str(tmp_path / "campaign.json"), "--chat", "@teamhermes", "--execute"],
+        client=fake, capsys=capsys, isatty=True, answer="Team Hermes",
+    )
+    assert code == 0, out
+    result = envelope_of(out)["result"]
+    assert result["status"] == "ok" and [step["handle"] for step in result["made"]] == ["topic:campaign-4-5-rerun"]
+    minted = result["remap"]["handles"]["topic:campaign-4-5-rerun"]
+    assert minted.startswith("tg:topic:")
+
+    code, out, _err, _fake = run_cli(["--json", "structure", "remap", "--apply-id", result["apply_id"]], capsys=capsys)
+    assert code == 0
+    rows = {row["source_rid"]: row["target_rid"] for row in envelope_of(out)["result"]["rows"]}
+    assert rows.get("topic:campaign-4-5-rerun") == minted, "the one object the apply made is in its own remap"
+
+    code, out, _err, _fake = run_cli(["structure", "remap", "--apply-id", result["apply_id"]], capsys=capsys)
+    assert code == 0
+    assert f"topic:campaign-4-5-rerun  ->  {minted}" in out
+
+
 # -- the gate -----------------------------------------------------------------
 
 

@@ -24,7 +24,8 @@ The four guarantees, each tested against fakes:
   given on a terminal, runs one step at a time through the port, resolves handle
   references through the remap as ids are minted, and stops on the first failure
   keeping the partial remap, each row written to `remaps` as it is made, so a rerun
-  diff shows the remainder.
+  diff shows the remainder. A blueprint entry written by hand has no source rid, so its
+  row is keyed by the handle: what an apply made is always in its own remap.
 * **Readback decides.** After the last step the target is exported again and diffed
   against the blueprint; anything still to add or change is `PARTIAL_FAILURE`. Objects
   the target has and the blueprint does not are reported as extras and never deleted.
@@ -684,7 +685,9 @@ def new_apply_id() -> str:
 @dataclass
 class Remap:
     """Handle -> target rid as the apply mints them, and source rid -> target rid for
-    the archive's `remaps` rows. Seeded with what the target already had."""
+    the archive's `remaps` rows. Seeded with what the target already had. `by_source`
+    holds rids alone; a handle with no source rid still lands a `remaps` row, keyed by
+    that handle."""
 
     apply_id: str
     blueprint_hash: str
@@ -768,8 +771,14 @@ def _require_human(approval: Approval | None, target: Target) -> None:
         )
 
 
-def _write_remap(archive: Archive | None, remap: Remap, identity: Identity, source_rid: str | None, target_rid: str) -> None:
-    """One row per minted id, its own transaction, so a failing next step loses nothing."""
+def _write_remap(archive: Archive | None, remap: Remap, identity: Identity, handle: str, source_rid: str | None, target_rid: str) -> None:
+    """One row per minted id, its own transaction, so a failing next step loses nothing.
+
+    A blueprint written by hand carries no source rid, and the object it describes is
+    exactly the one the apply had to make: the row is keyed by its handle instead, so the
+    minted id is in the remap rather than nowhere. A handle (`topic:campaign-4-5`) is
+    visibly not a rid and cannot parse as one, so nothing can mistake the two."""
+    source_rid = source_rid or handle
     if archive is None or not source_rid:
         return
     archive._begin()
@@ -814,12 +823,12 @@ async def apply(
 
     current = (await export(port, target, allowlist)).blueprint
     remap.record(blueprint["container"]["handle"], blueprint["container"].get("source_rid"), target.rid)
-    _write_remap(archive, remap, identity, blueprint["container"].get("source_rid"), target.rid)
+    _write_remap(archive, remap, identity, blueprint["container"]["handle"], blueprint["container"].get("source_rid"), target.rid)
     existing = _objects_by_handle(current)
     for item in blueprint["objects"]:
         if item["handle"] in existing:
             remap.record(item["handle"], item.get("source_rid"), existing[item["handle"]]["source_rid"])
-            _write_remap(archive, remap, identity, item.get("source_rid"), existing[item["handle"]]["source_rid"])
+            _write_remap(archive, remap, identity, item["handle"], item.get("source_rid"), existing[item["handle"]]["source_rid"])
 
     steps = plan_steps(blueprint, current, allowlist=allowlist)
     made: list[Step] = []
@@ -837,7 +846,7 @@ async def apply(
             break
         made.append(step)
         remap.record(step.handle, step.source_rid, target_rid)
-        _write_remap(archive, remap, identity, step.source_rid, target_rid)
+        _write_remap(archive, remap, identity, step.handle, step.source_rid, target_rid)
 
     readback: Diff | None = None
     if failed is None:
@@ -861,15 +870,24 @@ def remap_table(archive: Archive, apply_id: str) -> list[dict[str, Any]]:
     return [dict(row) for row in rows]
 
 
+def _is_rid(value: object) -> bool:
+    try:
+        parse_rid(value)  # type: ignore[arg-type]
+    except RidError:
+        return False
+    return True
+
+
 def remap_queries(connection: sqlite3.Connection) -> list[str]:
     """Every way `remaps` rows disagree with section 12; run with the archive's conformance queries."""
     failures: list[str] = []
-    for column in ("source_rid", "target_rid"):
-        for (value,) in connection.execute(f"SELECT DISTINCT {column} FROM remaps"):
-            try:
-                parse_rid(value)
-            except RidError:
-                failures.append(f"remaps.{column} holds {value!r}, which is not a rid")
+    for (value,) in connection.execute("SELECT DISTINCT source_rid FROM remaps"):
+        # A row for an object the blueprint had no source rid for is keyed by its handle.
+        if not _is_rid(value) and _HANDLE.match(value) is None:
+            failures.append(f"remaps.source_rid holds {value!r}, which is neither a rid nor a handle")
+    for (value,) in connection.execute("SELECT DISTINCT target_rid FROM remaps"):
+        if not _is_rid(value):
+            failures.append(f"remaps.target_rid holds {value!r}, which is not a rid")
     short = connection.execute("SELECT COUNT(*) FROM remaps WHERE length(blueprint_hash) != 16").fetchone()[0]
     if short:
         failures.append(f"{short} remaps rows carry a blueprint hash that is not 16 characters")

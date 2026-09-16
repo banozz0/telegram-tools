@@ -4,6 +4,10 @@ All notable changes to this project will be documented here.
 
 This project follows a practical changelog style: user-visible changes, safety changes, and release notes belong here; active task tracking belongs outside the repo.
 
+## 3.31.0 - 2026-09-16
+
+- **The remap of an apply lists what it made.** `structure apply` of a blueprint carrying a topic written by hand — an object no export produced, so it has no source id, and the one object the apply must create — reported `ok`, made the topic, and then printed a remap of rows for objects that already existed and matched, with nothing for the id it had just minted. The only record of what was created was gone the moment the run ended. A row for such an object is now keyed by its blueprint handle, so `structure remap --apply-id …` prints `topic:campaign-4-5-rerun  ->  tg:topic:-100…:31` beside the rid-keyed rows. A handle is visibly not a rid and nothing reads it as one; every object the blueprint did carry a source id for is unchanged. The shared tree is in at v0.13.
+
 ## 3.30.0 - 2026-09-16
 
 - **The export row asks for its path with one hint.** Menu row 4.3 prompted `Write it to (blank prints it here) (blank cancels)`: the row's own hint and the one every text prompt appends, contradicting each other. On this row blank prints the blueprint on screen, so the prompt now says only that. Every other text row still says `(blank cancels)`.
