@@ -4,6 +4,11 @@ All notable changes to this project will be documented here.
 
 This project follows a practical changelog style: user-visible changes, safety changes, and release notes belong here; active task tracking belongs outside the repo.
 
+## 3.29.0 - 2026-09-16
+
+- **An apply that made every topic it planned says `ok`.** Creating one topic on an existing forum came back `partial` (exit 1) with two position changes pending, and no rerun could clear them: Telegram lists topics by title and gives a client no way to set their order, so a new topic the file placed after General read back before it. The dry-run never counted that order and the readback did. The shared tree is in at v0.12, whose allowlist can name a section as unordered; topics are, so `structure diff`, the apply dry-run and the readback all ignore topic order, and a blueprint still lists topics by title.
+- **A hand-written topic without an icon is not an extra.** A topic object that leaves out `icon_emoji_id`, which the exporter always writes, read back as `- topic:….icon_emoji_id = null` under *left alone*. A key the file omits and the chat holds empty is no longer a difference.
+
 ## 3.28.0 - 2026-09-15
 
 - **An archived row carries the same marks the live row does.** 3.27.0 brought the extras a sync stored back out of the store and onto the hit, and then printed a row that used none of them: an archived forward showed its text with no `[fwd @harry]` in front of it, and an archived row and the same message read live disagreed about what it was. The `archive search` table now derives its marks from `records.record_marks` — the one place the live line and the export formats derive theirs — so a forward, a captioned poll, a captioned file, a service row and a plain photo say what they are from the archive exactly as they do from the chat, and a forward and a copy of the same text stop printing as one row twice. The marks sit outside the highlight, so a long body can never push one off the row. Nothing about what is stored changed, and no re-sync is needed: the keys have been in `platform_json` since they were first written.
