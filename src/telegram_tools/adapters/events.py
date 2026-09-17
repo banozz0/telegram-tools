@@ -257,6 +257,27 @@ def action_event(event: Any) -> list[dict[str, Any]]:
     return out
 
 
+async def _disconnected(client: Any) -> None:
+    """`client.disconnect()`, awaited on whichever loop this runs on.
+
+    Telethon's `disconnect` is not a coroutine while a loop is running: it puts
+    `_disconnect_coro` on `client.loop` and hands back a shield over it, and
+    `client.loop` is *the calling thread's* running loop, not the one the
+    client was connected on. Called straight from `stop()` that is the CLI's
+    own loop, so the teardown ran there -- cancelling tasks that belong to this
+    bridge's loop, after it had already been closed -- and the shield nobody
+    awaited carried the `RuntimeError: Event loop is closed` to the garbage
+    collector. Submitted as this coroutine instead, it runs on the client's own
+    thread, where `client.loop` is the client's loop, and awaiting the shield
+    means the disconnect has finished before the loop is asked to stop.
+
+    `client.py` awaits the same handed-back result for the same reason.
+    """
+    result = client.disconnect()
+    if result is not None:
+        await result
+
+
 class ClientLoop:
     """One Telethon client on a thread of its own, so the runner can stay synchronous.
 
@@ -290,6 +311,18 @@ class ClientLoop:
         try:
             loop.run_forever()
         finally:
+            # A loop closed with a task still on it is one "Task was destroyed
+            # but it is pending!" per task on stderr, printed by the garbage
+            # collector at interpreter exit where no caller can catch it. A
+            # disconnect that finished leaves none; one that timed out or
+            # failed leaves Telethon's update, keepalive, send and recv loops,
+            # and cancelling them here is what makes that case quiet too.
+            leftover = [task for task in asyncio.all_tasks(loop) if not task.done()]
+            for task in leftover:
+                task.cancel()
+            if leftover:
+                loop.run_until_complete(asyncio.gather(*leftover, return_exceptions=True))
+            loop.run_until_complete(loop.shutdown_asyncgens())
             loop.close()
 
     def call(self, coroutine: Any, *, timeout_s: float | None = None) -> Any:
@@ -314,7 +347,7 @@ class ClientLoop:
         if loop is None or thread is None:
             return
         try:
-            self.call(self.client.disconnect(), timeout_s=10.0)
+            self.call(_disconnected(self.client), timeout_s=10.0)
         except Exception:  # noqa: BLE001 - a teardown failure must not replace the real exit
             pass
         loop.call_soon_threadsafe(loop.stop)

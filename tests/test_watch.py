@@ -14,11 +14,14 @@ from __future__ import annotations
 import asyncio
 import json
 import sqlite3
+import subprocess
+import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from telethon import helpers
 from telethon.errors import FloodWaitError
 from telethon.tl.types import MessageEntityTextUrl, MessageEntityUrl
 
@@ -554,6 +557,123 @@ def test_the_queue_yields_none_when_nothing_arrives_so_the_runner_can_tick(loop_
     assert next(stream)["subject_id"] == "1"
     assert next(stream) is None
     source.close()
+
+
+# -- the exit path -------------------------------------------------------------
+
+
+class TelethonShapedClient:
+    """The two facts about a real client's teardown, and nothing else.
+
+    `loop` is whatever loop runs on the *calling* thread -- Telethon's
+    `TelegramBaseClient.loop` is `helpers.get_running_loop()` -- and
+    `disconnect()` is not a coroutine while one is running: it puts the
+    teardown on that loop and hands back a shield over it. Every other fake in
+    this suite is an `async def disconnect`, which is exactly why none of them
+    could ever show what the runner's exit path did to a person.
+    """
+
+    def __init__(self) -> None:
+        self.background: list[asyncio.Task] = []
+        self.connected_on: asyncio.AbstractEventLoop | None = None
+        self.torn_down_on: asyncio.AbstractEventLoop | None = None
+
+    @property
+    def loop(self) -> asyncio.AbstractEventLoop:
+        return helpers.get_running_loop()
+
+    async def connect(self) -> None:
+        self.connected_on = asyncio.get_running_loop()
+        # Telethon's update, keepalive, send and recv loops, which is what the
+        # live run named in its "Task was destroyed but it is pending!" lines.
+        self.background = [self.connected_on.create_task(self._idle()) for _ in range(4)]
+
+    async def _idle(self) -> None:
+        while True:
+            await asyncio.sleep(3600)
+
+    async def _disconnect_coro(self) -> None:
+        self.torn_down_on = asyncio.get_running_loop()
+        for task in self.background:
+            task.cancel()
+        await asyncio.gather(*self.background, return_exceptions=True)
+        self.background = []
+
+    def disconnect(self):
+        if self.loop.is_running():
+            return asyncio.shield(self.loop.create_task(self._disconnect_coro()))
+        return self.loop.run_until_complete(self._disconnect_coro())
+
+
+# What the child process below does: the bridge up over that client, and down
+# again, inside a loop of its own the way `watch run` sits inside the CLI's.
+EXIT_PATH = """
+import asyncio
+
+from telegram_tools.adapters.events import ClientLoop
+from test_watch import TelethonShapedClient
+
+
+async def watch_run():
+    bridge = ClientLoop(TelethonShapedClient())
+    bridge.start()
+    bridge.stop()
+
+
+asyncio.run(watch_run())
+"""
+
+# Every line shape the live run of 2026-09-17 printed after the Done screen.
+TEARDOWN_NOISE = (
+    "Traceback (most recent call last)",
+    "Task was destroyed but it is pending!",
+    "Event loop is closed",
+    "Future exception was never retrieved",
+    "Exception ignored in",
+)
+
+
+def test_the_client_is_torn_down_on_its_own_loop_and_not_the_callers():
+    """`stop()` runs the disconnect where the client's tasks live.
+
+    The bug this pins: `client.disconnect()` read from `stop()` resolves
+    `client.loop` to the CLI's loop, so the teardown was scheduled there and
+    cancelled this bridge's tasks from the wrong thread, after this bridge had
+    closed. It also handed back a future rather than a coroutine, which `call`
+    refused with a `TypeError` that `stop()` swallowed -- so the disconnect was
+    never waited for at all.
+    """
+    client = TelethonShapedClient()
+
+    async def cli_loop():
+        bridge = watch_events.ClientLoop(client)
+        bridge.start()
+        bridge.stop()
+
+    run(cli_loop())
+    assert client.torn_down_on is not None, "stop() never ran the disconnect"
+    assert client.torn_down_on is client.connected_on
+    assert client.background == [], "the client's own loops outlived the bridge"
+
+
+def test_leaving_the_runner_prints_nothing_after_the_done_screen():
+    """The exit path itself, in a process of its own, and its stderr.
+
+    The noise is printed by the garbage collector as the interpreter goes down,
+    so only a real exit can show it; in-process there is nothing to catch. A
+    person who has just used the tool's headline feature sees the Done screen
+    and then this, so "nothing" is the whole check.
+    """
+    done = subprocess.run(
+        [sys.executable, "-c", EXIT_PATH],
+        cwd=Path(__file__).parent,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert done.returncode == 0, done.stderr
+    printed = [line for line in done.stderr.splitlines() if any(mark in line for mark in TEARDOWN_NOISE)]
+    assert not printed, "the exit path printed:\n" + done.stderr
 
 
 # -- the detached session ------------------------------------------------------
