@@ -217,6 +217,20 @@ def write_error(write, exc: BaseException) -> None:
         write(f"hint: {hint}")
 
 
+async def _dry_run_passed(args, *, session, runner, write, connect: bool = True, execute_row: str | None = None) -> bool:
+    """Run a flow's dry-run. True only when it really produced its plan.
+
+    Exit code 0 -- ok, empty, dry_run -- is the only pass. A cancel at a gate or
+    a partial scan is 1, a refusal or a platform error is 2, an approval with no
+    terminal to ask on is 3, an interrupt is 130, and None is an error `_call`
+    already printed. None of those put a plan on screen, so the caller must not
+    offer the for-real row above one: whatever was said is already printed, and
+    the flow goes straight to its after-action prompt.
+    """
+    code = await _call(args, session=session, runner=runner, write=write, connect=connect, execute_row=execute_row)
+    return code == 0
+
+
 # After-run row keys. AGAIN is answered inside _act. STAY is the flow's own next
 # step -- back to its filled form, or whatever "another" means there -- which only
 # the flow can answer, so _act hands it back. Anything else (MENU, EXIT) leaves the
@@ -1255,7 +1269,7 @@ async def _flow_delete(*, session, runner, read, write) -> bool:
         # The dry-run always runs first: the menu must never be a shorter path
         # to a deletion than the flags are.
         row = "Delete it for real"
-        if await _call(dry_run, session=session, runner=runner, write=write, execute_row=row) is None:
+        if not await _dry_run_passed(dry_run, session=session, runner=runner, write=write, execute_row=row):
             return _leave_action(after_action(read=read, write=write))
 
         choice = choose(
@@ -1343,7 +1357,7 @@ async def _flow_clear(*, session, runner, read, write) -> bool:
             if key == scanned:
                 write("Same topics as the last dry-run; its count still stands.")
             else:
-                if await _call(dry_run, session=session, runner=runner, write=write) is None:
+                if not await _dry_run_passed(dry_run, session=session, runner=runner, write=write):
                     return _leave_action(after_action(read=read, write=write))
                 scanned = key
 
@@ -1936,7 +1950,7 @@ async def _flow_archive_retention(*, session, runner, read, write) -> bool:
         # The dry-run always runs first: the menu must never be a shorter path
         # past a gate than the flags are.
         row = "Prune it for real"
-        if await _call(dry_run, session=session, runner=runner, write=write, connect=False, execute_row=row) is None:
+        if not await _dry_run_passed(dry_run, session=session, runner=runner, write=write, connect=False, execute_row=row):
             return _leave_action(after_action(read=read, write=write))
         choice = choose(
             [f"{row} - the next screen asks for the scope's exact title"],
@@ -1971,7 +1985,7 @@ async def _flow_archive_forget(*, session, runner, read, write) -> bool:
                 continue
             dry_run = _namespace(command="archive", archive_kind="forget", scope=None, identity=identity, execute=False)
         row = "Forget it for real"
-        if await _call(dry_run, session=session, runner=runner, write=write, connect=False, execute_row=row) is None:
+        if not await _dry_run_passed(dry_run, session=session, runner=runner, write=write, connect=False, execute_row=row):
             return _leave_action(after_action(read=read, write=write))
         choice = choose(
             [f"{row} - the next screen asks for its exact title"],
@@ -2073,7 +2087,7 @@ async def _flow_structure_apply(*, session, runner, read, write) -> bool:
             label = "New chat"
 
         row = "Apply it for real"
-        if await _call(dry_run, session=session, runner=runner, write=write, execute_row=row) is None:
+        if not await _dry_run_passed(dry_run, session=session, runner=runner, write=write, execute_row=row):
             return _leave_action(after_action(read=read, write=write))
 
         choice = choose(
@@ -2130,7 +2144,7 @@ async def _flow_leave(*, session, runner, read, write) -> bool:
         # creator cannot leave at all: the menu must never be a shorter path out
         # of a chat than the flags are.
         row = "Leave it for real"
-        if await _call(dry_run, session=session, runner=runner, write=write, execute_row=row) is None:
+        if not await _dry_run_passed(dry_run, session=session, runner=runner, write=write, execute_row=row):
             return _leave_action(after_action(read=read, write=write))
 
         choice = choose(
@@ -2740,8 +2754,10 @@ def _flow_manage_verb(group: str, verb: str, title: str):
         what = "the chat's exact title" if group == "settings" else "the person's exact label"
         dry_run = _manage_namespace(group, verb, picked.reference, execute=False, **values)
         row = "Do it for real"
-        if await _call(dry_run, session=session, runner=runner, write=write, execute_row=row) is None:
-            return _leave_action(after_action(read=read, write=write))
+        if not await _dry_run_passed(dry_run, session=session, runner=runner, write=write, execute_row=row):
+            # run_it answers in after-run keys, which the flow hands to `_leave`:
+            # a bare False there reads as "back to the group", not as exit.
+            return MENU if after_action(read=read, write=write) else EXIT
         choice = choose(
             [f"{row} - the next screen asks for {what}"],
             title=crumb(form, "Dry-run done"),
@@ -2879,8 +2895,9 @@ def _flow_folders_verb(verb: str, title: str):
             return await _act(_folders_namespace(verb, values), session=session, runner=runner, read=read, write=write, trail=form, rows=(RUN_AGAIN,))
         dry_run = _folders_namespace(verb, {**values, "execute": False})
         row = "Do it for real"
-        if await _call(dry_run, session=session, runner=runner, write=write, execute_row=row) is None:
-            return _leave_action(after_action(read=read, write=write))
+        if not await _dry_run_passed(dry_run, session=session, runner=runner, write=write, execute_row=row):
+            # In after-run keys, as the manage verbs answer: False would read as "back".
+            return MENU if after_action(read=read, write=write) else EXIT
         choice = choose(
             [f"{row} - the next screen asks for the folder's exact title"],
             title=crumb(form, "Dry-run done"),

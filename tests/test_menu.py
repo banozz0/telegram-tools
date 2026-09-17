@@ -1,6 +1,8 @@
 import asyncio
 from pathlib import Path
 
+import pytest
+
 from telegram_tools import menu
 from telegram_tools import messages as message_ops
 from telegram_tools import surface
@@ -2297,6 +2299,71 @@ def test_archive_prunes_stop_at_a_failed_dry_run():
     assert code == 0
     assert len(calls) == 1 and calls[0].execute is False
     assert "error: not a scope in this archive" in screens(output)
+
+
+# A dry-run that did not produce its plan never leads to the row that runs it
+# for real. `_call` hands back the command's exit code, or None for an error it
+# caught and printed, and every gate tested for None alone: a dry-run that came
+# back 1 (cancelled, partial), 2 (refused), 3 (approval required) or 130
+# (interrupted) still drew its "Dry-run done" screen and the for-real row under
+# it. The sibling tool showed exactly that live on 2026-09-17. A refusal this
+# tool raises is the printed-error case, and there 0 at the after-action prompt
+# went back to the Manage or Folders screen instead of exiting. Each script
+# below reaches one gate's dry-run; the next press would be its for-real row.
+# The three administration verbs and topics-off share one gate, so every gate
+# site is here at least once.
+FOLDERS_DELETE = ("6", "6", "4")
+DRY_RUN_OUTCOMES = {
+    "exit-1": 1,
+    "exit-2": 2,
+    "exit-3": 3,
+    "exit-130": 130,
+    "printed-error": CommandError("The account is missing ban_users in Hermes.", code="PERMISSION_DENIED"),
+}
+REFUSED_DRY_RUNS = {
+    "delete": [DELETE, "1", "1", "1"],
+    "clear-messages": [CLEAR, "1", "1", "5"],
+    "archive retention": [ARCHIVE_RETENTION, "1", "90d"],
+    "archive forget": [ARCHIVE_FORGET, "1", "2"],
+    "structure apply": [STRUCTURE_APPLY, "/tmp/hermes.json", "1", "1", "1"],
+    "leave": [LEAVE, "1", "1"],
+    "admin demote": [MANAGE_ADMINS, "4", "1", "1", "1", "@dobby", "2"],
+    "member ban": [MANAGE_MEMBERS, "2", "1", "1", "1", "@troll", "3"],
+    "member kick": [MANAGE_MEMBERS, "3", "1", "1", "1", "@troll", "3"],
+    # 4 twice walks Topics from "leave alone" to on, then off.
+    "settings set --forum off": [MANAGE_SETTINGS, "2", "1", "1", "4", "4", "9"],
+    "folders delete": [FOLDERS_DELETE, "1", "7", "2"],
+}
+
+
+@pytest.mark.parametrize("outcome", list(DRY_RUN_OUTCOMES.values()), ids=list(DRY_RUN_OUTCOMES))
+@pytest.mark.parametrize("answers", list(REFUSED_DRY_RUNS.values()), ids=list(REFUSED_DRY_RUNS))
+def test_a_refused_dry_run_never_offers_the_for_real_row(answers, outcome):
+    asked = []
+    # The padding is the way out of whatever screen comes next -- 0 leaves a
+    # list, a blank leaves a text prompt (the blueprint file) and only redraws a
+    # list -- so a regression fails on the assertions below rather than on a
+    # script that ran out.
+    keys = iter([key for answer in answers for key in (answer if isinstance(answer, tuple) else (answer,))] + ["0", ""] * 6)
+
+    def read(prompt):
+        asked.append(prompt)
+        return next(keys)
+
+    output = []
+    if isinstance(outcome, int):
+        calls, runner = recorder(result=outcome)
+    else:
+        calls, runner = recorder(error=outcome)
+    code = asyncio.run(menu.run_menu(read=read, write=output.append, session=FakeSession(), runner=runner))
+
+    assert code == 0
+    # One call: the dry-run. The real pass is never even offered.
+    assert [args.execute for args in calls] == [False]
+    assert "Dry-run done" not in screens(output)
+    assert "for real" not in screens(output)
+    # The flow ends on the after-action prompt, and its 0 ends the session.
+    assert asked[-1] == "Enter = menu, 0 = exit: "
 
 
 def test_the_live_search_export_offers_all_five_formats():
