@@ -205,6 +205,22 @@ def _reaction_rows(reactions: Sequence[tuple[str, bool]]) -> list[dict[str, Any]
     return [{"emoji": emoticon, "mine": mine} for emoticon, mine in reactions]
 
 
+def _reaction_set(verb: str, emoji: str | None, held: Sequence[tuple[str, bool]]) -> list[str]:
+    """The reactions `SendReactionRequest` must carry: it replaces the whole set this identity holds.
+
+    `react` names the one to hold. `unreact` with no emoji clears them all, so
+    the list is empty -- but `unreact` naming one has to send this identity's
+    other reactions back, or the empty list takes those off the message too.
+    Only the ones `held` marks as this identity's: another account's reaction
+    sent here would be claimed as ours.
+    """
+    if verb == "react":
+        return [str(emoji)]
+    if emoji is None:
+        return []
+    return [emoticon for emoticon, mine in held if mine and emoticon != emoji]
+
+
 def _reactions_from_updates(updates: Any, message_id: int) -> tuple[tuple[str, bool], ...] | None:
     """The new reaction set out of what `SendReactionRequest` already answered.
 
@@ -592,7 +608,10 @@ async def perform(client, request: Request, *, sleep=asyncio.sleep, bookmark_row
         return Outcome(verb, request.chat_id, tuple(ids), tuple(new_ids), extra={"to_chat_id": request.to_chat_id})
 
     if verb in ("react", "unreact"):
-        reaction = [ReactionEmoji(emoticon=request.emoji)] if verb == "react" else []
+        # The message's own reactions were read in the preflight, so the set to
+        # keep is in hand and needs no second fetch to build.
+        held = request.messages[0].reactions if request.messages else ()
+        reaction = [ReactionEmoji(emoticon=emoticon) for emoticon in _reaction_set(verb, request.emoji, held)]
         updates = await client(SendReactionRequest(peer=peer, msg_id=ids[0], reaction=reaction))
         extra: dict[str, Any] = {"emoji": request.emoji}
         carried = _reactions_from_updates(updates, ids[0])
@@ -688,9 +707,11 @@ def format_done(request: Request, outcome: Outcome, *, where: str, destination: 
     if verb == "react":
         return f"Added {request.emoji} to message {first} in {where}."
     if verb == "unreact":
-        # `perform` sends an empty reaction list, which Telegram reads as every
-        # reaction of this identity's, so that is what the sentence names --
-        # with or without --emoji.
+        # A named emoji is sent as the rest of the set and a bare `unreact` as
+        # an empty list, which Telegram reads as every reaction of this
+        # identity's: the sentence names whichever of the two the run asked for.
+        if request.emoji:
+            return f"Removed {request.emoji} from message {first} in {where}."
         return f"Removed your reactions from message {first} in {where}."
     if verb in ("pin", "unpin"):
         return f"{'Pinned' if verb == 'pin' else 'Unpinned'} message {first} in {where}."
@@ -758,9 +779,11 @@ async def read_back(client, request: Request, outcome: Outcome, *, where: str, d
             raise LookupError("the reaction is not on the message")
         if verb == "unreact" and (request.emoji in chosen if request.emoji else chosen):
             raise LookupError("the reaction is still on the message")
-        return f"message {outcome.message_ids[0]} in {where} " + (
-            f"carries {request.emoji}" if verb == "react" else "carries no reaction of yours"
-        )
+        if verb == "react":
+            return f"message {outcome.message_ids[0]} in {where} carries {request.emoji}"
+        # A named emoji leaves the identity's other reactions on the message,
+        # so only the one that was asked for can be reported gone.
+        return f"message {outcome.message_ids[0]} in {where} carries no {request.emoji or 'reaction'} of yours"
 
     if verb in ("pin", "unpin"):
         # Telethon answers a pin with the service message Telegram posted -- and

@@ -1190,12 +1190,48 @@ def test_a_forward_into_a_topic_names_the_topic_it_landed_in(run_cli, capsys, ho
     assert after_the_gate(out)[0] == f"Forwarded message 300 to {DEPLOYS} as message 5001."
 
 
-def test_an_unreact_names_what_the_call_took_off_even_when_an_emoji_was_named(run_cli, capsys, home):
-    # The call is an empty reaction list, which Telegram reads as every reaction
-    # of this identity's, so naming only the emoji would claim less than it did.
+def _twice_reacted_client():
+    """A message this account has reacted to twice, with a third reaction someone else left."""
+    fake = FakeClient()
+    row = _message(13, own=True, topic=141, pinned=True, chosen=("👍", "🎉"))
+    row.reactions.results.append(SimpleNamespace(reaction=SimpleNamespace(emoticon="😂"), count=1, chosen_order=None))
+    fake.rows[FORUM_ID][13] = row
+    return fake
+
+
+def test_an_unreact_naming_an_emoji_leaves_the_account_s_other_reactions_on(run_cli, capsys, home):
+    # `SendReactionRequest` replaces the identity's whole set, so taking one
+    # reaction off means sending the rest back: an empty list would take 🎉
+    # off too, and someone else's 😂 must not be sent as this account's.
+    fake = _twice_reacted_client()
+    code, out, _err, _f = run_cli(
+        ["message", "unreact", "--chat", FORUM, "--id", "13", "--emoji", "👍"], client=fake, capsys=capsys, answers=("y",)
+    )
+
+    assert code == 0, out
+    assert fake.calls == [("react", FORUM_ID, 13, ["🎉"])]
+    assert after_the_gate(out) == [
+        f"Removed 👍 from message 13 in {HERMES}.",
+        "Read back: message 13 in Team Hermes carries no 👍 of yours",
+    ]
+
+
+def test_an_unreact_naming_the_account_s_only_reaction_sends_the_empty_set(run_cli, capsys, home):
     code, out, _err, fake = run_cli(
         ["message", "unreact", "--chat", FORUM, "--id", "13", "--emoji", "👍"], capsys=capsys, answers=("y",)
     )
+
+    assert code == 0, out
+    assert fake.calls == [("react", FORUM_ID, 13, [])]
+    assert after_the_gate(out) == [
+        f"Removed 👍 from message 13 in {HERMES}.",
+        "Read back: message 13 in Team Hermes carries no 👍 of yours",
+    ]
+
+
+def test_an_unreact_with_no_emoji_still_clears_every_reaction_of_yours(run_cli, capsys, home):
+    fake = _twice_reacted_client()
+    code, out, _err, _f = run_cli(["message", "unreact", "--chat", FORUM, "--id", "13"], client=fake, capsys=capsys, answers=("y",))
 
     assert code == 0, out
     assert fake.calls == [("react", FORUM_ID, 13, [])]
