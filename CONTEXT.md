@@ -536,7 +536,13 @@ The terms this codebase uses, and the boundaries they imply.
   The distinction that matters is between a right Telegram reports as absent,
   which refuses the write by name, and one it will not answer for at all — a
   private chat has no participant permissions — which is named as unconfirmed
-  and lets the write through, because that is what has always happened.
+  and lets the write through, because that is what has always happened. The
+  naming is a **warning**: `Reporter.warn` keeps it for the envelope's
+  `warnings` and prints `warning: <sentence>` the moment it is raised, which on
+  every write is before the preview and the gate, dry runs included — a
+  warning read after the title is typed is too late to be one. It prints in
+  both modes, on stderr under `--json`, because a gate that needs a terminal
+  still has a person reading there.
 - **Drift** — the re-derivation between the answered gate and the call. The
   target is resolved again and compared with the one that was shown; a
   difference is `PLAN_DRIFT` and nothing is sent or deleted.

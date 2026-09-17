@@ -913,6 +913,23 @@ def test_status_says_who_holds_the_lock_and_how_many_rules_load(run_watch, capsy
     assert "Not running (no lock file)" in out and "Rules loaded  1" in out
 
 
+def test_status_says_why_no_rules_load_to_a_person_as_well(run_watch, capsys, home):
+    """A read with no readback line: the warning prints where it is raised, not only in the envelope."""
+    paths = archive_store.paths_for(home)
+    paths.rules.mkdir(mode=0o700, parents=True, exist_ok=True)
+    (paths.rules / "broken.json").write_text(json.dumps({"schema": _rules.SCHEMA, "name": "broken"}))
+
+    code, out, _err, _fake = run_watch(["watch", "status"], capsys=capsys)
+    assert code == 0
+    warnings = [line for line in out.splitlines() if line.startswith("warning: ")]
+    assert len(warnings) == 1 and warnings[0].startswith("warning: the rules do not load: ")
+    assert out.index(warnings[0]) < out.index("Rules loaded  0")
+
+    code, out, err, _fake = run_watch(["--json", "watch", "status"], capsys=capsys)
+    assert [f"warning: {text}" for text in envelope_of(out)["warnings"]] == warnings
+    assert warnings[0] in err.splitlines()
+
+
 def test_stop_and_reload_refuse_when_no_runner_holds_the_lock(run_watch, capsys):
     for verb in ("stop", "reload"):
         code, out, _err, _fake = run_watch(["--json", "watch", verb], capsys=capsys)

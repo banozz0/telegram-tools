@@ -711,7 +711,8 @@ telegram-tools --json send --chat -1001234567890 --topic 141 --text "deploy is g
 - **`--jsonl`** streams one JSON line per record first (a chat, a message) and
   closes with the same envelope marked `"kind": "envelope"`.
 - **Everything a person would read moves to stderr** under either flag — tables,
-  previews, progress, prompts — so stdout stays parseable.
+  previews, progress, prompts, `warning:` lines — so stdout stays parseable. A
+  warning is also in the envelope, under `warnings`, word for word.
 - **`error.code` is stable.** `NOT_ALLOWLISTED`, `TARGET_NOT_FOUND`,
   `TARGET_KIND_MISMATCH`, `PERMISSION_DENIED`, `HIERARCHY_DENIED`, `PLAN_DRIFT`, `APPROVAL_REQUIRED`, `BULK_LIMIT`,
   `SESSION_IN_USE`, `CONFIG_MISSING`, `CONFIG_INVALID`, `LOGIN_REQUIRED`,
@@ -821,7 +822,11 @@ for a code or a password. Relay the refusal and let the person run it.
 
 Every write — sending, a message verb, creating, clearing, deleting, leaving, applying a blueprint, an admin, member, setting or folder change, a rule file, a schedule, editing a bot — now also
 asks Telegram what rights your account actually holds in that chat before it
-does anything, and refuses by name when one it needs is missing. Once you have
+does anything, and refuses by name when one it needs is missing. A right
+Telegram will not answer for — a private chat has no permissions to read — is
+not a refusal: the run prints `warning: preflight could not confirm …` above
+the preview, in a dry run as well, so it is read before the question rather
+than after it. Once you have
 answered the gate, the target is resolved a second time and compared with the
 one you were shown: a chat renamed or replaced in that window refuses rather
 than acting on whatever now holds the name. Afterwards the result is read back

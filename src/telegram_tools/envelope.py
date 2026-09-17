@@ -339,8 +339,25 @@ class Reporter:
             self.info(f"Read back: {evidence.readback}")
 
     def warn(self, text: str) -> None:
-        if text not in self._warnings:
-            self._warnings.append(text)
+        """A warning, kept for the envelope and printed the moment it is raised.
+
+        Every write raises its warnings once the plan is built, before the
+        preview and the gate, so printing here puts `warning: …` above the
+        question, in the dry run as well: the dry run is where the decision to
+        execute is made, and a warning read after the title is typed has
+        arrived too late to be one. A call site raising one needs no second
+        wiring, and the menu, which builds its own reporter, shows it too.
+
+        Unlike the readback it prints in machine mode as well, on stderr with
+        the banner and the preview. The envelope carries it for the agent, but
+        a gate that needs a terminal still has a person reading stderr before
+        they answer, and stdout stays one envelope either way. Nothing prints
+        when nothing was raised, and a repeated warning prints once.
+        """
+        if text in self._warnings:
+            return
+        self._warnings.append(text)
+        self.info(f"warning: {text}")
 
     # -- gates --------------------------------------------------------------
 

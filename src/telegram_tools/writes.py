@@ -60,9 +60,18 @@ def build_plan(
     unknown = rights.unknown(required)
     warnings: list[str] = []
     if unknown:
-        why = rights.unreadable or "Telegram reports no permissions for this chat"
+        # The warning is printed before the gate and in a dry run, so it says
+        # what will happen rather than what did. A probe that answered for other
+        # rights did get an answer from Telegram, one that does not name these.
+        if rights.unreadable:
+            why = rights.unreadable
+        elif rights.answered:
+            why = "the permissions Telegram returned for this chat do not name it"
+        else:
+            why = "Telegram reports no permissions for this chat"
         warnings.append(
-            f"preflight could not confirm {', '.join(unknown)}: {why}. The write was attempted anyway."
+            f"preflight could not confirm {', '.join(unknown)}: {why}. "
+            "That alone does not stop the write; Telegram decides when the call goes out."
         )
     return plan, tuple(warnings)
 
