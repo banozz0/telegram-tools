@@ -26,6 +26,7 @@ from telegram_tools._core.contract import validate_envelope
 from telegram_tools._core.identity import Identity
 from telegram_tools.adapters.archive import TelegramArchiveSource, scope_rid_for
 from telegram_tools.envelope import CommandError
+from test_adapters import admin, member
 
 ACCOUNT = SimpleNamespace(id=4242, first_name="Sven", username="sven", phone="+35699001122")
 IDENTITY = Identity(platform="telegram", mode="account", label="Sven (@sven)", id="tg:user:4242", profile="default")
@@ -84,9 +85,8 @@ class FakeClient:
             },
             CHANNEL_ID: {300: _message(300, own=True)},
         }
-        self.rights = rights if rights is not None else SimpleNamespace(
-            is_admin=True, send_messages=True, delete_messages=True, edit_messages=True, pin_messages=True
-        )
+        # An admin who may post in the channel as well as moderate the forum.
+        self.rights = rights if rights is not None else admin("delete_messages", "edit_messages", "pin_messages", "post_messages")
         self.calls: list[tuple] = []
         self.next_id = 5000
         # Telegram keeps a draft per scope: one on the chat's dialog, one on
@@ -433,7 +433,7 @@ def test_delete_with_DELETE_typed_deletes_reads_back_and_audits(run_cli, capsys,
 
 
 def test_delete_of_someone_elses_message_needs_the_delete_right(run_cli, capsys, home):
-    client = FakeClient(rights=SimpleNamespace(is_admin=False, send_messages=True, delete_messages=False))
+    client = FakeClient(rights=member())
     code, out, _err, fake = run_cli(
         ["--json", "message", "delete", "--chat", FORUM, "--ids", "11", "--execute"], client=client, capsys=capsys, answers=("DELETE",)
     )
@@ -531,6 +531,8 @@ def test_confirming_runs_the_verb_reads_back_and_audits(run_cli, capsys, home, v
     assert envelope["status"] == "ok"
     assert envelope["command"] == f"message {verb}"
     assert envelope["plan"]["approval"] == "prompt_y"
+    # Every right the verb needs is confirmed from what Telegram returned.
+    assert envelope["warnings"] == [] and envelope["plan"]["preflight"]["missing"] == []
     assert fake.calls[0][: len(call)] == call
     readback = envelope["evidence"]["readback"]
     if verb == "typing":
@@ -542,8 +544,30 @@ def test_confirming_runs_the_verb_reads_back_and_audits(run_cli, capsys, home, v
     assert not redaction.find(json.dumps(lines))
 
 
+@pytest.mark.parametrize("verb", ["reply", "poll"])
+def test_a_member_posts_into_a_forum_without_a_warning(run_cli, capsys, home, verb, monkeypatch):
+    flags, call = SINGLE[verb]
+    code, out, _err, fake = run_cli(["--json", "message", verb, "--chat", FORUM, *flags], client=FakeClient(rights=member()), capsys=capsys, answers=("y",))
+
+    assert code == 0, out
+    envelope = envelope_of(out)
+    assert envelope["warnings"] == [] and "send_messages" in envelope["plan"]["preflight"]["held"]
+    assert fake.calls[0][: len(call)] == call
+
+
+@pytest.mark.parametrize("verb", ["forward", "copy"])
+def test_a_subscriber_cannot_post_into_a_broadcast_channel(run_cli, capsys, home, verb):
+    flags, _call = SINGLE[verb]
+    code, out, _err, fake = run_cli(["--json", "message", verb, "--chat", FORUM, *flags], client=FakeClient(rights=member()), capsys=capsys, answers=("y",))
+
+    assert code == 2
+    error = envelope_of(out)["error"]
+    assert error["code"] == "PERMISSION_DENIED" and "send_messages" in error["message"]
+    assert fake.calls == []
+
+
 def test_edit_of_another_persons_message_needs_the_edit_right(run_cli, capsys, home):
-    client = FakeClient(rights=SimpleNamespace(is_admin=False, send_messages=True, edit_messages=False))
+    client = FakeClient(rights=member())
     code, out, _err, fake = run_cli(["--json", "message", "edit", "--chat", FORUM, "--id", "11", "--text", "x"], client=client, capsys=capsys, answers=("y",))
 
     assert code == 2 and envelope_of(out)["error"]["code"] == "PERMISSION_DENIED"
@@ -551,7 +575,7 @@ def test_edit_of_another_persons_message_needs_the_edit_right(run_cli, capsys, h
 
 
 def test_pin_without_the_right_is_refused_by_name(run_cli, capsys, home):
-    client = FakeClient(rights=SimpleNamespace(is_admin=False, send_messages=True, pin_messages=False))
+    client = FakeClient(rights=member())
     code, out, _err, fake = run_cli(["--json", "message", "pin", "--chat", FORUM, "--id", "11"], client=client, capsys=capsys, answers=("y",))
 
     assert code == 2

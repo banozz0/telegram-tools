@@ -36,7 +36,7 @@ from telethon.errors import UserNotParticipantError
 from telegram_tools._core import rid as _rid
 from telegram_tools._core.identity import Identity
 from telegram_tools._core.redaction import redact_text
-from telegram_tools.adapters.account import RIGHT_NAMES, Rights
+from telegram_tools.adapters.account import DIRECT, Rights, is_direct, rights_from
 from telegram_tools.envelope import PLATFORM, PREFIX, CommandError
 from telegram_tools.resolver import EntityResolutionError, ResolvedChat, _parse_numeric_reference
 
@@ -134,18 +134,21 @@ class BotNotInChatError(CommandError):
 class BotPermissions:
     """`PermissionProbe`: the rights the bot holds in a chat.
 
-    The same answer shape as the account probe, with one difference: not
-    being in the chat is a refusal, not an unknown. An account that cannot
-    read its permissions in a private chat has always been let through to
-    Telegram's own answer; a bot that is not in a group or channel has one
-    fix, and naming it before the preview is the point of a preflight.
+    The same reading as the account probe (`rights_from`, and no check at all
+    in a direct chat), with one difference: not being in the chat is a
+    refusal, not an unknown. An account whose participant Telegram will not
+    return has always been let through to Telegram's own answer; a bot that is
+    not in a group or channel has one fix, and naming it before the preview is
+    the point of a preflight.
     """
 
     def __init__(self, client, user: Any) -> None:
         self.client = client
         self.user = user
 
-    async def probe(self, peer: Any) -> Rights:
+    async def probe(self, peer: Any, chat: Any = None) -> Rights:
+        if is_direct(peer, chat):
+            return DIRECT
         get_permissions = getattr(self.client, "get_permissions", None)
         if get_permissions is None:
             return Rights(frozenset(), frozenset(), "this client reports no permissions")
@@ -153,13 +156,9 @@ class BotPermissions:
             permissions = await get_permissions(peer, self.user)
         except UserNotParticipantError:
             raise BotNotInChatError(bot_label(self.user)) from None
-        except Exception as exc:  # noqa: BLE001 - a private chat, or a refusal to answer, is unknown
+        except Exception as exc:  # noqa: BLE001 - a refusal to answer is unknown
             return Rights(frozenset(), frozenset(), f"{type(exc).__name__} reading permissions")
-        answered = {name for name in RIGHT_NAMES if hasattr(permissions, name)}
-        held = {name for name in answered if getattr(permissions, name)}
-        if "is_creator" in held:
-            held |= answered
-        return Rights(frozenset(held), frozenset(answered))
+        return rights_from(permissions, chat)
 
     async def rights(self, peer: Any) -> frozenset[str]:
         return (await self.probe(peer)).held

@@ -33,6 +33,7 @@ from telegram_tools.client import detached_session
 from telegram_tools.config import SendDestination
 from test_archive_sync import ACCOUNT, CHANNEL_ID, FORUM_ID, HARRY, IDENTITY, home  # noqa: F401 - fixtures
 from test_archive_sync import FakeClient as ArchiveFakeClient
+from test_adapters import holding, member
 
 CHAT_RID = f"tg:chat:{FORUM_ID}"
 TOPIC_RID = f"tg:topic:{FORUM_ID}:141"
@@ -456,7 +457,7 @@ class SendingClient(ArchiveFakeClient):
     async def get_permissions(self, peer, user):
         from telegram_tools.adapters.account import RIGHT_NAMES
 
-        return SimpleNamespace(**{name: True for name in RIGHT_NAMES})
+        return holding(RIGHT_NAMES)
 
     async def __call__(self, request):
         name = type(request).__name__
@@ -1082,7 +1083,7 @@ def test_a_schedule_the_account_cannot_post_into_is_refused_at_the_preflight(run
     client = SendingClient()
 
     async def no_rights(_peer, _user):
-        return SimpleNamespace(send_messages=False)
+        return member("send_messages")
 
     monkeypatch.setattr(client, "get_permissions", no_rights)
     code, out, _err, _fake = run_watch(

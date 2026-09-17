@@ -23,6 +23,7 @@ from telegram_tools._core.contract import validate_envelope
 from telegram_tools.adapters.bot import BotPermissions, bot_label, is_username_reference, resolve_chat_as_bot
 from telegram_tools.envelope import CommandError, Reporter, account_command
 from telegram_tools.resolver import EntityResolutionError
+from test_adapters import admin, member
 
 ACCOUNT = SimpleNamespace(id=42, first_name="Sven", username="sven")
 BOT = SimpleNamespace(id=98765, first_name="Alerts", username="alertsbot", bot=True)
@@ -46,7 +47,7 @@ class FakeBotClient:
         self.chats = list(chats if chats is not None else [channel()])
         self.member = member
         self.me = me
-        self.rights = rights if rights is not None else SimpleNamespace(is_admin=True, send_messages=True)
+        self.rights = rights if rights is not None else admin()
         self.sent = []
         self.resolved = []
 
@@ -262,7 +263,10 @@ def test_a_bot_mode_send_names_the_bot_and_the_account_everywhere(run_cli, home,
     }
     assert envelope["args"]["as_bot"] == "alerts"
     assert envelope["plan"]["approval"] == "yes_allowlist"
-    assert envelope["plan"]["preflight"]["held"] == ["is_admin", "send_messages"]
+    # An admin with no admin rights: it may still send in a supergroup, and
+    # nothing more -- read off the participant, not a send flag Telethon lacks.
+    assert envelope["plan"]["preflight"]["held"] == ["is_admin", "send_media", "send_messages"]
+    assert envelope["warnings"] == []
     assert bot.sent == [(bot.chats[0].input_entity, "ship it", None)]
     # The banner, on stderr under --json, names both identities.
     assert f"Acting as: @alertsbot · bot (via Sven (@sven)) · Target: Agency ({CHAT_ID})" in err
@@ -363,7 +367,7 @@ def test_a_bot_mode_yes_send_is_still_gated_by_the_allowlist(run_cli, home, caps
 def test_a_missing_right_refuses_the_bot_by_name(run_cli, home, monkeypatch, capsys):
     record_account(home)
     monkeypatch.setenv("TELEGRAM_SEND_ALLOWLIST", str(CHAT_ID))
-    muted = FakeBotClient(rights=SimpleNamespace(is_admin=False, send_messages=False))
+    muted = FakeBotClient(rights=member("send_messages"))
     code, out, _err, bot, _account = run_cli(
         ["--json", "--as-bot", "alerts", "send", "--chat", str(CHAT_ID), "--text", "ship it", "--yes"],
         bot=muted,
@@ -451,8 +455,8 @@ def test_bot_permissions_turn_not_a_participant_into_a_named_refusal():
     assert refused.value.code == "PERMISSION_DENIED"
     assert "@alertsbot" in str(refused.value)
 
-    rights = asyncio.run(BotPermissions(FakeBotClient(), BOT).probe(object()))
-    assert rights.held == frozenset({"is_admin", "send_messages"})
+    rights = asyncio.run(BotPermissions(FakeBotClient(), BOT).probe(object(), channel().entity))
+    assert rights.held == frozenset({"is_admin", "send_media", "send_messages"})
 
 
 def test_the_reporter_banner_carries_the_via_only_in_bot_mode():
