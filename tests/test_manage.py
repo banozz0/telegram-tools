@@ -80,6 +80,30 @@ def invite(link: str, **fields):
     return types.ChatInviteExported(link=link, admin_id=4242, date=None, **fields)
 
 
+# What Telegram itself does with the rights a write names, spelled out from the
+# live 2026-09-17 runs (campaign transcript telegram-6-member-rows, section 6):
+# a mute that named send_messages read back fifteen rights, a restrict that
+# named send_media read back seven, a ban read back every right there is until
+# 2038-01-19T03:14:07Z, and both promotions read back `other` beside what was
+# asked for. Written here as literals rather than read off the tool, so these
+# tests are a witness to Telegram and not to `manage.BANNED_FAMILY`.
+MUTED_BACK = ("embed_links", "send_audios", "send_docs", "send_games", "send_gifs", "send_inline", "send_media", "send_messages", "send_photos", "send_plain", "send_polls", "send_roundvideos", "send_stickers", "send_videos", "send_voices")
+RESTRICTED_MEDIA_BACK = ("send_audios", "send_docs", "send_media", "send_photos", "send_roundvideos", "send_videos", "send_voices")
+FOREVER = datetime(2038, 1, 19, 3, 14, 7, tzinfo=timezone.utc)
+
+
+def telegram_widens(names) -> set[str]:
+    """Every banned right the server sets when a write names `names`."""
+    taken = set(names)
+    if "send_messages" in taken:
+        taken.update(MUTED_BACK)
+    if "send_media" in taken:
+        taken.update(RESTRICTED_MEDIA_BACK)
+    if "view_messages" in taken:
+        taken.update(manage_ops.BANNED_RIGHT_NAMES)
+    return taken
+
+
 class PeopledWorld(World):
     """The structure world plus who is in each chat, who asked to join, and which links exist."""
 
@@ -188,14 +212,22 @@ class PeopledClient(FakeClient):
             world.requests.append(request)
             uid = self._user_id(request.user_id)
             names = [n for n in manage_ops.ADMIN_RIGHT_NAMES if getattr(request.admin_rights, n, False)]
+            # Telegram sets `other` on any promotion, whoever asked for what.
+            if names and "other" not in names:
+                names = sorted([*names, "other"])
             world.people[marked][uid] = admin(uid, *names, rank=request.rank or None) if names else plain(uid)
             return SimpleNamespace(updates=[])
         if name == "EditBannedRequest":
             marked, _chat = world.by_peer(request.channel)
             world.requests.append(request)
             uid = self._user_id(request.participant)
-            names = [n for n in manage_ops.BANNED_RIGHT_NAMES if getattr(request.banned_rights, n, False)]
-            world.people[marked][uid] = banned(uid, *names, until=request.banned_rights.until_date, left="view_messages" in names) if names else plain(uid)
+            asked = {n for n in manage_ops.BANNED_RIGHT_NAMES if getattr(request.banned_rights, n, False)}
+            # Telegram widens one send flag into the family beneath it, and a
+            # ban into every right there is, with no end of its own.
+            taken = telegram_widens(asked)
+            names = [n for n in manage_ops.BANNED_RIGHT_NAMES if n in taken]
+            until = FOREVER if "view_messages" in taken else request.banned_rights.until_date
+            world.people[marked][uid] = banned(uid, *names, until=until, left="view_messages" in names) if names else plain(uid)
             return SimpleNamespace(updates=[])
         if name == "GetChatInviteImportersRequest":
             marked, _chat = world.by_peer(request.peer)
@@ -517,8 +549,9 @@ def test_admin_promote_sets_the_rights_and_rank_and_reads_them_back(run_cli, cap
     assert code == 0, out
     envelope = envelope_of(out)
     assert envelope["plan"]["approval"] == "prompt_y"
-    assert envelope["result"]["member"]["rights"] == ["manage_topics", "pin_messages"] and envelope["result"]["member"]["rank"] == "ops"
-    assert "manage_topics, pin_messages" in envelope["evidence"]["readback"]
+    # `other` is Telegram's own, on every promotion (card agent-bo-95422334).
+    assert envelope["result"]["member"]["rights"] == ["manage_topics", "other", "pin_messages"] and envelope["result"]["member"]["rank"] == "ops"
+    assert "manage_topics, other, pin_messages" in envelope["evidence"]["readback"]
     sent = [r for r in fake.world.requests if type(r).__name__ == "EditAdminRequest"][0]
     assert sent.admin_rights.pin_messages and sent.admin_rights.manage_topics and not sent.admin_rights.ban_users
     assert [line["command"] for line in audit_lines(home)] == ["admin promote"]
@@ -529,7 +562,7 @@ def test_admin_rights_edits_an_existing_admin_and_promote_refuses_one(run_cli, c
     assert code == 2 and envelope_of(out)["error"]["code"] == "TARGET_KIND_MISMATCH"
     code, out, _err, fake = run_cli(["--json", "admin", "rights", "--chat", FORUM, "--user", "@dobby", "--rights", "ban_users"], client=PeopledClient(), capsys=capsys, isatty=True, answer="y")
     assert code == 0, out
-    assert envelope_of(out)["result"]["member"]["rights"] == ["ban_users"]
+    assert envelope_of(out)["result"]["member"]["rights"] == ["ban_users", "other"]
     assert mutations(fake) == ["EditAdminRequest"]
 
 
@@ -593,7 +626,8 @@ def test_p7_mute_and_restrict_carry_their_end_and_unmute_lifts_it(run_cli, capsy
     code, out, _err, fake = run_cli(["--json", "member", "mute", "--chat", FORUM, "--user", "@harry", "--until", "2h"], client=PeopledClient(), capsys=capsys, isatty=True, answer="y")
     assert code == 0, out
     member = envelope_of(out)["result"]["member"]
-    assert member["status"] == "restricted" and member["rights"] == ["send_messages"] and member["until"]
+    # Telegram widens send_messages into its family (card agent-bo-95422334).
+    assert member["status"] == "restricted" and member["rights"] == sorted(MUTED_BACK) and member["until"]
     sent = [r for r in fake.world.requests if type(r).__name__ == "EditBannedRequest"][0]
     assert sent.banned_rights.send_messages and sent.banned_rights.until_date is not None
     assert not sent.banned_rights.view_messages
@@ -601,7 +635,7 @@ def test_p7_mute_and_restrict_carry_their_end_and_unmute_lifts_it(run_cli, capsy
     world = fake.world
     code, out, _err, fake = run_cli(["--json", "member", "restrict", "--chat", FORUM, "--user", "@harry", "--rights", "send_media,send_stickers", "--until", "7d"], client=PeopledClient(world), capsys=capsys, isatty=True, answer="y")
     assert code == 0, out
-    assert envelope_of(out)["result"]["member"]["rights"] == ["send_media", "send_stickers"]
+    assert envelope_of(out)["result"]["member"]["rights"] == sorted({*RESTRICTED_MEDIA_BACK, "send_stickers"})
 
     code, out, _err, fake = run_cli(["--json", "member", "unmute", "--chat", FORUM, "--user", "@harry"], client=PeopledClient(world), capsys=capsys, isatty=True, answer="y")
     assert code == 0, out
@@ -1086,3 +1120,111 @@ def test_admin_list_shows_the_creators_rights_on_the_human_screen(run_cli, capsy
     assert code == 0
     creator = next(line for line in out.splitlines() if "  creator " in line)
     assert "add_admins" in creator and "manage_topics" in creator, creator
+
+
+# -- card agent-bo-95422334: a preview names every right the write takes -----------------
+
+
+def takes_line(text: str) -> str:
+    return next(line for line in text.splitlines() if line.startswith("Takes"))
+
+
+def test_a_mute_preview_names_the_whole_family_telegram_takes(run_cli, capsys, home):
+    # Live 6.2.5 previewed "Takes send_messages" and read back fifteen rights.
+    # The preview is the screen the y answers, so it names all fifteen.
+    code, out, err, fake = run_cli(["--json", "member", "mute", "--chat", FORUM, "--user", "@harry", "--until", "2h"], client=PeopledClient(), capsys=capsys, isatty=True, answer="y")
+    assert code == 0, out
+    envelope = envelope_of(out)
+    assert takes_line(err) == f"Takes   {', '.join(sorted(MUTED_BACK))}"
+    assert "Telegram widens send_messages into the family beneath it" in err
+    # The preview and the readback now name the same fifteen.
+    assert envelope["result"]["member"]["rights"] == sorted(MUTED_BACK)
+    # What reached Telegram is still the one flag that was asked for.
+    sent = [r for r in fake.world.requests if type(r).__name__ == "EditBannedRequest"][0]
+    assert sent.banned_rights.send_messages and not sent.banned_rights.send_photos
+
+
+def test_a_restrict_preview_names_the_media_family_and_leaves_a_lone_right_alone(run_cli, capsys, home):
+    # Live 6.2.7 previewed "Takes send_media" and read back seven rights.
+    code, out, err, _fake = run_cli(["--json", "member", "restrict", "--chat", FORUM, "--user", "@harry", "--rights", "send_media", "--until", "10m"], client=PeopledClient(), capsys=capsys, isatty=True, answer="y")
+    assert code == 0, out
+    envelope = envelope_of(out)
+    assert takes_line(err) == f"Takes   {', '.join(sorted(RESTRICTED_MEDIA_BACK))}"
+    assert envelope["result"]["member"]["rights"] == sorted(RESTRICTED_MEDIA_BACK)
+
+    # A right with no family beneath it widens into nothing, and says nothing.
+    code, out, err, _fake = run_cli(["--json", "member", "restrict", "--chat", FORUM, "--user", "@harry", "--rights", "send_stickers,embed_links", "--until", "10m"], client=PeopledClient(), capsys=capsys, isatty=True, answer="y")
+    assert code == 0, out
+    assert takes_line(err) == "Takes   embed_links, send_stickers"
+    assert "widens" not in err
+    assert envelope_of(out)["result"]["member"]["rights"] == ["embed_links", "send_stickers"]
+
+
+def test_a_ban_preview_says_it_takes_every_right_and_never_ends(run_cli, capsys, home):
+    # Live 6.2.2 previewed As, Who and the reason alone, while the write read
+    # back 23 rights and Telegram's forever. The gate now says both.
+    code, out, _err, fake = run_cli(["member", "ban", "--chat", FORUM, "--user", "@harry", "--reason", "spam", "--execute"], client=PeopledClient(), capsys=capsys, isatty=True, answer="Harry (@harry)")
+    assert code == 0, out
+    assert "view_messages among them: they cannot even read Team Hermes" in out
+    assert "Until   permanent (Telegram stores a ban with no end" in out
+    # The date Telegram stores for it is the 32-bit ceiling, not an end anyone
+    # set, so the readback says what it means. The JSON payload keeps the date.
+    readback = next(line for line in out.splitlines() if "is now banned" in line)
+    assert readback.endswith("in Team Hermes permanently (reason: spam)") and manage_ops.FOREVER not in readback
+
+
+def test_a_ban_reads_back_every_right_and_the_json_keeps_the_date(run_cli, capsys, home):
+    code, out, _err, _fake = run_cli(["--json", "member", "ban", "--chat", FORUM, "--user", "@harry", "--execute"], client=PeopledClient(), capsys=capsys, isatty=True, answer="@harry")
+    assert code == 0, out
+    envelope = envelope_of(out)
+    assert envelope["result"]["member"]["rights"] == sorted(manage_ops.BANNED_RIGHT_NAMES)
+    # The machine field stays a date; only the screens read it as permanent.
+    assert envelope["result"]["member"]["until"] == manage_ops.FOREVER
+    assert envelope["evidence"]["readback"].endswith("in Team Hermes permanently")
+
+
+def test_a_promote_preview_names_the_right_telegram_adds_for_itself(run_cli, capsys, home):
+    # Live 6.1.2 previewed "Rights delete_messages, pin_messages" and read back
+    # `other` as well, a right nobody asked for and no screen had named.
+    code, out, err, fake = run_cli(["--json", "admin", "promote", "--chat", FORUM, "--user", "@harry", "--rights", "pin_messages,delete_messages"], client=PeopledClient(), capsys=capsys, isatty=True, answer="y")
+    assert code == 0, out
+    envelope = envelope_of(out)
+    assert "Rights  delete_messages, other, pin_messages" in err
+    assert "Telegram sets other on every admin" in err
+    assert envelope["result"]["member"]["rights"] == ["delete_messages", "other", "pin_messages"]
+    # `other` is never sent, so an actor that does not hold it can still promote.
+    sent = [r for r in fake.world.requests if type(r).__name__ == "EditAdminRequest"][0]
+    assert sent.admin_rights.pin_messages and not sent.admin_rights.other
+
+
+def test_taking_the_last_admin_right_away_adds_nothing(run_cli, capsys, home):
+    # `--rights none` is not a promotion, so Telegram's `other` has nothing to
+    # come with; the preview must not claim a right the write will not set.
+    code, out, err, _fake = run_cli(["--json", "admin", "rights", "--chat", FORUM, "--user", "@dobby", "--rights", "none"], client=PeopledClient(), capsys=capsys, isatty=True, answer="y")
+    assert code == 0, out
+    assert "Rights  none" in err and "other" not in err
+    assert envelope_of(out)["result"]["member"]["status"] == "member"
+
+
+def test_the_families_are_the_ones_telegram_showed_live():
+    # The table the preview reads, pinned to the live readbacks it came from.
+    assert manage_ops.expand_rights(manage_ops.MUTE_RIGHTS) == tuple(sorted(MUTED_BACK))
+    assert manage_ops.expand_rights(("send_media",)) == tuple(sorted(RESTRICTED_MEDIA_BACK))
+    assert manage_ops.expand_rights(manage_ops.BAN_RIGHTS) == tuple(sorted(manage_ops.BANNED_RIGHT_NAMES))
+    assert manage_ops.expand_rights(("send_stickers",)) == ("send_stickers",)
+    assert manage_ops.expand_rights(()) == ()
+    assert manage_ops.expand_admin_rights(("pin_messages",)) == ("other", "pin_messages")
+    assert manage_ops.expand_admin_rights(()) == ()
+    assert manage_ops.until_phrase(manage_ops.FOREVER) == "permanently"
+    assert manage_ops.until_phrase("2026-09-17T18:05:09Z") == "until 2026-09-17T18:05:09Z"
+    assert manage_ops.until_phrase(None) == ""
+
+
+def test_the_typed_gate_asks_for_the_label_every_other_screen_printed():
+    # The gate's hint was the only place the short form appeared; both forms
+    # were always accepted, so only the asking changes.
+    member = member_of(plain(777), HARRY)
+    asked = []
+    assert manage_ops.confirm_typed_label("preview", member, read=lambda prompt: asked.append(prompt) or "Harry (@harry)", write=lambda _text: None)
+    assert asked == ["Type the exact label (Harry (@harry)) to continue: "]
+    assert manage_ops.labels_match("@harry", member) and manage_ops.labels_match("harry", member)

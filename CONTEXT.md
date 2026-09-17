@@ -429,6 +429,18 @@ The terms this codebase uses, and the boundaries they imply.
   disagrees on whether an unbanned member may edit topics. A direct chat — a person, or Saved Messages — is not
   asked about at all: it holds the send rights, pin and delete, and nothing an
   admin would.
+- **Widened rights** — what Telegram sets beyond what a write named, and what
+  the preview therefore has to say (`manage.BANNED_FAMILY`,
+  `manage.ADMIN_ALWAYS`). One send flag sets the family beneath it — a mute
+  names `send_messages` and fifteen rights come back, `send_media` brings the
+  six media kinds — and `view_messages` sets every banned right there is, which
+  is what a ban is. Any promotion also sets `other`, the flag `chatAdminRights`
+  documents as carrying an admin's baseline. The call still sends exactly what
+  was named, and the hierarchy rule still reads exactly that; the plan and the
+  preview name what will land, because the preview is the screen a `y` answers
+  and one that understates approves less than it takes. A ban has no end at
+  all: Telegram stores it as `manage.FOREVER`, the 32-bit time ceiling, which
+  the screens say as `permanently` while the machine field keeps the date.
 - **Replacing list** — how `--include`, `--exclude` and `--types` behave on
   `folders create` and `folders edit`, and `--rights` on `admin rights`: the
   flag names what the field *is* afterwards, not what to add, and `none`
@@ -436,8 +448,9 @@ The terms this codebase uses, and the boundaries they imply.
   back the chats pinned inside a folder without ever being asked about them.
 - **Typed label** — the gate `member ban`, `member kick` and `admin demote` share with
   `delete`: dry-run by default, `--execute`, and the person's exact label typed
-  back — their `@username`, or their name when they have none, either with or
-  without the `@`, case-insensitively. No `--yes`, and a terminal in either
+  back. The prompt names the label every screen around it printed
+  (`Harry (@harry)`); their `@username` alone is taken too, with or without the
+  `@`, case-insensitively (`manage.labels_match`). No `--yes`, and a terminal in either
   mode, because a person's membership or rights is a container's worth of
   consequence. The re-derivation after the gate compares the chat's title and
   the person's status, so someone promoted in the window is `PLAN_DRIFT`. Two
