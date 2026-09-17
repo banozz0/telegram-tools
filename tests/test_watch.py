@@ -1128,3 +1128,162 @@ def test_the_menu_rule_form_reaches_every_flag_the_rules_parser_defines():
     flags = {action.dest for action in add._actions if action.dest not in ("help",)}
     staged = {key for key, _label, _kind in menu.RULE_FIELDS}
     assert flags - staged == set(), f"the form reaches no row for {flags - staged}"
+
+
+class MenuClient:
+    """The one client a menu session holds: it answers `get_me` and nothing else."""
+
+    def __init__(self, user=ACCOUNT):
+        self.user = user
+        self.get_me_calls = 0
+        self.disconnected = 0
+
+    async def get_me(self):
+        self.get_me_calls += 1
+        return self.user
+
+    async def disconnect(self):
+        self.disconnected += 1
+
+
+def test_a_menu_that_holds_the_session_opens_no_second_one_for_the_identity(home, monkeypatch, capsys):
+    """Card 319, run 2 and run 8 of the live transcript: the menu's own session is the session.
+
+    A profile `auth` has never recorded has no label and no user id to read, so
+    the identity lookup used to open a client of its own -- on the very session
+    file the menu is holding -- and Telethon's lock answered. Every one of these
+    three is offline: the queue, the runner's own schedules and the rule files
+    are all on this machine.
+    """
+    from telegram_tools import menu
+    from telegram_tools.client import SessionInUseError
+
+    held = MenuClient()
+
+    async def started(_client, *, authorize=True):
+        return held
+
+    def second_connection(_config):
+        raise SessionInUseError(
+            "Another telegram-tools is already using the login session. "
+            "Close the other one - a menu open in another terminal counts - and try again."
+        )
+
+    monkeypatch.setattr(menu, "create_client", lambda _config: held)
+    monkeypatch.setattr(menu, "start_client", started)
+    # What a second client on one session file does, where it would be opened.
+    monkeypatch.setattr(cli, "create_client", second_connection)
+
+    session = menu.MenuSession()
+    lines: list[str] = []
+
+    async def drive():
+        # The chat picker, or any other connecting row: the menu now holds the file.
+        assert await session.client() is held
+        rows = (
+            (SimpleNamespace(command="review", review_kind="approve", ids=None), True),
+            (SimpleNamespace(command="schedule", schedule_kind="list", chat=None), False),
+            (SimpleNamespace(command="watch", watch_kind="rules", rules_verb="list"), False),
+        )
+        codes = []
+        for args, connect in rows:
+            codes.append(await menu._call(args, session=session, runner=cli.run, write=lines.append, connect=connect))
+        return codes
+
+    codes = run(drive())
+    capsys.readouterr()
+    assert [line for line in lines if line.startswith("error:")] == []
+    assert codes == [0, 0, 0]
+    # And the identity is the one the menu already resolved, asked for once.
+    assert held.get_me_calls == 1
+
+
+def _no_connection(monkeypatch):
+    """Every way a command opens a client of its own, made loud."""
+
+    def refuse(_config):
+        raise AssertionError("this command opened a Telegram connection")
+
+    monkeypatch.setattr(cli, "create_client", refuse)
+    monkeypatch.setattr(cli, "create_detached_client", refuse)
+
+
+def test_the_three_runner_signals_never_connect_on_a_profile_with_no_record(home, monkeypatch, capsys):
+    """`watch status`, `stop` and `reload` read local files; the identity is decoration.
+
+    A record-less profile used to buy that decoration with a whole second
+    session. Status here has a live holder (this very process), and the two
+    signals a stale one, so neither signals anything.
+    """
+    paths = archive_store.paths_for()
+    paths.rules.mkdir(parents=True, exist_ok=True)
+    _no_connection(monkeypatch)
+    monkeypatch.setattr(cli.sys, "stdin", SimpleNamespace(isatty=lambda: False, read=lambda: "", readline=lambda: "\n"))
+
+    import os
+
+    paths.runner_lock.write_text(json.dumps({"pid": os.getpid(), "started_at": "2026-09-17T17:22:56Z"}))
+    code = cli.main(["--json", "watch", "status"])
+    payload = json.loads(capsys.readouterr().out)
+    assert code == 0 and payload["result"]["running"] is True
+    assert payload["identity"] is None
+    assert any("has no record" in warning for warning in payload["warnings"])
+
+    # A pid nothing holds: both signals refuse by name, and neither connected first.
+    paths.runner_lock.write_text(json.dumps({"pid": 2, "started_at": "2026-09-17T17:22:56Z"}))
+    monkeypatch.setattr(cli._runner, "_pid_alive", lambda _pid: False)
+    for verb in ("stop", "reload"):
+        code = cli.main(["--json", "watch", verb])
+        payload = json.loads(capsys.readouterr().out)
+        assert code == 2, verb
+        assert payload["error"]["code"] == "RUNNER_NOT_RUNNING", verb
+
+
+def test_a_profile_with_no_record_is_asked_once_and_never_through_a_second_client(home, monkeypatch):
+    """The pin: what a record-less profile costs, with and without a client to hand."""
+    config = SimpleNamespace(profile="default")
+    held = MenuClient()
+
+    # With a client, nothing is opened: the run asks the connection it has.
+    _no_connection(monkeypatch)
+    report = cli.Reporter()
+    identity = run(cli._offline_identity(config, report, client=held))
+    assert identity.id == "tg:user:4242" and identity.label == "Sven (@sven)" and identity.profile == "default"
+    assert held.get_me_calls == 1
+
+    # Without one, exactly one client is opened and disconnected again.
+    opened = MenuClient()
+    monkeypatch.setattr(cli, "create_client", lambda _config: opened)
+
+    async def started(_client, *, authorize=True):
+        return opened
+
+    monkeypatch.setattr(cli, "start_client", started)
+    identity = run(cli._offline_identity(config, cli.Reporter(), client=None))
+    assert identity.id == "tg:user:4242"
+    assert opened.get_me_calls == 1 and opened.disconnected == 1
+
+
+def test_the_runner_never_opens_the_session_file_it_is_built_to_leave_alone(home, monkeypatch, capsys):
+    """`watch run` connects detached so a one-shot command keeps working; the identity did not.
+
+    A profile with no record sent the lookup through `create_client`, which is
+    the SQLite session file itself -- so a runner started beside an open menu
+    refused with the lock error, on the one command whose whole design is to
+    hold that file open for nobody.
+    """
+    fake = SendingClient()
+
+    def refuse(_config):
+        raise AssertionError("the runner opened the profile's own session file")
+
+    monkeypatch.setattr(cli, "create_client", refuse)
+    monkeypatch.setattr(cli, "create_detached_client", lambda _config: fake)
+    monkeypatch.setattr(cli.watch_events, "TelegramEventSource", lambda *_a, **_k: RecordedSource(live=[]))
+    monkeypatch.setattr(cli.sys, "stdin", SimpleNamespace(isatty=lambda: False, read=lambda: "", readline=lambda: "\n"))
+
+    code = cli.main(["--json", "watch", "run"])
+    payload = json.loads(capsys.readouterr().out)
+    assert code == 0, payload
+    # It still acts as somebody: the detached client answered for the account.
+    assert payload["identity"]["id"] == "tg:user:4242"

@@ -85,6 +85,11 @@ class MenuSession:
         # to learn it from. None until then, which is what keeps a bare
         # `telegram-tools` from needing a login to show its root.
         self.banner: str | None = None
+        # The identity that line was built from, handed to every command this
+        # session runs: a row that runs on a client of its own must not look it
+        # up again, because on a profile `auth` has never recorded that lookup
+        # opens a second client on the session file this one holds.
+        self.acting = None
 
     @property
     def config(self):
@@ -96,7 +101,8 @@ class MenuSession:
         if self._client is None:
             self._client = await start_client(create_client(self.config))
             provider = await AccountIdentity.open(self._client, getattr(self.config, "profile", "default"))
-            self.banner = identity_banner(provider.identity())
+            self.acting = provider.identity()
+            self.banner = identity_banner(self.acting)
         return self._client
 
     async def chats(self):
@@ -163,6 +169,7 @@ class MenuSession:
         self._chats = None
         self._bots = None
         self.banner = None
+        self.acting = None
 
     @property
     def profile(self) -> str:
@@ -201,12 +208,17 @@ async def _call(args, *, session, runner, write, connect: bool = True, execute_r
     `execute_row` is the row that would run this for real. A dry-run in here has
     no `--execute` to name -- there is no command line in front of the person --
     so it names that row instead; see `surface`.
+
+    The identity goes with it either way: an offline row still acts as someone,
+    and a session that already knows who it is must not send the command off to
+    ask again through a second client (card 319).
     """
     try:
         client = await session.client() if session is not None and connect else None
         config = session.config if session is not None else None
+        acting = session.acting if session is not None else None
         with surface.menu_row(execute_row):
-            return await runner(args, client=client, config=config)
+            return await runner(args, client=client, config=config, acting=acting)
     except MENU_ERRORS as exc:
         write_error(write, exc)
         return None
@@ -2497,9 +2509,11 @@ def _flow_runner_verb(kind: str):
 
     async def flow(*, session, runner, read, write) -> bool:
         trail = crumb(MAIN, "Watch", "Runner", kind)
-        # Every one of these runs on a client of its own: `run` connects with a
-        # detached copy of the authorization so the menu keeps its own session,
-        # and the other three open nothing at all.
+        # None of these takes the menu's client: `run` connects with a detached
+        # copy of the authorization so the menu keeps its own session, and
+        # status, stop and reload read the lock file, the log and the local
+        # state table without connecting at all -- they act as the identity
+        # this session already resolved, or as nobody when there is none.
         args = _namespace(command="watch", watch_kind=kind)
         result = await _act(args, session=session, runner=runner, read=read, write=write, trail=trail, rows=(RUN_AGAIN,), connect=False)
         return _leave(result)

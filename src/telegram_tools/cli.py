@@ -855,7 +855,7 @@ async def _run_search(client, args, *, report: Reporter | None = None) -> int:
 # -- the archive -----------------------------------------------------------
 
 
-async def _offline_identity(config, report: Reporter) -> Identity:
+async def _offline_identity(config, report: Reporter, *, client=None) -> Identity:
     """The account this run acts as, without opening its session when the profile record says.
 
     The archive commands that never touch Telegram -- status, search, export,
@@ -863,18 +863,57 @@ async def _offline_identity(config, report: Reporter) -> Identity:
     a retention plan is signed by whoever approved it. The profile record
     `auth` wrote answers that with no connection; a profile without one is
     asked once, through its session, exactly as bot mode does.
+
+    `client` is the connection the caller already holds -- the menu's, for a
+    row it runs on its own session. One session file is one connection, so a
+    profile with no record is asked through that client rather than through a
+    second one, which is the lock error this tool exists to avoid.
     """
     if report.acting is None:
-        user_id, label = await _via_account(config, report)
-        report.set_identity(
-            Identity(
-                platform=PLATFORM,
-                mode="account",
-                label=label,
-                id=str(_rid.make(PREFIX, "user", user_id)),
-                profile=getattr(config, "profile", profile_store.DEFAULT_PROFILE),
+        user_id, label = await _via_account(config, report, client=client)
+        report.set_identity(_account_identity(config, label, user_id))
+    return report.acting
+
+
+def _account_identity(config, label: str, user_id: int) -> Identity:
+    """One account, as an `Identity`: the profile this run acts as, and who it is."""
+    return Identity(
+        platform=PLATFORM,
+        mode="account",
+        label=label,
+        id=str(_rid.make(PREFIX, "user", user_id)),
+        profile=getattr(config, "profile", profile_store.DEFAULT_PROFILE),
+    )
+
+
+def _recorded_identity(config) -> Identity | None:
+    """The identity the profile record names, or None when `auth` has never written one."""
+    stored = profile_store.load(getattr(config, "profile", profile_store.DEFAULT_PROFILE))
+    if stored.label and stored.user_id:
+        return _account_identity(config, stored.label, int(stored.user_id))
+    return None
+
+
+def _local_identity(config, report: Reporter) -> Identity | None:
+    """Who the three runner signals act as, from the profile record alone. Never connects.
+
+    `watch status`, `stop` and `reload` read a lock file, a log and the local
+    state table: nothing there is signed, and the identity is the banner line
+    and the envelope's field. A profile `auth` has never recorded would have to
+    open a whole second session to learn a decoration -- on a machine where a
+    menu or a runner may hold the file -- so it goes without one and the
+    envelope says which profile has no record and what writes it.
+    """
+    if report.acting is None:
+        identity = _recorded_identity(config)
+        if identity is None:
+            name = getattr(config, "profile", profile_store.DEFAULT_PROFILE)
+            report.warn(
+                f"profile {name!r} has no record of which account it is, so this run is unsigned; "
+                "`telegram-tools auth` writes one"
             )
-        )
+            return None
+        report.set_identity(identity)
     return report.acting
 
 
@@ -1297,7 +1336,7 @@ async def _run_review(args, config, *, client=None, report: Reporter) -> int:
     kind = getattr(args, "review_kind", None)
     if kind is None:
         raise ValueError("review needs one of: list, approve, accept, reject, retry, status.")
-    identity = await _offline_identity(config, report)
+    identity = await _offline_identity(config, report, client=client)
     report.show_banner()
     with archive_store.open_archive() as archive:
         queue = review_ops.queue_for(archive)
@@ -3379,11 +3418,7 @@ async def _run_watch_run(args, config, *, report: Reporter) -> int:
     # The lock and the log are made under the tool's root; `mkdir(parents=True)`
     # would give that root the umask, and the next write would refuse over it.
     profile_store.make_private_tree(paths.root, paths.root)
-    identity = await _offline_identity(config, report)
-    report.show_banner()
-    mode = "bot" if _in_bot_mode(report) else "account"
     rules = _rules_set()
-    report.info(f"{len(rules)} rule(s) loaded from {paths.rules}")
 
     client = create_detached_client(config)
     loop = watch_events.ClientLoop(client)
@@ -3391,6 +3426,22 @@ async def _run_watch_run(args, config, *, report: Reporter) -> int:
     try:
         if not loop.call(client.is_user_authorized()):
             raise login.LoginRequired(getattr(config, "profile", profile_store.DEFAULT_PROFILE))
+        # Who this runner acts as, off the detached client when the profile has
+        # no record: `create_client` is the session file itself, and opening it
+        # to learn a label would lock out every one-shot command for as long as
+        # the runner ran -- the one thing a detached client exists to prevent.
+        # The client belongs to the loop's thread, so the question goes through it.
+        if report.acting is None:
+            identity = _recorded_identity(config)
+            if identity is None:
+                user = loop.call(client.get_me())
+                identity = _account_identity(config, account_label(user), int(getattr(user, "id", 0)))
+                report.me = user
+            report.set_identity(identity)
+        identity = report.acting
+        report.show_banner()
+        mode = "bot" if _in_bot_mode(report) else "account"
+        report.info(f"{len(rules)} rule(s) loaded from {paths.rules}")
         source = watch_events.TelegramEventSource(client, loop, mode=mode)
         source.register()
         sender = watch_events.TelegramMessageSender(client, loop, config.send_allowlist)
@@ -3418,7 +3469,7 @@ async def _run_watch_run(args, config, *, report: Reporter) -> int:
 
 async def _run_watch_status(args, config, *, report: Reporter) -> int:
     """`watch status`: the lock and its holder, the rules loaded, the last tick, cursors and schedules."""
-    await _offline_identity(config, report)
+    _local_identity(config, report)
     report.show_banner()
     paths = archive_store.paths_for()
     try:
@@ -3438,7 +3489,7 @@ async def _run_watch_status(args, config, *, report: Reporter) -> int:
 
 async def _run_watch_signal(args, config, *, report: Reporter) -> int:
     """`watch stop` and `watch reload`: a signal to the holder, and what it answered."""
-    await _offline_identity(config, report)
+    _local_identity(config, report)
     report.show_banner()
     paths = archive_store.paths_for()
     kind = args.watch_kind
@@ -3613,7 +3664,7 @@ async def _run_schedule(args, config, *, client=None, report: Reporter) -> int:
         if client is not None and (reference is not None or kind == "post"):
             identity = await _acting(client, report)
         else:
-            identity = await _offline_identity(config, report)
+            identity = await _offline_identity(config, report, client=client)
         report.show_banner()
         with archive_store.open_archive() as archive:
             state = _runner.RunnerState(archive, identity)
@@ -3814,16 +3865,21 @@ def require_bot_mode_supports(args, report: Reporter) -> None:
     )
 
 
-async def _via_account(config, report: Reporter) -> tuple[int, str]:
-    """The account a bot acts through: its id and label.
+async def _via_account(config, report: Reporter, *, client=None) -> tuple[int, str]:
+    """The account a run acts as or through: its id and label.
 
     From the profile record when `auth` has written one -- no connection, and
     the account's own session can stay held by a menu elsewhere. A profile
-    from before records existed is asked once, through its session.
+    from before records existed is asked once: through the client the caller
+    already holds when there is one, because a second client on one session
+    file is `SessionInUseError`, and only otherwise through a session of its own.
     """
     stored = profile_store.load(getattr(config, "profile", profile_store.DEFAULT_PROFILE))
     if stored.label and stored.user_id:
         return int(stored.user_id), stored.label
+    if client is not None:
+        user = await client.get_me()
+        return int(getattr(user, "id", 0)), account_label(user)
     client = await start_client(create_client(config), authorize=not report.machine)
     try:
         if report.machine and not await client.is_user_authorized():
@@ -3880,7 +3936,7 @@ async def run_as_bot(args, config, *, report: Reporter) -> int:
 # -- running one -----------------------------------------------------------
 
 
-async def run(args, *, client=None, config=None, report: Reporter | None = None) -> int:
+async def run(args, *, client=None, config=None, report: Reporter | None = None, acting: Identity | None = None) -> int:
     """Run one command.
 
     The menu passes its own already-started client so a whole menu session is one
@@ -3888,8 +3944,15 @@ async def run(args, *, client=None, config=None, report: Reporter | None = None)
     error waiting to happen. A caller that passes a client owns it, so it is not
     disconnected here. It passes no reporter either, which is what keeps the
     menu on the human path.
+
+    `acting` is the identity that caller already resolved. Its rows that run on
+    a client of their own -- the rule files, the runner's own schedules -- are
+    offline and still act *as* someone, and looking that up again is what used
+    to open a second session on a profile with no record (card 319).
     """
     report = report or Reporter()
+    if acting is not None and report.acting is None:
+        report.set_identity(acting)
 
     if args.command == "doctor":
         return run_doctor(report=report, profile=_profile_name(args))
