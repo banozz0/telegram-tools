@@ -5,6 +5,7 @@ from telegram_tools import menu
 from telegram_tools import messages as message_ops
 from telegram_tools import surface
 from telegram_tools._core.columns import width
+from telegram_tools._core.identity import Identity
 from telegram_tools.bots import IMPLICIT_OTHER_RIGHT, right_names
 from telegram_tools.config import ConfigError
 from telegram_tools.envelope import CommandError
@@ -40,6 +41,9 @@ ICON_TOPICS = [
 
 BOTS = [BotInfo(id=12345, username="harrybot", name="Harry", bio=None, description=None, is_owned=True)]
 
+# Who a connected session says it is: the identity behind its `Acting as:` line.
+ACTING = Identity(platform="telegram", mode="account", label="Sven (@sven)", id="tg:user:4242", profile="default")
+
 # What the local archive holds, as its pickers list it: (rid, title).
 SCOPES = [("tg:topic:-100111:141", "Deploys"), ("tg:chat:-100222", "Alerts")]
 
@@ -71,9 +75,12 @@ class FakeSession:
         self.released = 0
         self.topic_calls = []
         self.review_states = []
-        # The identity line the real session learns when it connects. Screens
-        # below the root carry it; a test that wants the bare screen sets None.
+        # The identity line the real session learns when it connects, and the
+        # identity it was built from, which every command it runs is handed.
+        # Screens below the root carry it; a test that wants the bare screen
+        # sets None.
         self.banner = "Acting as: Sven (@sven) \u00b7 account"
+        self.acting = ACTING
 
     async def client(self):
         return "CLIENT"
@@ -108,6 +115,7 @@ class FakeSession:
         self.released += 1
         self.closed = True
         self.banner = None
+        self.acting = None
 
     # The named logins on this machine, as the Profiles screen sees them, and
     # the switch that changes which one the rest of the session acts as.
@@ -136,7 +144,7 @@ REVIEW = [
 def recorder(result=0, error=None):
     calls = []
 
-    async def runner(args, *, client=None, config=None):
+    async def runner(args, *, client=None, config=None, acting=None):
         calls.append(args)
         if error is not None:
             raise error
@@ -226,7 +234,7 @@ def test_the_session_is_closed_on_exit():
 def test_doctor_runs_without_a_client_and_returns_to_the_menu():
     calls = []
 
-    async def runner(args, *, client=None, config=None):
+    async def runner(args, *, client=None, config=None, acting=None):
         calls.append((args, client, config))
         return 0
 
@@ -2215,7 +2223,7 @@ def test_archive_status_runs_without_the_menus_connection():
     session = FakeSession()
     calls = []
 
-    async def runner(args, *, client=None, config=None):
+    async def runner(args, *, client=None, config=None, acting=None):
         calls.append((args, client))
         return 0
 
@@ -2449,7 +2457,7 @@ def test_a_dry_run_in_the_menu_names_the_row_that_executes_not_a_flag():
     """
     tails = []
 
-    async def runner(args, *, client=None, config=None):
+    async def runner(args, *, client=None, config=None, acting=None):
         preview = message_ops.format_preview(
             message_ops.OPS["delete"],
             actor="Sven (@sven)",
