@@ -189,6 +189,7 @@ class Reporter:
         command: str = "",
         args: Any = None,
         argv: Sequence[str] = (),
+        profile: str = "default",
         audit: Any = None,
         stdout: Any = None,
         stderr: Any = None,
@@ -207,6 +208,11 @@ class Reporter:
 
         self.me: Any = None
         self.acting: Identity | None = None
+        # The login this run acts as, resolved once by `run` from the config
+        # and read back by whatever builds the identity: the envelope, every
+        # plan and each audit line carry the same one, and a run under
+        # `--profile work` that stamped `default` named the wrong account.
+        self.profile = profile
         # The account a bot identity acts through, as a label: named beside the
         # mode on every bot-mode screen. None in account mode.
         self.via_label: str | None = None

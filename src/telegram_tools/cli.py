@@ -647,9 +647,14 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 async def _acting(client, report: Reporter):
-    """The account this run acts as, fetched once and reused by plan, envelope and audit."""
+    """The account this run acts as, fetched once and reused by plan, envelope and audit.
+
+    The profile comes off the reporter, which `run` set from the resolved
+    config: the identity names which login acted, and reading the default here
+    made every `--profile work` run claim `default` on all three surfaces.
+    """
     if report.acting is None:
-        provider = await AccountIdentity.open(client)
+        provider = await AccountIdentity.open(client, report.profile)
         report.set_identity(provider.identity(), me=provider.user)
     return report.acting
 
@@ -4011,6 +4016,10 @@ async def run(args, *, client=None, config=None, report: Reporter | None = None,
 
     if config is None:
         config = load_config(profile=getattr(args, "profile", None))
+    # The resolved name, not the flag: `load_config` settles the flag, the
+    # environment and the default into one, and every identity this run builds
+    # reads it back off the reporter.
+    report.profile = getattr(config, "profile", profile_store.DEFAULT_PROFILE)
 
     audit_path = getattr(config, "audit_path", None)
     if audit_path is not None and report.audit_log is None:
