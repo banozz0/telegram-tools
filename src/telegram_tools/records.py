@@ -44,6 +44,14 @@ def topic_id_for_message(message: Any) -> int | None:
 # added only when the message has them: an ordinary message's record, and the
 # CSV header derived from it, stays exactly what it was.
 
+# Bumped whenever `message_body` derives a text or a key it did not before. The
+# archive stamps a scope with it after a whole walk, and `archive status` names
+# the scopes an older rendering wrote, because a resume never revisits a row.
+# 1 was 3.23.0 (a poll, an event, a forward's origin), 2 was 3.24.0 (ten
+# attachment kinds). No release before the stamp wrote one, so the store counts
+# an unstamped scope as behind: it cannot tell a pre-3.23.0 row from a later one.
+TEXT_RENDERING = 2
+
 
 @dataclass(frozen=True)
 class Body:

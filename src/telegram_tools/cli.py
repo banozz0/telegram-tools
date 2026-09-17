@@ -975,7 +975,7 @@ async def _run_archive_export(args, config, *, report: Reporter) -> int:
     with archive_store.open_archive() as archive:
         hits = archive.search(args.query, **_query_kwargs(args, identity))
     path = _export.write(
-        hits,
+        archive_store.export_rows(hits, args.format),
         args.output,
         args.format,
         paths=archive_store.paths_for(),
@@ -1362,7 +1362,8 @@ async def _run_search_archive(args, config, *, report: Reporter) -> int:
     if args.output:
         path = Path(args.output)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(_export.render(rows, args.format, query=args.keyword, title=f"{TOOL} archive export"), encoding="utf-8")
+        shown = archive_store.export_rows(hits, args.format)
+        path.write_text(_export.render(shown, args.format, query=args.keyword, title=f"{TOOL} archive export"), encoding="utf-8")
     elif args.format != "json":
         raise ValueError(f"--output is required for {args.format.upper()} export")
     elif not report.machine:

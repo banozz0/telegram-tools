@@ -27,7 +27,7 @@ from telegram_tools._core.export import FORMATS as EXPORT_FORMATS
 from telegram_tools._core.paths import ToolPaths, make_private_dir, open_private
 from telegram_tools._core.plan import Plan
 from telegram_tools import profiles as profile_store
-from telegram_tools.records import record_marks
+from telegram_tools.records import TEXT_RENDERING, record_marks
 from telegram_tools.surface import execute_hint
 
 CONFIG_FILE = "config.json"
@@ -65,6 +65,9 @@ def open_archive(home: Path | None = None) -> Archive:
     The file is created here, empty, before SQLite ever sees it: SQLite makes
     a new database at the process umask and gives the WAL and shm files the
     database's mode, so a 0600 file first is what keeps all three private.
+
+    `render_version` is what lets `archive status` name the scopes an older
+    text rendering wrote; see `records.TEXT_RENDERING`.
     """
     paths = paths_for(home)
     make_private_dir(paths.root)
@@ -75,6 +78,7 @@ def open_archive(home: Path | None = None) -> Archive:
         budgets=budgets_for(home),
         core_version=core_version(),
         tool_version=__version__,
+        render_version=TEXT_RENDERING,
     )
 
 
@@ -280,6 +284,29 @@ def format_hits(hits: Sequence[SearchHit]) -> str:
     return "\n".join(lines)
 
 
+# The two export formats with fixed columns; the others carry the extras as keys.
+MARKED_FORMATS = ("markdown", "html")
+
+
+def export_rows(hits: Sequence[SearchHit], fmt: str) -> list[dict[str, Any]]:
+    """The rows `archive export` hands the writer: marked in front of the text for markdown and html.
+
+    Those two show columns and no keys, so a forward and a copy of it were one
+    row twice; the marks ride in the text and the highlight, as the live
+    exports' do. `[media]` is left to the media column when it counts a file.
+    `json`, `jsonl` and `csv` keep the text as stored.
+    """
+    rows = [hit.to_dict() for hit in hits]
+    if fmt not in MARKED_FORMATS:
+        return rows
+    for row in rows:
+        marks = record_marks(row, media=not row.get("media"))
+        row["text"] = marks + str(row.get("text") or "")
+        if row.get("highlight"):
+            row["highlight"] = marks + str(row["highlight"])
+    return rows
+
+
 def format_plan(plan: Plan, *, execute: bool) -> str:
     """What `retention` and `forget` show before the gate: the target, the numbers, the mode."""
     mutation = plan.mutations[0]
@@ -317,6 +344,7 @@ __all__ = [
     "config_path",
     "confirm_typed_name",
     "core_version",
+    "export_rows",
     "format_coverage",
     "format_hits",
     "format_plan",
