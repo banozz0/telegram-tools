@@ -27,7 +27,10 @@ Three mappings are worth stating, because they decide what a rule can match:
   message in the chat.
 * **A forum topic is the scope.** The rid of an event in a forum is
   `tg:topic:<chat>:<topic>`, exactly as the archive scopes it, so a rule
-  filtered to one topic sees only that topic.
+  filtered to one topic sees only that topic. A forum has no chat scope at
+  all: `TelegramArchiveSource` lists one scope per topic and none for the
+  group, so General is `tg:topic:<chat>:1` here too, however silent Telegram
+  is about it.
 * **`edit_version` is what makes a re-delivery a duplicate.** For an edit it is
   the edit's own timestamp, so each edit is its own event and the same edit
   arriving twice is not. For a reaction Telegram sends no version, so it is a
@@ -57,6 +60,7 @@ from telegram_tools._core.runner import RateLimited
 from telegram_tools.adapters.archive import _iso
 from telegram_tools.adapters.media import links_of, media_candidate
 from telegram_tools.envelope import PLATFORM, PREFIX
+from telegram_tools.manage import GENERAL_TOPIC_ID
 from telegram_tools.resolver import resolve_chat
 from telegram_tools.send import SendNotAllowedError, require_send_allowed
 
@@ -86,23 +90,43 @@ def scope_rid(chat_id: int, topic_id: int | None) -> str:
     return str(_rid.make(PREFIX, "topic", chat_id, topic_id))
 
 
+def is_forum(message: Any) -> bool:
+    """Whether the message's own chat has topics, off the entity Telethon attaches.
+
+    `_preprocess_updates` hangs the update container's chats on the update and
+    `Message._finish_init` takes the message's own out of them, so a handler
+    and a history walk both have it: on 2026-09-18 every message read out of
+    the fixture forum carried a full `Channel` with `forum=True`, `min=False`.
+    A message that somehow arrives without its chat answers False, which is
+    the answer every message got before this existed.
+    """
+    return bool(getattr(getattr(message, "chat", None), "forum", False))
+
+
 def topic_of(message: Any) -> int | None:
     """The forum topic a message belongs to, or None outside a forum.
 
     Telethon puts the topic on `reply_to`: `forum_topic` marks the message as
     living in one, `reply_to_top_id` is the topic when the message also replies
-    to something inside it, and `reply_to_msg_id` is the topic otherwise. A
-    forum's General topic carries no id at all, which is 1 in Telegram's own
-    numbering.
+    to something inside it, and `reply_to_msg_id` is the topic otherwise.
+
+    General is the topic Telegram says nothing about. It has no service message
+    that opened it, so there is no id to point at: a message there carries no
+    reply header, and a reply there carries `forum_topic` *off* and the
+    replied-to id -- both read live off `-1004458956767` on 2026-09-18, and the
+    second is why the flag has to be honoured before the chat is. Every message
+    in a forum is in a topic, so one whose header names none is General's, which
+    is 1 in Telegram's own numbering and the rid the archive, the menu's topic
+    list and `send --topic 1` already use for it (card agent-bo-95422355).
     """
     reply_to = getattr(message, "reply_to", None)
     if reply_to is None or not getattr(reply_to, "forum_topic", False):
-        return None
+        return GENERAL_TOPIC_ID if is_forum(message) else None
     top = getattr(reply_to, "reply_to_top_id", None)
     if top:
         return int(top)
     inner = getattr(reply_to, "reply_to_msg_id", None)
-    return int(inner) if inner else 1
+    return int(inner) if inner else GENERAL_TOPIC_ID
 
 
 def sender_rid_of(message: Any) -> str | None:
@@ -193,12 +217,19 @@ def reaction_version(reactions: Any) -> int:
     return int(digest, 16)
 
 
-def reaction_event(update: Any, *, chat_id: int, occurred_at: str | None = None) -> dict[str, Any] | None:
-    """`UpdateMessageReactions` or `UpdateBotMessageReaction` as a `reaction` event."""
+def reaction_event(update: Any, *, chat_id: int, forum: bool = False, occurred_at: str | None = None) -> dict[str, Any] | None:
+    """`UpdateMessageReactions` or `UpdateBotMessageReaction` as a `reaction` event.
+
+    A reaction update names its topic in `top_msg_id` and, for General, names
+    none -- the same silence a General message keeps. It carries no message to
+    read the chat off, so `forum` is the caller's answer to "does this chat
+    have topics"; without it a rule scoped to General would match the message
+    and miss every reaction on it.
+    """
     message_id = getattr(update, "msg_id", None)
     if message_id is None:
         return None
-    topic = getattr(update, "top_msg_id", None)
+    topic = getattr(update, "top_msg_id", None) or (GENERAL_TOPIC_ID if forum else None)
     reactions = getattr(update, "reactions", None)
     if reactions is None:
         # The bot-side update lists the reactions instead of summarising them.
@@ -224,7 +255,14 @@ def reaction_event(update: Any, *, chat_id: int, occurred_at: str | None = None)
 
 
 def action_event(event: Any) -> list[dict[str, Any]]:
-    """A `ChatAction` as `member_join` or `member_leave` events, one per person it names."""
+    """A `ChatAction` as `member_join` or `member_leave` events, one per person it names.
+
+    Telegram files the service message that announces a join in a topic --
+    General, in a forum -- and that message is the action's own, so it says
+    where the event belongs. A `ChatAction` that carries no message (a
+    participant update rather than a service message) leaves it the chat's,
+    which is the only answer available and the right one outside a forum.
+    """
     if event.user_joined or event.user_added:
         kind = "member_join"
     elif event.user_left or event.user_kicked:
@@ -232,7 +270,8 @@ def action_event(event: Any) -> list[dict[str, Any]]:
     else:
         return []
     marked = int(getattr(event, "chat_id", 0) or 0)
-    rid = scope_rid(marked, None)
+    announced = getattr(event, "action_message", None)
+    rid = scope_rid(marked, None if announced is None else topic_of(announced))
     out: list[dict[str, Any]] = []
     for user_id in getattr(event, "user_ids", None) or ():
         member = str(_rid.make(PREFIX, "user", user_id))
@@ -373,6 +412,10 @@ class TelegramEventSource:
         # How many events the queue dropped because the runner fell behind.
         # Reported by `watch status`, never swallowed.
         self.dropped = 0
+        # Which chats have topics, remembered per chat id. A message says so
+        # itself; a reaction update does not, so the first reaction in a chat
+        # nothing has been seen in costs one resolve and every later one none.
+        self.forums: dict[int, bool] = {}
 
     # -- the handlers ------------------------------------------------------
 
@@ -390,10 +433,12 @@ class TelegramEventSource:
             self.dropped += 1
 
     async def _on_message(self, event: Any) -> None:
+        self._note_forum(event.message)
         for record in message_events(event.message, kind="message"):
             self.put(record)
 
     async def _on_edit(self, event: Any) -> None:
+        self._note_forum(event.message)
         for record in message_events(event.message, kind="edit"):
             self.put(record)
 
@@ -406,9 +451,35 @@ class TelegramEventSource:
         chat_id = _peer_id(peer)
         if chat_id is None:
             return
-        record = reaction_event(update, chat_id=chat_id)
+        record = reaction_event(update, chat_id=chat_id, forum=await self._is_forum(chat_id))
         if record is not None:
             self.put(record)
+
+    def _note_forum(self, message: Any) -> None:
+        """Remember what a message already told us about its chat, for free."""
+        chat = getattr(message, "chat", None)
+        marked = getattr(message, "chat_id", None)
+        if chat is not None and marked is not None:
+            self.forums[int(marked)] = bool(getattr(chat, "forum", False))
+
+    async def _is_forum(self, chat_id: int) -> bool:
+        """Whether `chat_id` has topics, asked once and then remembered.
+
+        A reaction update carries no entity, and General names no topic, so
+        without this a reaction in General would be the one event left with the
+        chat rid. A chat that will not resolve answers False -- the reaction is
+        still delivered, under the rid it had before this existed.
+        """
+        known = self.forums.get(chat_id)
+        if known is not None:
+            return known
+        try:
+            resolved = await resolve_chat(self.client, chat_id)
+        except Exception:  # noqa: BLE001 - any refusal is the same fact: nothing says it has topics
+            return False
+        answer = bool(getattr(resolved.entity, "forum", False))
+        self.forums[chat_id] = answer
+        return answer
 
     # -- the Protocol -------------------------------------------------------
 
@@ -537,6 +608,7 @@ __all__ = [
     "TelegramMessageSender",
     "action_event",
     "attachments_of",
+    "is_forum",
     "message_events",
     "reaction_event",
     "reaction_version",

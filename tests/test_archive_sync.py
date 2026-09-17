@@ -47,7 +47,7 @@ def run(coroutine):
     return asyncio.run(coroutine)
 
 
-def message(number: int, *, topic: int | None = None, media=None):
+def message(number: int, *, topic: int | None = None, media=None, forum: bool = False):
     when = datetime(2026, 9, 1, tzinfo=UTC) + timedelta(minutes=number)
     reply_to = SimpleNamespace(reply_to_msg_id=topic, reply_to_top_id=None, forum_topic=True) if topic else None
     return SimpleNamespace(
@@ -59,12 +59,16 @@ def message(number: int, *, topic: int | None = None, media=None):
         reply_to=reply_to,
         media=media,
         edit_date=None,
+        # Telethon hangs the chat on every message it builds, and it is the
+        # only thing that says a message with no topic header is in General
+        # rather than in a group with no topics at all.
+        chat=SimpleNamespace(forum=forum, megagroup=True),
     )
 
 
-def history(count: int, *, start: int = 1, topic: int | None = None) -> list:
+def history(count: int, *, start: int = 1, topic: int | None = None, forum: bool = False) -> list:
     """`count` messages of one scope, newest first, as Telegram serves them."""
-    return [message(number, topic=topic) for number in range(start + count - 1, start - 1, -1)]
+    return [message(number, topic=topic, forum=forum) for number in range(start + count - 1, start - 1, -1)]
 
 
 def _dialog(chat_id, title, *, forum=False, channel=False, username=None):
@@ -89,8 +93,8 @@ class FakeClient:
         ]
         self.topics = {FORUM_ID: [SimpleNamespace(id=141, title="Deploys", top_message=900), SimpleNamespace(id=217, title="Support", top_message=901)]}
         self.rows = rows if rows is not None else {
-            (FORUM_ID, 141): history(40, topic=141),
-            (FORUM_ID, 217): history(5, start=100, topic=217),
+            (FORUM_ID, 141): history(40, topic=141, forum=True),
+            (FORUM_ID, 217): history(5, start=100, topic=217, forum=True),
             (CHANNEL_ID, None): history(7, start=300),
         }
         self.fail_after = fail_after

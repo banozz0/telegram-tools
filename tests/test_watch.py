@@ -32,13 +32,17 @@ from telegram_tools._core import rules as _rules
 from telegram_tools._core import runner as _runner
 from telegram_tools._core.contract import CodedError, validate_envelope
 from telegram_tools.adapters import events as watch_events
+from telegram_tools.adapters.archive import scope_rid_for
 from telegram_tools.client import detached_session
 from telegram_tools.config import SendDestination
-from test_archive_sync import ACCOUNT, CHANNEL_ID, FORUM_ID, HARRY, IDENTITY, home  # noqa: F401 - fixtures
+from test_archive_sync import ACCOUNT, CHANNEL_ID, FORUM_ID, HARRY, IDENTITY, history, home  # noqa: F401 - fixtures
 from test_archive_sync import FakeClient as ArchiveFakeClient
 from test_adapters import holding, member
 
 CHAT_RID = f"tg:chat:{FORUM_ID}"
+# Where a message with no topic header in that forum really is: General, topic
+# 1, the one every other surface here already calls it (card agent-bo-95422355).
+GENERAL_RID = f"tg:topic:{FORUM_ID}:1"
 TOPIC_RID = f"tg:topic:{FORUM_ID}:141"
 ALERTS_RID = f"tg:chat:{CHANNEL_ID}"
 BOT = SimpleNamespace(id=123456, first_name="Alerts", username="alertsbot", bot=True)
@@ -51,11 +55,46 @@ def run(coroutine):
 # -- fake messages and updates -----------------------------------------------
 
 
+def fake_chat(chat_id: int | None):
+    """The chat entity Telethon hangs on every message it builds.
+
+    `_preprocess_updates` puts the update container's own chats on the update
+    and `Message._finish_init` reads the message's own out of them, so a
+    handler always has it; checked live on 2026-09-18 against the fixture
+    forum, where every message's `chat` was a full `Channel` with `forum=True`
+    and `min=False`. Without it here no fake could tell a forum from a plain
+    group, which is exactly the difference between "no topic" and "General".
+    """
+    return SimpleNamespace(id=abs(chat_id or 0), forum=chat_id == FORUM_ID, megagroup=True)
+
+
+def fake_reply_header(topic: int | None, replies_to: int | None):
+    """The `MessageReplyHeader` Telegram really sends, for each of the four cases.
+
+    All four read off `-1004458956767` on 2026-09-18 (`message reply` and
+    `iter_messages`), because the one this tool got wrong is the one that is
+    not there at all:
+
+    * a message in General -- no header;
+    * a reply inside General -- `forum_topic` off, the replied-to id, no top id;
+    * a message in topic T -- `forum_topic` on, `reply_to_msg_id` T, no top id;
+    * a reply inside topic T -- `forum_topic` on, top id T, the replied-to id.
+    """
+    if topic and replies_to:
+        return SimpleNamespace(reply_to_msg_id=replies_to, reply_to_top_id=topic, forum_topic=True)
+    if topic:
+        return SimpleNamespace(reply_to_msg_id=topic, reply_to_top_id=None, forum_topic=True)
+    if replies_to:
+        return SimpleNamespace(reply_to_msg_id=replies_to, reply_to_top_id=None, forum_topic=False)
+    return None
+
+
 def fake_message(
     number: int,
     *,
     text: str = "deploy finished",
     topic: int | None = None,
+    replies_to: int | None = None,
     chat_id: int = FORUM_ID,
     links: tuple[str, ...] = (),
     document=None,
@@ -68,13 +107,12 @@ def fake_message(
     for url in links:
         offset = len(body[: body.index(url)].encode("utf-16-le")) // 2
         entities.append(MessageEntityUrl(offset=offset, length=len(url)))
-    reply_to = (
-        SimpleNamespace(reply_to_msg_id=topic, reply_to_top_id=None, forum_topic=True) if topic else None
-    )
+    reply_to = fake_reply_header(topic, replies_to)
     media = None if document is None else SimpleNamespace(document=document, photo=None)
     return SimpleNamespace(
         id=number,
         chat_id=chat_id,
+        chat=fake_chat(chat_id),
         date=datetime(2026, 9, 1, tzinfo=UTC) + timedelta(minutes=number),
         raw_text=body,
         message=body,
@@ -101,9 +139,9 @@ def reactions(*pairs):
 
 
 def test_a_plain_message_is_one_event_scoped_to_its_chat():
-    (record,) = watch_events.message_events(fake_message(7))
+    (record,) = watch_events.message_events(fake_message(7, chat_id=CHANNEL_ID))
     event = _rules.Event.from_dict(record)
-    assert (event.platform, event.rid, event.subject_id, event.kind) == ("telegram", CHAT_RID, "7", "message")
+    assert (event.platform, event.rid, event.subject_id, event.kind) == ("telegram", ALERTS_RID, "7", "message")
     assert event.sender_rid == f"tg:user:{HARRY.id}" and not event.sender_is_bot
     assert record["cursor"] == "7"
 
@@ -112,6 +150,51 @@ def test_a_message_in_a_forum_topic_is_scoped_to_the_topic_not_the_chat():
     (record,) = watch_events.message_events(fake_message(9, topic=141))
     assert record["rid"] == TOPIC_RID
     assert record["metadata"]["topic_id"] == 141
+
+
+def test_a_general_message_is_scoped_to_the_general_topic_the_archive_already_uses():
+    """Card agent-bo-95422355: General had two names, and the topic rid is the one.
+
+    Live on 2026-09-18: message 54 went to General with `send --topic 1` and
+    moved the runner's cursor for `tg:chat:-1004458956767`, while `archive
+    sync --scope tg:topic:-1004458956767:1` held the same three messages. A
+    forum has no chat scope at all -- `TelegramArchiveSource` lists one scope
+    per topic -- so the chat rid was a scope nothing else wrote to.
+    """
+    (record,) = watch_events.message_events(fake_message(54))
+    assert record["rid"] == GENERAL_RID
+    # The archive's own spelling of the same place, from the other adapter.
+    assert record["rid"] == scope_rid_for(str(FORUM_ID), 1)
+    assert record["metadata"]["topic_id"] == 1
+
+
+def test_a_rule_scoped_to_general_from_the_topic_list_matches_a_general_message():
+    """The menu lists General with the other topics, so this is how a person scopes it."""
+    rule = a_rule(filter={"keywords": ["deploy"], "scopes": [GENERAL_RID]})
+    (record,) = watch_events.message_events(fake_message(54))
+    assert rule.filter.matches(_rules.Event.from_dict(record), IDENTITY.id)
+
+
+def test_a_reply_inside_general_is_general_and_not_the_message_it_replies_to():
+    """Live: a reply in General carries `forum_topic` off and the replied-to id.
+
+    Nothing may read that id as a topic, and the message is still General's.
+    """
+    (record,) = watch_events.message_events(fake_message(57, replies_to=56))
+    assert record["rid"] == GENERAL_RID
+    assert record["metadata"]["reply_to"] == 56
+
+
+def test_a_reply_inside_a_topic_is_the_topic_and_not_the_message_it_replies_to():
+    (record,) = watch_events.message_events(fake_message(58, topic=141, replies_to=55))
+    assert record["rid"] == TOPIC_RID
+    assert record["metadata"]["reply_to"] == 55
+
+
+def test_a_message_in_a_plain_group_has_no_topic_at_all():
+    """Only a forum turns "no topic header" into General; a group has no topics."""
+    assert watch_events.topic_of(fake_message(7, chat_id=CHANNEL_ID)) is None
+    assert watch_events.topic_of(fake_message(7)) == 1
 
 
 def test_one_message_carrying_a_link_and_a_file_is_three_events_with_three_keys():
@@ -183,16 +266,59 @@ def test_a_reaction_update_maps_to_the_message_it_is_on():
     assert record["cursor"] == ""
 
 
+def test_a_reaction_in_general_is_the_general_topic_too():
+    """A reaction update names no topic for General, exactly as a message does not.
+
+    The update carries no message to read the chat off, so the source that
+    registered the handler says whether the chat is a forum; without that a
+    rule scoped to General would see the message and miss the reaction on it.
+    """
+    update = SimpleNamespace(
+        peer=SimpleNamespace(channel_id=1000000001),
+        msg_id=54,
+        top_msg_id=None,
+        reactions=reactions(("👍", 1)),
+        actor=SimpleNamespace(user_id=777),
+    )
+    record = watch_events.reaction_event(update, chat_id=FORUM_ID, forum=True)
+    assert record["rid"] == GENERAL_RID
+    assert record["metadata"]["topic_id"] == 1
+    # The same update in a chat that has no topics stays the chat's.
+    plain = watch_events.reaction_event(update, chat_id=CHANNEL_ID)
+    assert plain["rid"] == ALERTS_RID
+
+
 def test_joins_and_leaves_become_one_event_per_person():
     joined = watch_events.action_event(
-        SimpleNamespace(user_joined=True, user_added=False, user_left=False, user_kicked=False, chat_id=FORUM_ID, user_ids=[777, 888], action_message=None)
+        SimpleNamespace(user_joined=True, user_added=False, user_left=False, user_kicked=False, chat_id=CHANNEL_ID, user_ids=[777, 888], action_message=None)
     )
     left = watch_events.action_event(
-        SimpleNamespace(user_joined=False, user_added=False, user_left=True, user_kicked=False, chat_id=FORUM_ID, user_ids=[555], action_message=None)
+        SimpleNamespace(user_joined=False, user_added=False, user_left=True, user_kicked=False, chat_id=CHANNEL_ID, user_ids=[555], action_message=None)
     )
     assert [record["kind"] for record in joined] == ["member_join", "member_join"]
     assert [record["subject_id"] for record in joined] == ["tg:user:777", "tg:user:888"]
+    assert [record["rid"] for record in joined] == [ALERTS_RID, ALERTS_RID]
     assert left[0]["kind"] == "member_leave" and left[0]["subject_id"] == "tg:user:555"
+
+
+def test_a_join_in_a_forum_is_scoped_where_telegram_files_its_service_message():
+    """Telegram posts the join into General, and that is where the archive holds it.
+
+    The action's own service message says which topic it landed in, so the
+    join is scoped there rather than to a chat rid a forum never has.
+    """
+    joined = watch_events.action_event(
+        SimpleNamespace(
+            user_joined=True,
+            user_added=False,
+            user_left=False,
+            user_kicked=False,
+            chat_id=FORUM_ID,
+            user_ids=[777],
+            action_message=fake_message(44, text=""),
+        )
+    )
+    assert [record["rid"] for record in joined] == [GENERAL_RID]
 
 
 def test_a_peer_becomes_the_marked_id_every_rid_here_uses():
@@ -317,13 +443,13 @@ def test_a_restart_mid_stream_fires_each_recorded_event_exactly_once(home):
     # Back up: the cursor says 2, so the source replays 3 and 4, and re-serves 2.
     second, restarted = a_runner(home, LoadedRules(a_rule()), sender)
     with second:
-        source = RecordedSource(replays={CHAT_RID: stream})
+        source = RecordedSource(replays={GENERAL_RID: stream})
         restarted.replay(source)
         for record in stream[1:]:
             restarted.handle(record)
         after = fires(second)
 
-    assert source.asked == [(CHAT_RID, "2")]
+    assert source.asked == [(GENERAL_RID, "2")]
     assert len(after) == 4, "each recorded event fired once across the restart"
     assert len(set(after)) == 4
     assert len(sender.sent) == 4
@@ -534,6 +660,22 @@ def test_the_source_replays_a_scope_from_its_cursor_oldest_first(loop_for):
     assert all(int(record["subject_id"]) > 37 for record in records)
     assert client.pages[-1]["min_id"] == 37
     assert all(record["rid"] == f"tg:topic:{FORUM_ID}:141" for record in records)
+
+
+def test_a_replay_of_general_yields_events_in_general_so_its_cursor_can_move(loop_for):
+    """A replay serves the scope it was asked for, General included.
+
+    The runner saves a cursor under the *event's* rid, so General events
+    carrying the chat rid meant `tg:topic:<chat>:1` never advanced: every
+    restart walked the whole of General again, forever.
+    """
+    client = SendingClient(rows={(FORUM_ID, 1): history(4, start=50, forum=True)})
+    client.topics[FORUM_ID] = [SimpleNamespace(id=1, title="General", top_message=902), *client.topics[FORUM_ID]]
+    source = watch_events.TelegramEventSource(client, loop_for(client))
+    records = list(source.replay(GENERAL_RID, "50"))
+    assert sorted(record["subject_id"] for record in records) == ["51", "52", "53"]
+    assert all(record["rid"] == GENERAL_RID for record in records)
+    assert client.pages[-1]["scope"] == (FORUM_ID, 1)
 
 
 def test_a_bot_replays_nothing_because_a_bot_has_no_history(loop_for):
@@ -984,20 +1126,20 @@ def test_the_runner_replays_then_handles_the_live_stream_and_reports_what_it_did
     monkeypatch.setenv("TELEGRAM_SEND_ALLOWLIST", str(CHANNEL_ID))
     add_a_rule(run_watch, capsys, "--alert-to", ALERTS_RID)
     stream = [watch_events.message_events(fake_message(number))[0] for number in (1, 2)]
-    source = RecordedSource(live=stream, replays={CHAT_RID: stream})
+    source = RecordedSource(live=stream, replays={GENERAL_RID: stream})
     code, out, _err, fake = run_watch(["--json", "watch", "run"], capsys=capsys, source=source)
     assert code == 0
     result = envelope_of(out)["result"]
     assert result["events"] == 2 and result["fired"] == 2
     assert result["rules"] == 1
     assert source.registered and source.closed
-    assert [sent["text"].splitlines()[0] for sent in fake.sent] == ["[deploys] message in " + CHAT_RID + " from tg:user:777"] * 2
+    assert [sent["text"].splitlines()[0] for sent in fake.sent] == ["[deploys] message in " + GENERAL_RID + " from tg:user:777"] * 2
     # Every alert ends with the origin marker, which is what a second runner drops on.
     assert all(_rules.carries_marker(sent["text"]) for sent in fake.sent)
 
     # Up again over the same stream: the cursor is at 2, the replay re-serves
     # nothing above it, and the two events it does see are duplicates.
-    code, out, _err, again = run_watch(["--json", "watch", "run"], capsys=capsys, source=RecordedSource(live=stream, replays={CHAT_RID: stream}))
+    code, out, _err, again = run_watch(["--json", "watch", "run"], capsys=capsys, source=RecordedSource(live=stream, replays={GENERAL_RID: stream}))
     assert code == 0
     assert envelope_of(out)["result"]["fired"] == 0
     assert again.sent == []
