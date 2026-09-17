@@ -986,3 +986,353 @@ def test_a_reaction_takes_its_state_off_the_updates_instead_of_fetching_again(ru
     assert envelope_of(out)["result"]["reactions"] == [{"emoji": "🔥", "mine": True}]
     # The Updates already held the new set, so the readback fetch is not made.
     assert carried.fetches == fetched.fetches - 1
+
+
+# -- what a person reads once the write is done ------------------------------
+#
+# A confirmed send or message verb printed its result mapping as indented JSON
+# under its Read back line -- `report.printed_result`, the call kept for the
+# commands whose human output has always been JSON -- so the screen after the
+# y was a dozen lines of `verb`, `chat_id`, `new_message_ids`, `done`. In human
+# mode each now says what it did in one sentence, naming the message and the
+# place the way the banner names it, and keeps its Read back line under it;
+# the mapping is the envelope's alone.
+
+HERMES = f"Team Hermes ({FORUM_ID})"
+DEPLOYS = f"Team Hermes › Deploys ({FORUM_ID}:141)"
+ALERTS = f"Alerts ({CHANNEL_ID})"
+
+
+def after_the_gate(out: str) -> list[str]:
+    """Every line the run printed once the y/N was answered.
+
+    The prompt has no newline of its own and the fake terminal echoes nothing,
+    so whatever the run prints next begins on the prompt's line.
+    """
+    marker = "[y/N]: "
+    assert out.count(marker) == 1, out
+    return out.split(marker, 1)[1].splitlines()
+
+
+DONE_SENTENCES = {
+    "reply": (
+        ["--to", "11", "--text", "on it"],
+        f"Sent message 5001 to {HERMES}, replying to message 11.",
+        "Read back: message 5001 is in Team Hermes",
+    ),
+    "edit": (
+        ["--id", "10", "--text", "deploy 10 fixed"],
+        f"Edited message 10 in {HERMES}.",
+        "Read back: message 10 in Team Hermes now reads the new text",
+    ),
+    "forward": (
+        ["--ids", "11", "--to", CHANNEL],
+        f"Forwarded message 11 to {ALERTS} as message 5001.",
+        "Read back: message 5001 is in Alerts",
+    ),
+    "copy": (
+        ["--ids", "12", "--to", CHANNEL],
+        f"Copied message 12 to {ALERTS} as message 5001.",
+        "Read back: message 5001 is in Alerts",
+    ),
+    "react": (
+        ["--id", "11", "--emoji", "🔥"],
+        f"Added 🔥 to message 11 in {HERMES}.",
+        "Read back: message 11 in Team Hermes carries 🔥",
+    ),
+    "unreact": (
+        ["--id", "13"],
+        f"Removed your reactions from message 13 in {HERMES}.",
+        "Read back: message 13 in Team Hermes carries no reaction of yours",
+    ),
+    "pin": (
+        ["--id", "11"],
+        f"Pinned message 11 in {HERMES}.",
+        "Read back: message 11 in Team Hermes is pinned",
+    ),
+    "unpin": (
+        ["--id", "13"],
+        f"Unpinned message 13 in {HERMES}.",
+        "Read back: message 13 in Team Hermes is not pinned",
+    ),
+    "poll": (
+        ["--topic", "141", "--question", "Ship?", "--option", "yes", "--option", "no"],
+        f"Posted poll message 5001 in {DEPLOYS}.",
+        "Read back: message 5001 is in Team Hermes › Deploys",
+    ),
+    "typing": (
+        ["--seconds", "1"],
+        f"Showed typing in {HERMES} for 1 second(s).",
+        "Read back: unverified: the typing could not be read back (LookupError)",
+    ),
+    "read": (
+        [],
+        f"Marked {HERMES} read.",
+        "Read back: Team Hermes has no unread messages",
+    ),
+    "unread": (
+        [],
+        f"Marked {HERMES} unread.",
+        "Read back: Team Hermes is marked unread",
+    ),
+    "bookmark": (
+        ["--id", "11", "--label", "keep"],
+        f"Bookmarked message 11 in {HERMES} to Saved Messages as message 5001.",
+        "Read back: message 11 from Team Hermes is in Saved Messages as 5001",
+    ),
+    "draft": (
+        ["--topic", "141", "--text", "later: deploy"],
+        f"Saved a draft in {DEPLOYS}.",
+        "Read back: the draft in Team Hermes › Deploys reads the text",
+    ),
+}
+
+
+def test_every_prompted_verb_has_a_done_sentence_here():
+    # `delete` is typed_delete and has its own tests below.
+    assert set(DONE_SENTENCES) == set(ops.VERBS) - {"delete"}
+
+
+@pytest.mark.parametrize("verb", sorted(DONE_SENTENCES))
+def test_a_done_message_verb_prints_one_sentence_then_its_read_back_and_no_json(run_cli, capsys, home, verb, monkeypatch):
+    flags, sentence, readback = DONE_SENTENCES[verb]
+    monkeypatch.setattr(ops.asyncio, "sleep", _no_sleep)
+    code, out, _err, _fake = run_cli(["message", verb, "--chat", FORUM, *flags], capsys=capsys, answers=("y",))
+
+    assert code == 0, out
+    assert after_the_gate(out) == [sentence, readback]
+    assert "{" not in out and '"done"' not in out
+
+
+def test_a_done_send_prints_one_sentence_then_its_read_back_and_no_json(run_cli, capsys, home):
+    """The live case: no --yes, the preview answered y."""
+    code, out, _err, _fake = run_cli(["send", "--chat", FORUM, "--text", "ship it"], capsys=capsys, answers=("y",))
+
+    assert code == 0, out
+    assert after_the_gate(out) == [f"Sent message 5001 to {HERMES}.", "Read back: message 5001 is in Team Hermes"]
+    assert "{" not in out
+
+
+def test_a_done_send_names_the_topic_and_the_message_it_replied_to(run_cli, capsys, home):
+    code, out, _err, _fake = run_cli(
+        ["send", "--chat", FORUM, "--topic", "141", "--text", "ack", "--reply-to", "11"], capsys=capsys, answers=("y",)
+    )
+
+    assert code == 0, out
+    assert after_the_gate(out)[0] == f"Sent message 5001 to {DEPLOYS}, replying to message 11."
+
+
+def test_a_done_send_with_files_says_how_many_went(run_cli, capsys, home, tmp_path):
+    first, second = tmp_path / "a.png", tmp_path / "b.txt"
+    first.write_bytes(b"x")
+    second.write_text("y")
+
+    class FileClient(FakeClient):
+        async def send_file(self, peer, files, *, caption=None, reply_to=None, **_):
+            chat = self._chat(peer)
+            self.calls.append(("send_file", chat, list(files), caption, reply_to))
+            return [self._new(chat, caption or "", media=object()) for _path in files]
+
+    code, out, _err, _fake = run_cli(
+        ["send", "--chat", CHANNEL, "--file", str(first), "--file", str(second)],
+        client=FileClient(),
+        capsys=capsys,
+        answers=("y",),
+    )
+
+    assert code == 0, out
+    assert after_the_gate(out) == [f"Sent message 5001 to {ALERTS} with 2 file(s).", "Read back: message 5001 is in Alerts"]
+
+
+def test_a_send_yes_says_the_same_sentence_with_no_gate_in_front_of_it(run_cli, capsys, home, monkeypatch):
+    monkeypatch.setenv("TELEGRAM_SEND_ALLOWLIST", FORUM)
+    code, out, _err, _fake = run_cli(["send", "--chat", FORUM, "--text", "ship it", "--yes"], capsys=capsys)
+
+    assert code == 0, out
+    banner, *rest = out.splitlines()
+    assert banner.startswith("Acting as: ")
+    assert rest == [f"Sent message 5001 to {HERMES}.", "Read back: message 5001 is in Team Hermes"]
+
+
+def test_a_declined_send_prints_nothing_after_the_prompt(run_cli, capsys, home):
+    code, out, _err, fake = run_cli(["send", "--chat", FORUM, "--text", "ship it"], capsys=capsys, answers=("n",))
+
+    assert code == 1
+    assert fake.calls == []
+    assert after_the_gate(out) == []
+
+
+@pytest.mark.parametrize("verb", sorted(DONE_SENTENCES))
+def test_a_declined_message_verb_prints_nothing_after_the_prompt(run_cli, capsys, home, verb):
+    flags, _sentence, _readback = DONE_SENTENCES[verb]
+    code, out, _err, fake = run_cli(["message", verb, "--chat", FORUM, *flags], capsys=capsys, answers=("n",))
+
+    assert code == 1
+    assert fake.calls == []
+    assert after_the_gate(out) == []
+
+
+def test_a_forward_of_several_names_the_count_and_the_last_one_posted(run_cli, capsys, home):
+    code, out, _err, _fake = run_cli(
+        ["message", "forward", "--chat", FORUM, "--ids", "10,11", "--to", CHANNEL], capsys=capsys, answers=("y",)
+    )
+
+    assert code == 0, out
+    assert after_the_gate(out)[0] == f"Forwarded 2 messages to {ALERTS}, the last as message 5002."
+
+
+def test_a_forward_into_a_topic_names_the_topic_it_landed_in(run_cli, capsys, home):
+    code, out, _err, _fake = run_cli(
+        ["message", "forward", "--chat", CHANNEL, "--ids", "300", "--to", FORUM, "--to-topic", "141"], capsys=capsys, answers=("y",)
+    )
+
+    assert code == 0, out
+    assert after_the_gate(out)[0] == f"Forwarded message 300 to {DEPLOYS} as message 5001."
+
+
+def test_an_unreact_names_what_the_call_took_off_even_when_an_emoji_was_named(run_cli, capsys, home):
+    # The call is an empty reaction list, which Telegram reads as every reaction
+    # of this identity's, so naming only the emoji would claim less than it did.
+    code, out, _err, fake = run_cli(
+        ["message", "unreact", "--chat", FORUM, "--id", "13", "--emoji", "👍"], capsys=capsys, answers=("y",)
+    )
+
+    assert code == 0, out
+    assert fake.calls == [("react", FORUM_ID, 13, [])]
+    assert after_the_gate(out) == [
+        f"Removed your reactions from message 13 in {HERMES}.",
+        "Read back: message 13 in Team Hermes carries no reaction of yours",
+    ]
+
+
+def test_a_cleared_draft_says_it_was_taken_back(run_cli, capsys, home):
+    code, out, _err, _fake = run_cli(
+        ["message", "draft", "--chat", FORUM, "--clear"], client=_drafting_client(), capsys=capsys, answers=("y",)
+    )
+
+    assert code == 0, out
+    assert after_the_gate(out) == [f"Removed the draft in {HERMES}.", "Read back: Team Hermes holds no draft"]
+
+
+def test_an_executed_delete_says_how_many_went_and_from_where(run_cli, capsys, home):
+    code, out, _err, _fake = run_cli(
+        ["message", "delete", "--chat", FORUM, "--ids", "10,11", "--execute"], capsys=capsys, answers=("DELETE",)
+    )
+
+    assert code == 0, out
+    after = out.split("Type DELETE to continue: ", 1)[1].splitlines()
+    assert after == [f"Deleted 2 message(s) from {HERMES}.", "Read back: 2 message(s) gone from Team Hermes"]
+    assert "{" not in out
+
+
+def test_a_delete_dry_run_ends_on_its_own_tail_and_prints_no_json(run_cli, capsys, home):
+    code, out, _err, fake = run_cli(["message", "delete", "--chat", FORUM, "--ids", "10,11"], capsys=capsys)
+
+    assert code == 0
+    assert fake.calls == []
+    assert out.splitlines()[-1] == "Dry-run: 2 message(s) would be deleted. Add --execute to do it; DELETE is asked for then."
+    assert "{" not in out
+
+
+def test_a_delete_nobody_typed_DELETE_for_prints_nothing_more(run_cli, capsys, home):
+    code, out, _err, fake = run_cli(
+        ["message", "delete", "--chat", FORUM, "--ids", "10", "--execute"], capsys=capsys, answers=("nope",)
+    )
+
+    assert code == 1
+    assert fake.calls == []
+    assert out.splitlines()[-1] == "Type DELETE to continue: Cancelled - DELETE was not typed."
+
+
+def test_under_json_the_sentence_stays_off_both_streams_and_the_result_keeps_its_keys(run_cli, capsys, home):
+    code, out, err, _fake = run_cli(
+        ["--json", "message", "reply", "--chat", FORUM, "--to", "11", "--text", "on it"], capsys=capsys, answers=("y",)
+    )
+
+    envelope = envelope_of(out)  # one object on stdout, nothing before or after it
+    assert code == 0
+    assert envelope["result"] == {
+        "verb": "reply",
+        "chat_id": FORUM_ID,
+        "message_ids": [11],
+        "new_message_ids": [5001],
+        "done": True,
+        "dry_run": False,
+        "cancelled": False,
+    }
+    assert envelope["evidence"]["readback"] == "message 5001 is in Team Hermes"
+    assert "Sent message" not in out + err and "Read back:" not in out + err
+
+    code, out, err, _fake = run_cli(["--json", "send", "--chat", FORUM, "--text", "ship it"], capsys=capsys, answers=("y",))
+    envelope = envelope_of(out)
+    assert code == 0
+    assert envelope["result"] == {
+        "chat_id": FORUM_ID,
+        "topic_id": None,
+        "message_id": 5001,
+        "files": 0,
+        "sent": True,
+        "cancelled": False,
+    }
+    assert "Sent message" not in out + err
+    # The readback also stays in the local audit line.
+    assert audit_lines(home)[-1]["evidence"]["readback"] == "message 5001 is in Team Hermes"
+
+
+def test_under_json_a_declined_send_and_a_delete_dry_run_keep_their_results(run_cli, capsys, home):
+    code, out, _err, _fake = run_cli(["--json", "send", "--chat", FORUM, "--text", "ship it"], capsys=capsys, answers=("n",))
+    assert code == 1
+    assert envelope_of(out)["result"] == {
+        "chat_id": FORUM_ID,
+        "topic_id": None,
+        "message_id": None,
+        "files": 0,
+        "sent": False,
+        "cancelled": True,
+    }
+
+    code, out, _err, _fake = run_cli(["--json", "message", "delete", "--chat", FORUM, "--ids", "10,11"], capsys=capsys)
+    assert code == 0
+    assert envelope_of(out)["result"] == {
+        "verb": "delete",
+        "chat_id": FORUM_ID,
+        "message_ids": [10, 11],
+        "new_message_ids": [],
+        "done": False,
+        "dry_run": True,
+        "cancelled": False,
+        "deleted": 0,
+    }
+
+
+def test_a_confirmed_send_from_the_menu_lands_one_sentence_and_its_read_back_above_done(home, monkeypatch, capsys):
+    """The real menu into the real command: the screen after the y, as a person saw it."""
+    from telegram_tools import menu
+    from telegram_tools.models import ChatChoice
+    from test_menu import SEND, FakeSession
+
+    fake = FakeClient()
+
+    class Session(FakeSession):
+        async def client(self):
+            return fake
+
+    session = Session(chats=[ChatChoice(id=FORUM_ID, title="Team Hermes", username=None, type="forum_group")], topics=[])
+    session.config.send_allowlist = ()
+    # The confirm reads the real `input`; a terminal echoes the typed y and ends the prompt's line.
+    monkeypatch.setattr(cli.sys, "stdin", SimpleNamespace(isatty=lambda: True, read=lambda: "", readline=lambda: print("y") or "y\n"))
+    # 3 1 = write > send, 1 = forum groups, 1 = Team Hermes, 2 = Message, then
+    # the body, 5 = Send it, Enter = main menu, 0 = exit.
+    keys = iter([*SEND, "1", "1", "2", "ship it", ".", "5", "", "0"])
+    code = asyncio.run(menu.run_menu(read=lambda _prompt: next(keys), write=print, session=session, runner=cli.run))
+
+    assert code == 0
+    assert [call[0] for call in fake.calls] == ["send_message"]
+    lines = capsys.readouterr().out.splitlines()
+    done = next(index for index, line in enumerate(lines) if line == "Main › Write › Send › Team Hermes › Done")
+    assert lines[done - 3 : done] == [
+        "Send it? [y/N]: y",
+        f"Sent message 5001 to {HERMES}.",
+        "Read back: message 5001 is in Team Hermes",
+    ]
+    assert not any(line.lstrip().startswith(("{", "}", '"message_id"')) for line in lines)

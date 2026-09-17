@@ -78,7 +78,7 @@ from telegram_tools._core import blueprint as _blueprint
 from telegram_tools.adapters.blueprint import TelegramBlueprintPort, chat_kind
 from telegram_tools.resolver import EntityResolutionError, resolve_chat
 from telegram_tools.search import format_message_records, search_messages
-from telegram_tools.send import SendTarget, confirm_send, format_send_preview, require_send_allowed, send_message
+from telegram_tools.send import SendTarget, confirm_send, format_send_preview, format_sent, require_send_allowed, send_message
 from telegram_tools.topics import get_forum_topics, get_forum_topics_by_ids, in_id_order
 from telegram_tools.writes import build_plan, read_back, recheck_for, require_rights
 from telegram_tools import __version__
@@ -1537,6 +1537,9 @@ async def _run_send(client, args, config, *, report: Reporter | None = None) -> 
 
     status = "cancelled" if result.cancelled else "ok"
     if status == "ok":
+        if not report.machine:
+            # What was done, above what was read back; the mapping is the envelope's.
+            report.info(format_sent(_place(destination), result, reply_to=reply_to))
         evidence = await read_back(
             "the scheduled message" if at is not None else "the sent message",
             (lambda: _scheduled_message(client, peer, destination, result.message_id, at))
@@ -1545,11 +1548,13 @@ async def _run_send(client, args, config, *, report: Reporter | None = None) -> 
         )
         report.set_evidence(evidence)
         report.audit(plan, status=status, evidence=evidence)
-    payload = result.to_dict()
-    if at is not None and not result.cancelled and not report.machine:
-        print(watch_ops.format_schedule_created({**payload, "rid": destination.rid, "at": at.isoformat(), "guarantee": watch_ops.SERVER_HELD, "next": at.isoformat()}))
-    report.printed_result(payload, status=status)
+    report.result(result.to_dict(), status=status)
     return 1 if result.cancelled else 0
+
+
+def _place(target: Target) -> str:
+    """A target as the banner names it, `<title> (<rid id>)`, for a sentence to reuse."""
+    return f"{target.display} ({_rid.parse(target.rid).id})"
 
 
 async def _scheduled_message(client, peer, destination, message_id, at) -> str:
@@ -1752,9 +1757,7 @@ async def _run_message(client, args, config, *, report: Reporter | None = None) 
     # The topic's own rid id, `<chat>:<topic>`, carries the topic without
     # borrowing the title's place, so the prefix has nothing left to do. The
     # source `Topic` line keeps its id-first shape: it has no rid beside it.
-    to_line = None
-    if to_target is not None:
-        to_line = f"{to_target.display} ({_rid.parse(to_target.rid).id})"
+    to_line = None if to_target is None else _place(to_target)
     preview = message_ops.format_preview(
         op,
         actor=actor,
@@ -1772,7 +1775,8 @@ async def _run_message(client, args, config, *, report: Reporter | None = None) 
     if verb == "delete" and not execute:
         report.info(preview)
         outcome = message_ops.Outcome(verb, resolved.id, tuple(ids), dry_run=True, done=False, extra={"deleted": 0})
-        report.printed_result(outcome.to_dict(), status="dry_run")
+        # The preview's own tail is the sentence here; the mapping is the envelope's.
+        report.result(outcome.to_dict(), status="dry_run")
         return 0
 
     if verb == "delete":
@@ -1792,7 +1796,7 @@ async def _run_message(client, args, config, *, report: Reporter | None = None) 
 
     if confirm is not None and not confirm():
         outcome = message_ops.Outcome(verb, resolved.id, tuple(ids), done=False, cancelled=True)
-        report.printed_result(outcome.to_dict(), status="cancelled")
+        report.result(outcome.to_dict(), status="cancelled")
         return 1
 
     # -- re-derivation ---------------------------------------------------
@@ -1842,6 +1846,9 @@ async def _run_message(client, args, config, *, report: Reporter | None = None) 
             )
 
     outcome = await message_ops.perform(client, request, bookmark_row=bookmark_row if verb == "bookmark" else None)
+    if not report.machine:
+        # What was done, above what was read back; the mapping is the envelope's.
+        report.info(message_ops.format_done(request, outcome, where=_place(target), destination=to_line))
 
     evidence = await read_back(
         f"the {verb}",
@@ -1851,7 +1858,7 @@ async def _run_message(client, args, config, *, report: Reporter | None = None) 
     )
     report.set_evidence(evidence)
     report.audit(plan, status="ok", evidence=evidence)
-    report.printed_result(outcome.to_dict(), status="ok")
+    report.result(outcome.to_dict(), status="ok")
     return 0
 
 

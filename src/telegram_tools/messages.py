@@ -657,6 +657,57 @@ async def perform(client, request: Request, *, sleep=asyncio.sleep, bookmark_row
     raise ValueError(f"Unknown message verb: {verb}")
 
 
+def format_done(request: Request, outcome: Outcome, *, where: str, destination: str | None = None) -> str:
+    """The one sentence a person reads once a verb went through.
+
+    What the call did, to which message, and where: `where` and `destination`
+    are spelled the way the banner spells a place, `<title> (<rid id>)`. The
+    Read back line under it says what Telegram showed afterwards, and the ids
+    for anything that parses are in `result`, under --json.
+    """
+    verb = request.verb
+    ids = outcome.message_ids
+    new = outcome.new_ids
+    first = ids[0] if ids else None
+
+    if verb == "reply":
+        return f"Sent message {new[0]} to {where}, replying to message {first}."
+    if verb == "edit":
+        return f"Edited message {first} in {where}."
+    if verb == "delete":
+        # One call takes the whole selection or raises, so there is no count
+        # of how far it got to report, and the readback says what is gone.
+        return f"Deleted {len(ids)} message(s) from {where}."
+    if verb in DESTINATION_VERBS:
+        done = "Copied" if verb == "copy" else "Forwarded"
+        if len(ids) == 1:
+            return f"{done} message {first} to {destination}" + (f" as message {new[0]}." if new else ".")
+        # Up to --limit ids each way: the count and the newest one posted say
+        # where the run landed without printing two hundred numbers.
+        return f"{done} {len(ids)} messages to {destination}" + (f", the last as message {max(new)}." if new else ".")
+    if verb == "react":
+        return f"Added {request.emoji} to message {first} in {where}."
+    if verb == "unreact":
+        # `perform` sends an empty reaction list, which Telegram reads as every
+        # reaction of this identity's, so that is what the sentence names --
+        # with or without --emoji.
+        return f"Removed your reactions from message {first} in {where}."
+    if verb in ("pin", "unpin"):
+        return f"{'Pinned' if verb == 'pin' else 'Unpinned'} message {first} in {where}."
+    if verb == "poll":
+        return f"Posted poll message {new[0]} in {where}."
+    if verb == "typing":
+        return f"Showed typing in {where} for {request.seconds} second(s)."
+    if verb in ("read", "unread"):
+        return f"Marked {where} {verb}."
+    if verb == "bookmark":
+        saved = f" as message {new[0]}" if new else ""
+        return f"Bookmarked message {first} in {where} to Saved Messages{saved}."
+    if verb == "draft":
+        return f"Removed the draft in {where}." if request.clear else f"Saved a draft in {where}."
+    raise ValueError(f"Unknown message verb: {verb}")
+
+
 async def read_back(client, request: Request, outcome: Outcome, *, where: str, destination: str | None = None) -> str:
     """Fetch what the verb should have left behind and say it, or raise so the caller says `unverified`.
 
@@ -777,6 +828,7 @@ __all__ = [
     "confirm_typed_delete",
     "copy_text",
     "fetch_briefs",
+    "format_done",
     "format_preview",
     "ids_from_search",
     "mentions_in",

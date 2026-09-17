@@ -116,6 +116,27 @@ def format_send_preview(
     return "\n".join(lines)
 
 
+def format_sent(place: str, result: SendResult, *, reply_to: int | None = None) -> str:
+    """The one sentence a person reads once a send went through.
+
+    The id Telegram answered with and where the message went, `place` spelled
+    the way the banner spells it. A `--at` send has not posted yet, so it names
+    the message Telegram is holding, until when, and the guarantee section 10.6
+    wants on the screen. The result mapping is the envelope's, under --json.
+    """
+    if result.scheduled_at is None:
+        line = f"Sent message {result.message_id} to {place}"
+    else:
+        line = f"Scheduled message {result.message_id} in {place} for {result.scheduled_at}"
+    if result.files:
+        line += f" with {result.files} file(s)"
+    if reply_to is not None:
+        line += f", replying to message {reply_to}"
+    if result.scheduled_at is not None:
+        line += f"; Telegram holds it ({result.guarantee})"
+    return line + "."
+
+
 def confirm_send(preview: str, *, read: Callable[[str], str] = input, write: Callable[[str], None] = print) -> bool:
     write(preview)
     answer = read("Send it? [y/N]: ").strip().lower()
