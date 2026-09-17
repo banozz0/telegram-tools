@@ -940,7 +940,8 @@ def _staged_label(kind: str, value: Any) -> str:
         # Three states, not two: a flag left alone is not a flag set to off.
         return "leave alone" if value is None else ("on" if value else "off")
     if value in (None, "", [], ()):
-        return "(none)" if kind not in ("topic", "to_topic") else "(the chat itself)"
+        # An unset row says what unset means, so no label has to talk about blank.
+        return {"topic": "(the chat itself)", "to_topic": "(the chat itself)", "topic_id": "(the chat itself)", "expires": "never"}.get(kind, "(none)")
     if kind == "lines":
         return _preview_line(value)
     if kind == "ids":
@@ -2642,14 +2643,14 @@ MANAGE_FORMS = {
     ("invite", "list"): (("revoked", "The revoked ones instead", "toggle"),),
     ("invite", "create"): (
         ("title", "Title (admins see it)", "text"),
-        ("expires", "Expires (2h, 7d, or a date; blank = never)", "text"),
+        ("expires", "Expires (2h, 7d, or a date)", "expires"),
         ("usage_limit", "How many may join through it", "int"),
         ("request_needed", "Joining needs an admin's approval", "toggle"),
     ),
     ("invite", "revoke"): (("link", "Link, as invite list printed it", "text"),),
-    ("settings", "show"): (("topic", "One topic's own settings (id; blank = the chat)", "int"),),
+    ("settings", "show"): (("topic", "One topic's own settings (id)", "topic_id"),),
     ("settings", "set"): (
-        ("topic", "Change this topic instead of the chat (id)", "int"),
+        ("topic", "Change this topic instead of the chat (id)", "topic_id"),
         ("title", "New name (the chat's, or the topic's)", "text"),
         ("about", "Description (the chat only)", "lines"),
         ("forum", "Topics on this group (off removes every topic)", "onoff"),
@@ -2690,6 +2691,20 @@ def _typed_here(group: str, verb: str, values: dict) -> bool:
     if (group, verb) in MANAGE_TYPED:
         return True
     return (group, verb) == ("settings", "set") and values.get("forum") is False
+
+
+# The run row of a list or a show: it reads, so it promises no question.
+READ_ONLY_RUN_ROW = "Run it (reads only, asks nothing)"
+# Where a form's [value] column starts, unless a longer label pushes it right.
+FORM_LABEL_WIDTH = 44
+
+
+def _manage_run_row(group: str, verb: str, values: dict) -> str:
+    if not manage_ops.OPS[(group, verb)].writes:
+        return READ_ONLY_RUN_ROW
+    return "Run it (dry-run first)" if _typed_here(group, verb, values) else "Do it (shows the preview, then asks)"
+
+
 MANAGE_ROWS = {
     "admin": (
         ("list", "List the creator and admins, with their rights"),
@@ -2769,9 +2784,10 @@ def _flow_manage_verb(group: str, verb: str, title: str):
             staged: dict[str, Any] = {key: (False if kind == "toggle" else None) for key, _label, kind in fields}
             if "limit" in staged:
                 staged["limit"] = manage_ops.LIST_LIMIT
+            width = max(FORM_LABEL_WIDTH, *(len(label) for _key, label, _kind in fields))
             while True:
-                rows = [(key, f"{label:<44} [{_staged_label(kind, staged[key])}]") for key, label, kind in fields]
-                rows.append(("run", "Run it (dry-run first)" if _typed_here(group, verb, staged) else "Do it (shows the preview, then asks)"))
+                rows = [(key, f"{label:<{width}} [{_staged_label(kind, staged[key])}]") for key, label, kind in fields]
+                rows.append(("run", _manage_run_row(group, verb, staged)))
                 choice = choose([label for _key, label in rows], title=form, read=read, write=write, back_label="Back (discards)")
                 if choice is BACK:
                     break
@@ -2786,7 +2802,7 @@ def _flow_manage_verb(group: str, verb: str, title: str):
                         # a toggle has: leave alone, on, off.
                         staged[key] = {None: True, True: False, False: None}[staged[key]]
                         continue
-                    if kind in ("int", "count"):
+                    if kind in ("int", "count", "topic_id"):
                         answer = ask_int(label, read=read, write=write, current=staged[key], minimum=0 if kind == "count" else 1)
                     elif kind == "lines":
                         answer = ask_lines(label, read=read, write=write, current=_preview_line(staged[key]) if staged[key] else None)
@@ -2850,7 +2866,7 @@ FOLDERS_FORMS = {
 }
 FOLDERS_REQUIRED = {"create": ("title",), "edit": ("folder_id",), "delete": ("folder_id",)}
 FOLDERS_ROWS = (
-    ("list", "List your folders, with their chats and categories"),
+    ("list", "List your folders, with their categories and chat counts"),
     ("create", "Make a folder"),
     ("edit", "Change a folder"),
     ("delete", "Delete a folder (dry-run first, then its exact title)"),
@@ -2898,8 +2914,9 @@ def _flow_folders_verb(verb: str, title: str):
         if not fields:
             return _leave(await run_it({}, session=session, runner=runner, read=read, write=write, form=form))
         staged: dict[str, Any] = {key: None for key, _label, _kind in fields}
+        width = max(FORM_LABEL_WIDTH, *(len(label) for _key, label, _kind in fields))
         while True:
-            rows = [(key, f"{label:<44} [{_staged_label(kind, staged[key])}]") for key, label, kind in fields]
+            rows = [(key, f"{label:<{width}} [{_staged_label(kind, staged[key])}]") for key, label, kind in fields]
             rows.append(("run", "Run it (dry-run first)" if typed else "Do it (shows the preview, then asks)"))
             choice = choose([label for _key, label in rows], title=form, read=read, write=write, back_label="Back (discards)")
             if choice is BACK:
