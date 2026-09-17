@@ -149,7 +149,13 @@ def run_cli(home, monkeypatch):
     def run(argv, *, client=None, capsys, answers=("",), isatty=True):
         fake = client or FakeClient(authorized=True)
         replies = list(answers)
-        monkeypatch.setattr(cli, "create_client", lambda _config: fake)
+        def make_client(_config, **kwargs):
+            # What the command asked its connection for, so a test can say
+            # whether it wants updates on it: QR login is the one that does.
+            fake.built_with = kwargs
+            return fake
+
+        monkeypatch.setattr(cli, "create_client", make_client)
 
         async def started(_client, *, authorize=True):
             if authorize:
@@ -460,6 +466,9 @@ def test_auth_qr_draws_a_code_and_redraws_it_until_it_is_scanned(run_cli, home, 
     assert qr.recreated == 1, "an expired code is replaced, not left on screen"
     assert "█" in out, "the QR block itself is drawn"
     assert profiles.load("work", home=home).label == "Sven (@sven)"
+    # Every other command connects without subscribing to updates so it cannot
+    # take the runner's; this one waits for `updateLoginToken` and must.
+    assert client.built_with == {"receive_updates": True}
 
 
 def test_auth_qr_asks_for_the_two_step_password_too(run_cli, capsys, monkeypatch):
