@@ -9,7 +9,7 @@ from telethon.tl.functions.channels import DeleteChannelRequest, LeaveChannelReq
 from telethon.tl.functions.messages import DeleteChatUserRequest, DeleteTopicHistoryRequest
 from telethon.tl.types import InputPeerChat, InputUserSelf
 
-from telegram_tools.models import ContainerDeleteResult, DeleteResult, LeaveResult, TopicInfo
+from telegram_tools.models import ContainerDeleteResult, DeleteResult, LeaveResult, TopicCount, TopicInfo
 from telegram_tools.surface import execute_hint
 
 CLEAR_TOPIC_MESSAGES_WARNING = """\
@@ -76,20 +76,27 @@ async def delete_topic_messages(
 
     ids: list[int] = []
     seen: set[int] = set()
+    counts: list[TopicCount] = []
     for topic in topics:
-        progress(f"Scanning topic {topic.id} ({topic.display_title})")
+        found = 0
         for message_id in await _collect_topic_message_ids(client, chat, topic):
             if message_id not in seen:
                 seen.add(message_id)
                 ids.append(message_id)
+                found += 1
+        # Said once the topic's ids are in, so a person reads which topics the
+        # total below is made of rather than one number for all of them.
+        progress(f"Scanning topic {topic.id} ({topic.display_title}): {found} to clear")
+        counts.append(TopicCount(id=topic.id, title=topic.title, matched=found))
+    rows = tuple(counts)
 
     if not execute:
         progress(f"Dry-run: {len(ids)} topic messages would be cleared")
-        return DeleteResult(matched=len(ids), deleted=0, dry_run=True)
+        return DeleteResult(matched=len(ids), deleted=0, dry_run=True, topics=rows)
 
     if confirm() != "DELETE":
         progress("Clear topic messages cancelled")
-        return DeleteResult(matched=len(ids), deleted=0, dry_run=False, cancelled=True)
+        return DeleteResult(matched=len(ids), deleted=0, dry_run=False, cancelled=True, topics=rows)
 
     # The gate has been answered; check the topics are still the topics that
     # were named before a single message is deleted.
@@ -102,7 +109,7 @@ async def delete_topic_messages(
         deleted += await _delete_batch_with_flood_wait(client, chat, batch, sleep=sleep, progress=progress)
         progress(f"Cleared {deleted}/{len(ids)} topic messages")
 
-    return DeleteResult(matched=len(ids), deleted=deleted, dry_run=False)
+    return DeleteResult(matched=len(ids), deleted=deleted, dry_run=False, topics=rows)
 
 
 # -- deleting the chat or topic itself ------------------------------------

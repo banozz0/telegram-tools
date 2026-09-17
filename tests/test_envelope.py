@@ -385,7 +385,13 @@ def test_a_clear_messages_dry_run_names_its_topics_and_changes_nothing(run_cli, 
     # A dry run is done, not undone: exit 0, and nothing was deleted.
     assert (code, envelope["status"]) == (0, "dry_run")
     assert envelope["plan"]["approval"] == "typed_delete"
-    assert envelope["result"] == {"matched": 2, "cleared": 0, "dry_run": True, "cancelled": False}
+    assert envelope["result"] == {
+        "matched": 2,
+        "cleared": 0,
+        "dry_run": True,
+        "cancelled": False,
+        "topics": [{"id": 141, "title": "Deploys", "matched": 2}],
+    }
     assert envelope["evidence"] is None
     assert len(fake.messages) == 2
 
@@ -468,6 +474,141 @@ def test_an_executed_clear_reads_back_and_leaves_one_0600_audit_line(run_cli, ho
     assert (line["command"], line["approval"]) == ("clear-messages", "typed_delete")
     assert line["targets"] == [f"tg:topic:{CHAT_ID}:141"]
     assert line["evidence"]["readback"] == envelope["evidence"]["readback"]
+
+
+class CampaignForumClient(ForumClient):
+    """The live campaign's forum: six topics, which Telegram serves most recent first.
+
+    Both topic calls answer in that order whatever order the ids were asked in,
+    so nothing here can pass by leaning on Telegram's order.
+    """
+
+    TOPICS = ((31, "campaign 4.5 rerun"), (30, "campaign 4.5"), (2, "1"), (6, "3"), (4, "2"), (1, "General"))
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        # The opener is the topic's own id and is never cleared; General has none.
+        self.threads = {31: [31], 30: [30], 2: [12, 11, 10, 2], 6: [21, 20, 6], 4: [4], 1: []}
+
+    async def __call__(self, request):
+        name = type(request).__name__
+        if name not in ("GetForumTopicsRequest", "GetForumTopicsByIDRequest"):
+            return await super().__call__(request)
+        self.requests.append(name)
+        asked = getattr(request, "topics", None)
+        rows = [
+            SimpleNamespace(id=topic_id, title=title, top_message=self.threads[topic_id][0] if self.threads[topic_id] else topic_id, icon_emoji_id=None)
+            for topic_id, title in self.TOPICS
+            if asked is None or topic_id in asked
+        ]
+        return SimpleNamespace(topics=rows, count=len(rows))
+
+    async def iter_messages(self, _peer, reply_to=None, wait_time=None):
+        for message_id in list(self.threads.get(reply_to, [])):
+            yield SimpleNamespace(id=message_id)
+
+    async def delete_messages(self, _peer, ids):
+        for thread in self.threads.values():
+            thread[:] = [message_id for message_id in thread if message_id not in ids]
+        return len(ids)
+
+
+def _scan_lines(text: str) -> list[str]:
+    return [line for line in text.splitlines() if line.startswith("Scanning topic")]
+
+
+def test_an_all_topics_dry_run_scans_in_id_order_and_counts_each_topic(run_cli, capsys):
+    # Live: the menu's tick screen listed 1, 2, 4, 6, 30, 31, the dry-run scanned
+    # 31, 30, 2, 6, 4, 1 and said only "19 topic messages would be cleared".
+    code, out, _err, _fake = run_cli(
+        ["clear-messages", "--chat", str(CHAT_ID), "--all-topics"], client=CampaignForumClient(), capsys=capsys
+    )
+
+    assert code == 0
+    assert _scan_lines(out) == [
+        "Scanning topic 1 (General): 0 to clear",
+        "Scanning topic 2 (1): 3 to clear",
+        "Scanning topic 4 (2): 0 to clear",
+        "Scanning topic 6 (3): 2 to clear",
+        "Scanning topic 30 (campaign 4.5): 0 to clear",
+        "Scanning topic 31 (campaign 4.5 rerun): 0 to clear",
+    ]
+    assert "Dry-run: 5 topic messages would be cleared" in out.splitlines()
+    # A person read each topic's count on its own line; the JSON under it keeps
+    # the four keys it has always had rather than repeating them.
+    printed, _end = json.JSONDecoder().raw_decode(out, out.index("{"))
+    assert printed == {"matched": 5, "cleared": 0, "dry_run": True, "cancelled": False}
+
+
+def test_named_topics_are_scanned_in_id_order_too(run_cli, capsys):
+    # The menu passes the ticked topics as --topic; Telegram answers them in its
+    # own order, which put 30 before 2.
+    code, out, _err, _fake = run_cli(
+        ["clear-messages", "--chat", str(CHAT_ID), "--topic", "30", "--topic", "2"],
+        client=CampaignForumClient(),
+        capsys=capsys,
+    )
+
+    assert code == 0
+    assert _scan_lines(out) == ["Scanning topic 2 (1): 3 to clear", "Scanning topic 30 (campaign 4.5): 0 to clear"]
+    assert "Dry-run: 3 topic messages would be cleared" in out.splitlines()
+
+
+def test_an_all_topics_dry_run_under_json_carries_a_row_per_topic(run_cli, capsys):
+    code, out, err, _fake = run_cli(
+        ["--json", "clear-messages", "--chat", str(CHAT_ID), "--all-topics"],
+        client=CampaignForumClient(),
+        capsys=capsys,
+    )
+
+    envelope = envelope_of(out)
+    assert (code, envelope["status"]) == (0, "dry_run")
+    result = envelope["result"]
+    assert {key: result[key] for key in ("matched", "cleared", "dry_run", "cancelled")} == {
+        "matched": 5,
+        "cleared": 0,
+        "dry_run": True,
+        "cancelled": False,
+    }
+    assert result["topics"] == [
+        {"id": 1, "title": "General", "matched": 0},
+        {"id": 2, "title": "1", "matched": 3},
+        {"id": 4, "title": "2", "matched": 0},
+        {"id": 6, "title": "3", "matched": 2},
+        {"id": 30, "title": "campaign 4.5", "matched": 0},
+        {"id": 31, "title": "campaign 4.5 rerun", "matched": 0},
+    ]
+    assert sum(row["matched"] for row in result["topics"]) == result["matched"]
+    # The words a person reads are on stderr, in the same order.
+    assert [line.rsplit(": ", 1)[0] for line in _scan_lines(err)] == [
+        f"Scanning topic {row['id']} ({row['title']})" for row in result["topics"]
+    ]
+
+
+def test_an_executed_all_topics_clear_rechecks_the_topics_it_showed(run_cli, home, capsys):
+    # The plan a person approved lists the topics in id order; the recheck after
+    # DELETE asks Telegram again, and Telegram answers in its own order. Unsorted,
+    # that reads as a changed forum and refuses a clear nothing changed.
+    fake = CampaignForumClient()
+
+    code, out, _err, _fake = run_cli(
+        ["--json", "clear-messages", "--chat", str(CHAT_ID), "--all-topics", "--execute"],
+        client=fake,
+        capsys=capsys,
+        isatty=True,
+        answer="DELETE",
+    )
+
+    envelope = envelope_of(out)
+    assert (code, envelope["status"]) == (0, "ok"), envelope["error"]
+    assert "GetForumTopicsByIDRequest" in fake.requests
+    assert envelope["result"]["cleared"] == 5
+    assert envelope["evidence"]["readback"] == (
+        "topic 1 now holds 0 message(s); topic 2 now holds 1 message(s); topic 4 now holds 1 message(s); "
+        "topic 6 now holds 1 message(s); topic 30 now holds 1 message(s); topic 31 now holds 1 message(s)"
+    )
+    line = json.loads((home / ".telegram-tools" / "audit.jsonl").read_text(encoding="utf-8").strip())
+    assert line["targets"] == [f"tg:topic:{CHAT_ID}:{topic_id}" for topic_id in (1, 2, 4, 6, 30, 31)]
 
 
 def test_a_cancelled_gate_leaves_no_audit_line(run_cli, home, capsys):

@@ -37,7 +37,85 @@ def test_the_scanning_line_shows_the_topic_emoji_telegram_draws():
         )
     )
 
-    assert "Scanning topic 80 (\U0001f4bb Dobby)" in lines
+    assert "Scanning topic 80 (\U0001f4bb Dobby): 2 to clear" in lines
+
+
+class ThreadedClient(FakeClient):
+    """A forum whose topics are threads of their own: `reply_to` picks the thread."""
+
+    def __init__(self, threads):
+        super().__init__([])
+        self.threads = threads
+
+    def iter_messages(self, chat, *, reply_to=None, wait_time=None):
+        async def iterator():
+            for message_id in self.threads.get(reply_to, []):
+                yield SimpleNamespace(id=message_id)
+
+        return iterator()
+
+
+def test_each_scanned_topic_says_how_many_messages_it_would_clear():
+    # The live dry-run over six topics printed one total, 19, and which topics
+    # held them (13 in topic 2, 6 in topic 6) was known only from searches.
+    client = ThreadedClient({2: [32, 31, 30, 2], 6: [41, 40, 6]})
+    lines = []
+
+    result = asyncio.run(
+        delete_topic_messages(
+            client,
+            "@group",
+            [TopicInfo(id=2, title="1", top_message=32), TopicInfo(id=6, title="3", top_message=41)],
+            execute=False,
+            progress=lines.append,
+        )
+    )
+
+    assert lines == [
+        "Scanning topic 2 (1): 3 to clear",
+        "Scanning topic 6 (3): 2 to clear",
+        "Dry-run: 5 topic messages would be cleared",
+    ]
+    assert [row.to_dict() for row in result.topics] == [
+        {"id": 2, "title": "1", "matched": 3},
+        {"id": 6, "title": "3", "matched": 2},
+    ]
+
+
+def test_the_count_is_on_the_scan_line_before_the_typed_gate_too():
+    client = ThreadedClient({2: [32, 31, 2]})
+    lines = []
+
+    asyncio.run(
+        delete_topic_messages(
+            client,
+            "@group",
+            [TopicInfo(id=2, title="1", top_message=32)],
+            execute=True,
+            progress=lines.append,
+            confirm=lambda: "NOPE",
+        )
+    )
+
+    assert lines == ["Scanning topic 2 (1): 2 to clear", "Clear topic messages cancelled"]
+    assert client.deleted_batches == []
+
+
+def test_a_message_found_under_two_topics_counts_once_so_the_rows_add_up():
+    client = ThreadedClient({2: [51, 50, 2], 6: [52, 51, 6]})
+
+    result = asyncio.run(
+        delete_topic_messages(
+            client,
+            "@group",
+            [TopicInfo(id=2, title="1"), TopicInfo(id=6, title="3")],
+            execute=False,
+        )
+    )
+
+    assert result.matched == 3
+    assert [(row.id, row.matched) for row in result.topics] == [(2, 2), (6, 1)]
+    assert sum(row.matched for row in result.topics) == result.matched
 
 
 def test_dry_run_collects_topic_messages_without_deleting():
@@ -158,6 +236,7 @@ def test_clear_result_serializes_with_cleared_wording():
         "cleared": 0,
         "dry_run": True,
         "cancelled": False,
+        "topics": [{"id": 10, "title": "Builds", "matched": 1}],
     }
 
 
