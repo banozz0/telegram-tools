@@ -6,7 +6,7 @@ filters in order, `messages.updateDialogFilter` writes one or, with no filter,
 removes it -- so this module is the mapping between them and the `Folder`
 record `folders.py` screens.
 
-Three details of the wire shape live here rather than leaking upward:
+Four details of the wire shape live here rather than leaking upward:
 
 * the list carries a `DialogFilterDefault`, which is Telegram's "All chats"
   row rather than a folder anyone made; it has no id and is dropped;
@@ -14,7 +14,9 @@ Three details of the wire shape live here rather than leaking upward:
   It carries an include list and nothing else, so it is read as `kind:
   "shared"` and `folders.require_editable` refuses to write it back;
 * a title is `TextWithEntities` on this layer and was a plain string on
-  older ones, so it is read through both and written as the current shape.
+  older ones, so it is read through both and written as the current shape;
+* a title past Telegram's cap comes back from the write as a bare
+  MESSAGE_TOO_LONG, which is re-raised as `folders.title_too_long` naming it.
 
 A folder's chats are `InputPeer`s. Their marked ids come from
 `utils.get_peer_id` with no call of any kind, which is why `folders list`
@@ -26,12 +28,13 @@ from __future__ import annotations
 from typing import Any, Sequence
 
 from telethon import utils
+from telethon.errors import MessageTooLongError
 from telethon.tl.functions.messages import GetDialogFiltersRequest, UpdateDialogFilterRequest
 from telethon.tl.types import DialogFilter, TextWithEntities
 
 from telegram_tools._core import rid as _rid
 from telegram_tools.envelope import PREFIX
-from telegram_tools.folders import TYPE_NAMES, Folder
+from telegram_tools.folders import TYPE_NAMES, Folder, title_too_long
 
 
 def chat_rid(peer: Any) -> str:
@@ -101,7 +104,12 @@ class TelegramFoldersPort:
         )
 
     async def write(self, folder_id: int, filter_: DialogFilter) -> None:
-        await self.client(UpdateDialogFilterRequest(id=int(folder_id), filter=filter_))
+        try:
+            await self.client(UpdateDialogFilterRequest(id=int(folder_id), filter=filter_))
+        except MessageTooLongError as exc:
+            # The title is the one field here Telegram measures, and `folders.wanted`
+            # already held it to the documented cap: a refusal now means the cap moved.
+            raise title_too_long(_title_text(filter_.title), platform=type(exc).__name__) from None
 
     async def remove(self, folder_id: int) -> None:
         """`messages.updateDialogFilter` with no filter: how Telegram deletes one."""

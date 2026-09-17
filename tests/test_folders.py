@@ -11,8 +11,10 @@ looking at what reached the fake rather than by trusting the message.
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 import pytest
+from telethon.errors import MessageTooLongError
 from telethon.tl import types
 
 from telegram_tools import cli
@@ -139,6 +141,21 @@ def test_types_are_telegrams_own_names_and_an_unknown_one_is_a_usage_error():
         folders_ops.parse_types("chats")
 
 
+def test_a_folder_title_is_at_most_twelve_characters_counted_as_code_points():
+    """Card agent-bo-95422300. Twelve is `dialogFilter.title`'s documented cap ("max 12 UTF-8 chars"),
+    and TDLib and Telegram Desktop both count it in code points, so twelve emoji fit though they are
+    twenty-four UTF-16 units and forty-eight bytes."""
+    assert folders_ops.MAX_TITLE_LENGTH == 12
+    for fits in ("campaign 6.6", "🚀" * 12, "  campaign 6.6  "):
+        assert len(folders_ops.wanted(SimpleNamespace(title=fits), None)["title"]) <= 12
+    for too_long in ("campaign 6.6b", "🚀" * 13):
+        with pytest.raises(CommandError) as refused:
+            folders_ops.wanted(SimpleNamespace(title=too_long), None)
+        assert refused.value.code == "PLATFORM_UNSUPPORTED"
+        assert repr(too_long) in str(refused.value) and "13 characters" in str(refused.value)
+        assert "12 characters or fewer" in refused.value.hint
+
+
 def test_a_shared_folder_refuses_both_writes_by_name():
     shared = folders_ops.Folder(id=4, title="Shared club", kind="shared")
     for verb in ("edit", "delete"):
@@ -263,6 +280,59 @@ def test_editing_nothing_is_a_usage_error(run_cli, capsys):
     code, _out, err, fake = run_cli(["folders", "edit", "--id", "2"], client=FolderedClient(), capsys=capsys, isatty=True, answer="y")
     assert code == 2 and "folders edit changes nothing" in err
     assert writes(fake) == []
+
+
+@pytest.mark.parametrize(
+    "argv", [["create", "--title", "campaign 6.6b", "--include", FORUM], ["edit", "--id", "2", "--title", "campaign 6.6b"]]
+)
+def test_a_title_over_the_cap_is_refused_by_name_before_the_preview(run_cli, capsys, home, argv):
+    """Card agent-bo-95422300: 6.6.3 printed Telegram's bare "Message was too long" after the y."""
+    code, out, err, fake = run_cli(["folders", *argv], client=FolderedClient(), capsys=capsys, isatty=True, answer="y")
+    assert code == 2, out + err
+    assert "error: The folder title 'campaign 6.6b' is 13 characters, and Telegram allows at most 12." in err
+    assert "hint: Shorten the title to 12 characters or fewer" in err
+    assert f"folders {argv[0]}:" not in out + err and "[y/N]" not in out + err, "refused before the preview and the gate"
+    assert writes(fake) == [] and audit_lines(home) == []
+
+    code, out, _err, fake = run_cli(["--json", "folders", *argv], client=FolderedClient(), capsys=capsys, isatty=True, answer="y")
+    error = envelope_of(out)["error"]
+    assert (code, error["code"]) == (2, "PLATFORM_UNSUPPORTED") and "12" in error["hint"]
+    assert writes(fake) == []
+
+
+def test_twelve_emoji_are_a_title_that_fits(run_cli, capsys):
+    code, out, _err, fake = run_cli(
+        ["--json", "folders", "edit", "--id", "2", "--title", "🚀" * 12], client=FolderedClient(), capsys=capsys, isatty=True, answer="y"
+    )
+    assert code == 0, out
+    assert fake.by_id(2).title.text == "🚀" * 12
+
+
+class CappedClient(FolderedClient):
+    """Telegram with a cap below this tool's: the write answers MESSAGE_TOO_LONG, as 6.6.3 saw it."""
+
+    async def __call__(self, request):
+        if type(request).__name__ == "UpdateDialogFilterRequest" and request.filter is not None and len(request.filter.title.text) > 8:
+            self.world.requests.append(request)
+            raise MessageTooLongError(request=request)
+        return await super().__call__(request)
+
+
+def test_telegram_calling_a_title_too_long_is_a_named_refusal_not_its_bare_error(run_cli, capsys):
+    code, out, err, fake = run_cli(
+        ["folders", "edit", "--id", "2", "--title", "Work stuff"], client=CappedClient(), capsys=capsys, isatty=True, answer="y"
+    )
+    assert code == 2, out + err
+    assert "error: Telegram refused the folder title 'Work stuff' (10 characters) as too long." in err
+    assert "hint: This tool lets titles of up to 12 characters through" in err
+    assert "Message was too long" not in err
+    assert fake.by_id(2).title.text == "Work"
+
+    code, out, _err, _fake = run_cli(
+        ["--json", "folders", "edit", "--id", "2", "--title", "Work stuff"], client=CappedClient(), capsys=capsys, isatty=True, answer="y"
+    )
+    error = envelope_of(out)["error"]
+    assert (code, error["code"], error["platform"]) == (2, "PLATFORM_UNSUPPORTED", "MessageTooLongError")
 
 
 @pytest.mark.parametrize("argv", [["edit", "--id", "4", "--title", "Mine"], ["delete", "--id", "4", "--execute"]])

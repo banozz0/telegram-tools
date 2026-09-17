@@ -21,6 +21,9 @@ chat list -- Telegram calls it a dialog filter -- and four verbs manage them:
   with the preview still printed. `delete` is `typed_name`: a folder is a
   container, so it dry-runs by default, takes `--execute` plus the folder's
   exact title at a terminal, and has no `--yes`.
+* **A title fits Telegram's twelve characters.** `create` and `edit` refuse a
+  longer `--title` by name before the preview; Telegram would refuse it only
+  after the gate, as MESSAGE_TOO_LONG with no word about which field.
 * **A shared folder is listed, never edited.** A folder someone handed over as
   a chatlist invite carries no exclude list and no categories, so the edit
   Telegram would accept is not the folder that comes back; both `edit` and
@@ -59,6 +62,12 @@ EXCLUDING = ("exclude_archived", "exclude_muted", "exclude_read")
 # client picks the lowest free one from 2.
 FIRST_ID = 2
 LAST_ID = 255
+# Telegram's cap on a folder title. The `dialogFilter` constructor documents
+# "max 12 UTF-8 chars"; TDLib cuts a title to it with `utf8_truncate`, which
+# counts code points, and Telegram Desktop counts code points against its own
+# 12, so `len()` is the measure. Past it Telegram answers the write, after the
+# gate, with a bare MESSAGE_TOO_LONG.
+MAX_TITLE_LENGTH = 12
 # The verbs, and the gate each takes.
 VERBS = ("list", "create", "edit", "delete")
 APPROVALS = {"create": "prompt_y", "edit": "prompt_y", "delete": "typed_name"}
@@ -165,6 +174,8 @@ def wanted(args: Any, base: Folder | None) -> dict[str, Any]:
         fields["title"] = str(args.title).strip()
         if not fields["title"]:
             raise ValueError("--title cannot be empty: a folder is named.")
+        if len(fields["title"]) > MAX_TITLE_LENGTH:
+            raise title_too_long(fields["title"])
     if getattr(args, "emoji", None) is not None:
         fields["emoticon"] = str(args.emoji).strip() or None
     if getattr(args, "types", None) is not None:
@@ -178,6 +189,23 @@ def wanted(args: Any, base: Folder | None) -> dict[str, Any]:
     if base is not None and not fields:
         raise ValueError("folders edit changes nothing: name at least one of --title, --emoji, --include, --exclude, --types.")
     return fields
+
+
+def title_too_long(title: str, *, platform: str | None = None) -> CommandError:
+    """The refusal for a title past the cap: before the preview, or -- `platform` set -- Telegram's answer to one this let through."""
+    shown = redact_text(title)
+    if platform is None:
+        return CommandError(
+            f"The folder title {shown!r} is {len(title)} characters, and Telegram allows at most {MAX_TITLE_LENGTH}.",
+            code="PLATFORM_UNSUPPORTED",
+            hint=f"Shorten the title to {MAX_TITLE_LENGTH} characters or fewer (an emoji can count as several) and run it again.",
+        )
+    return CommandError(
+        f"Telegram refused the folder title {shown!r} ({len(title)} characters) as too long.",
+        code="PLATFORM_UNSUPPORTED",
+        hint=f"This tool lets titles of up to {MAX_TITLE_LENGTH} characters through, so Telegram's cap may have changed; try a shorter title.",
+        platform=platform,
+    )
 
 
 def require_matches_something(types: Sequence[str], include: Sequence[Any]) -> None:
@@ -291,6 +319,7 @@ __all__ = [
     "EXCLUDING",
     "FIRST_ID",
     "LAST_ID",
+    "MAX_TITLE_LENGTH",
     "MUTATIONS",
     "TYPE_NAMES",
     "VERBS",
@@ -307,6 +336,7 @@ __all__ = [
     "parse_types",
     "require_editable",
     "require_matches_something",
+    "title_too_long",
     "titles_match",
     "wanted",
 ]
