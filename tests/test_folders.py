@@ -236,7 +236,8 @@ def test_folders_edit_replaces_the_lists_and_none_empties_one(run_cli, capsys):
     assert [p.channel_id for p in after.include_peers] == [FORUM_PEER.channel_id]
     assert after.exclude_peers == []
     readback = envelope_of(out)["evidence"]["readback"]
-    assert f"chats 'tg:chat:{CHANNEL_ID}' -> 'tg:chat:{FORUM_ID}'" in readback
+    # The chat this run named reads as its title; the one it dropped was never resolved, so its rid stands.
+    assert f"chats 'tg:chat:{CHANNEL_ID}' -> 'Team Hermes'" in readback
 
 
 def test_folders_edit_clearing_the_categories_keeps_the_folder_matching_something(run_cli, capsys):
@@ -338,3 +339,16 @@ def test_the_plan_names_the_folder_and_needs_no_chat_right(run_cli, capsys):
     assert plan["preflight"]["required"] == [], "a folder is the account's, not a chat's"
     assert plan["approval"] == "prompt_y"
     assert envelope_of(out)["target"]["kind"] == "folder"
+
+
+def test_the_folder_card_and_readback_name_the_chats_the_preview_named(run_cli, capsys):
+    """Card agent-bo-95422301: the preview said a chat's title, so what follows the write says it too."""
+    code, out, _err, _fake = run_cli(["folders", "create", "--title", "Ops", "--include", FORUM], client=FolderedClient(), capsys=capsys, isatty=True, answer="y")
+    assert code == 0, out
+    card = out.split("Read back:", 1)[1].split("{", 1)[0]
+    assert "Chats       Team Hermes\n" in card and "tg:chat:" not in card, card
+    code, out, _err, _fake = run_cli(["folders", "edit", "--id", "2", "--include", FORUM, "--include", CHANNEL], client=FolderedClient(), capsys=capsys, isatty=True, answer="y")
+    assert code == 0, out
+    assert "Read back: Work: chats 'Team Hermes' -> 'Team Hermes, Alerts'\n" in out
+    card = out.split("Read back:", 1)[1].split("{", 1)[0]
+    assert "Chats       Team Hermes, Alerts\n" in card, card

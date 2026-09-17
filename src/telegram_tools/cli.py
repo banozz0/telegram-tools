@@ -392,7 +392,7 @@ def build_parser() -> argparse.ArgumentParser:
     invite_create.add_argument("--usage-limit", dest="usage_limit", type=positive_int, metavar="N", help="How many people may join through it")
     invite_create.add_argument("--request-needed", dest="request_needed", action="store_true", help="Joining through it needs an admin's approval")
     invite_create.add_argument("--yes", action="store_true", help=yes_help)
-    invite_revoke = invite_kinds.add_parser("revoke", help="Revoke an invite link (y/N); the link is redacted everywhere but the flag")
+    invite_revoke = invite_kinds.add_parser("revoke", help="Revoke an invite link (y/N); the link is redacted everywhere but the flag and the human preview")
     invite_revoke.add_argument("--chat", required=True, help=chat_help)
     invite_revoke.add_argument("--link", required=True, help="The link to revoke, as `invite list` printed it")
     invite_revoke.add_argument("--yes", action="store_true", help=yes_help)
@@ -2815,6 +2815,8 @@ async def _run_folders(client, args, *, report: Reporter) -> int:
             fields.get("include", base.include if base else ()),
         )
 
+    # The titles the preview showed, by rid, so what follows the write says them too.
+    names = {rid: title for key in ("include", "exclude") if key in fields for rid, title in zip(fields[key], labels[key])}
     folder_id = base.id if base is not None else folders_ops.next_id(existing)
     shown = base if base is not None else folders_ops.Folder(id=folder_id, title=str(fields.get("title", "")))
     target = Target(
@@ -2910,7 +2912,7 @@ async def _run_folders(client, args, *, report: Reporter) -> int:
             return f"folder {folder_id} is gone" if after is None else f"folder {folder_id} is still there"
         if after is None:
             return f"folder {folder_id} is not there after the write"
-        return f"{after.title}: " + (folders_ops.diff(base, after) if base is not None else "made")
+        return f"{after.title}: " + (folders_ops.diff(base, after, names=names) if base is not None else "made")
 
     evidence = await read_back("the folder", folder_now)
     report.set_evidence(evidence)
@@ -2923,7 +2925,7 @@ async def _run_folders(client, args, *, report: Reporter) -> int:
         "cancelled": False,
     }
     if not report.machine and after is not None and verb != "delete":
-        print(folders_ops.format_folder(after))
+        print(folders_ops.format_folder(after, names=names))
     report.printed_result(payload, status="ok")
     return 0
 
@@ -3077,7 +3079,10 @@ async def _run_manage(client, args, *, report: Reporter) -> int:
             details.append("Joining needs an admin's approval")
     elif op.verb == "revoke":
         params = {"link": redact_text(args.link)}
-        details.append(f"Link    {redact_text(args.link)}")
+        # The y/N is about this link, and the person at the terminal typed it,
+        # so their screen shows it whole; the plan, the envelope, the audit line
+        # and a machine run's stderr keep the redaction.
+        details.append(f"Link    {redact_text(args.link) if report.machine else args.link}")
     elif op.verb == "set":
         change = manage_ops.settings_change(args, kind=kind, topic_id=args.topic)
         required, approval, typed, mutation = change.required, change.approval, change.typed, change.mutation
@@ -3226,7 +3231,7 @@ async def _run_manage(client, args, *, report: Reporter) -> int:
         evidence = Evidence.verified(f"an invite link to {target.title} now exists" + (f", titled {made['title']}" if made.get("title") else "") + (f", expiring {made['expires']}" if made.get("expires") else ""))
         extra["invite"] = made
     elif op.verb == "revoke":
-        evidence = Evidence.verified(f"the link is revoked: {made.get('revoked')}") if made.get("revoked") else Evidence.unverified("Telegram did not report the link as revoked")
+        evidence = Evidence.verified(f"the invite link to {target.title} is now revoked" + (f", titled {made['title']}" if made.get("title") else "")) if made.get("revoked") else Evidence.unverified("Telegram did not report the link as revoked")
         extra["invite"] = made
     else:
         async def settings_now() -> str:
@@ -3272,7 +3277,7 @@ async def _run_manage_read(port, op, args, resolved, target: Target, kind: str, 
         report.result({"requests": rows}, status="ok" if rows else "empty")
     elif op.group == "invite":
         rows = await port.invites(peer, revoked=bool(args.revoked))
-        report.info(manage_ops.format_invites(rows, chat_title=target.title))
+        report.info(manage_ops.format_invites(rows, chat_title=target.title, revoked=bool(args.revoked)))
         # The one envelope that carries links: this command asked for them.
         report.result({"invites": rows, "revoked": bool(args.revoked)}, status="ok" if rows else "empty", show_invites=True)
     elif args.topic is not None:

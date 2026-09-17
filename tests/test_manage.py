@@ -898,3 +898,40 @@ def test_the_port_lists_admins_creator_first():
     rows = asyncio.run(port.admins(types.InputPeerChannel(channel_id=1000000001, access_hash=0)))
     assert [row.status for row in rows][:2] == ["creator", "admin"]
     assert rows[0].label == "Sven (@sven)"
+
+
+# -- card agent-bo-95422301: the screens say what happened, in words ------------------
+
+
+def test_invite_revoke_shows_its_link_to_the_person_and_no_record_keeps_it(run_cli, capsys, home):
+    # The y/N is about one link: the person's own screen shows which, and says the result in words.
+    code, out, _err, _fake = run_cli(["invite", "revoke", "--chat", FORUM, "--link", INVITE], client=PeopledClient(), capsys=capsys, isatty=True, answer="y")
+    assert code == 0, out
+    assert f"Link    {INVITE}" in out
+    assert "Read back: the invite link to Team Hermes is now revoked, titled club\n" in out
+    assert find(json.dumps(audit_lines(home))) == []
+    # A machine run keeps the link out of the envelope and out of the preview on stderr.
+    code, out, err, _fake = run_cli(["--json", "invite", "revoke", "--chat", FORUM, "--link", INVITE], client=PeopledClient(), capsys=capsys, isatty=True, answer="y")
+    assert code == 0, out
+    assert INVITE not in out and INVITE not in err
+    assert "Link    https://t.me/+<redacted>" in err
+    assert envelope_of(out)["evidence"]["readback"] == "the invite link to Team Hermes is now revoked, titled club"
+    assert find(json.dumps(audit_lines(home))) == []
+
+
+def test_an_invite_list_of_the_revoked_says_revoked(run_cli, capsys):
+    assert manage_ops.format_invites([], chat_title="Team Hermes") == "No invite link in Team Hermes."
+    assert manage_ops.format_invites([], chat_title="Team Hermes", revoked=True) == "No revoked invite link in Team Hermes."
+    code, out, _err, _fake = run_cli(["invite", "list", "--chat", FORUM, "--revoked"], client=PeopledClient(), capsys=capsys)
+    assert code == 0 and "1 revoked invite link(s) in Team Hermes" in out
+    world = PeopledWorld()
+    world.invites = {}
+    code, out, _err, _fake = run_cli(["invite", "list", "--chat", FORUM, "--revoked"], client=PeopledClient(world), capsys=capsys)
+    assert code == 0 and "No revoked invite link in Team Hermes." in out
+
+
+def test_admin_list_shows_the_creators_rights_on_the_human_screen(run_cli, capsys):
+    code, out, _err, _fake = run_cli(["admin", "list", "--chat", FORUM], client=PeopledClient(), capsys=capsys)
+    assert code == 0
+    creator = next(line for line in out.splitlines() if "  creator " in line)
+    assert "add_admins" in creator and "manage_topics" in creator, creator

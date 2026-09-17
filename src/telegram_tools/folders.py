@@ -214,16 +214,21 @@ def format_folders(rows: Sequence[Folder]) -> str:
     return "\n".join(lines)
 
 
-def format_folder(folder: Folder) -> str:
+def _chats(rids: Sequence[str], names: Mapping[str, str] | None) -> str:
+    """A chat list the way the preview said it: a title where this run resolved one, else the rid."""
+    return ", ".join((names or {}).get(rid, rid) for rid in rids)
+
+
+def format_folder(folder: Folder, *, names: Mapping[str, str] | None = None) -> str:
     emoji = f"  {folder.emoticon}" if folder.emoticon else ""
     return "\n".join(
         [
             f"{redact_text(folder.title)} (folder {folder.id}){emoji}",
             RULE,
             f"Categories  {', '.join(folder.types) or '(none)'}",
-            f"Chats       {', '.join(folder.include) or '(none)'}",
-            f"Excluded    {', '.join(folder.exclude) or '(none)'}",
-            f"Pinned      {', '.join(folder.pinned) or '(none)'}",
+            f"Chats       {_chats(folder.include, names) or '(none)'}",
+            f"Excluded    {_chats(folder.exclude, names) or '(none)'}",
+            f"Pinned      {_chats(folder.pinned, names) or '(none)'}",
         ]
     )
 
@@ -259,15 +264,15 @@ def format_fields(fields: Mapping[str, Any], *, include: Sequence[str] = (), exc
     return tuple(lines)
 
 
-def diff(before: Folder, after: Folder) -> str:
+def diff(before: Folder, after: Folder, *, names: Mapping[str, str] | None = None) -> str:
     """The readback: every field that actually moved, `old -> new`."""
     moved = []
     for label, old, new in (
         ("title", before.title, after.title),
         ("emoji", before.emoticon, after.emoticon),
         ("categories", ", ".join(before.types), ", ".join(after.types)),
-        ("chats", ", ".join(before.include), ", ".join(after.include)),
-        ("excluded", ", ".join(before.exclude), ", ".join(after.exclude)),
+        ("chats", _chats(before.include, names), _chats(after.include, names)),
+        ("excluded", _chats(before.exclude, names), _chats(after.exclude, names)),
     ):
         if old != new:
             moved.append(f"{label} {old or '(none)'!r} -> {new or '(none)'!r}")
