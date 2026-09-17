@@ -400,6 +400,21 @@ The terms this codebase uses, and the boundaries they imply.
   `member`, `restricted`, `banned`, `left`, `none` for someone not in the
   chat), the rights that are on, a rank, an `until`. Read off the participant
   object Telegram returns (`adapters/manage.member_of`).
+- **Held rights** — what the preflight finds the acting identity holds in a
+  chat (`adapters/account.rights_from`, shared by the account and bot probes).
+  Telethon's `ParticipantPermissions` answers is_creator, is_admin and the
+  admin flags; it never spells `send_messages`, `send_media` or
+  `manage_topics`, so those are read off the participant it wraps and the chat
+  entity the resolution fetched. A creator holds every right. An admin holds
+  `manage_topics` from its own `admin_rights`, posts in a broadcast channel
+  only with `post_messages`, and sends in a group whatever its members may
+  not. A member posts nothing in a broadcast channel or once out of the chat,
+  and otherwise holds a send right unless its own `banned_rights` or the
+  chat's `default_banned_rights` sets it; `manage_topics` set there refuses,
+  and unset it stays unconfirmed, because Telegram's own documentation
+  disagrees on whether an unbanned member may edit topics. A direct chat — a person, or Saved Messages — is not
+  asked about at all: it holds the send rights, pin and delete, and nothing an
+  admin would.
 - **Replacing list** — how `--include`, `--exclude` and `--types` behave on
   `folders create` and `folders edit`, and `--rights` on `admin rights`: the
   flag names what the field *is* afterwards, not what to add, and `none`

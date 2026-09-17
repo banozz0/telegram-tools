@@ -37,6 +37,7 @@ from telegram_tools.adapters.blueprint import (
     topic_rid,
 )
 from telegram_tools.envelope import CommandError
+from test_adapters import holding
 from test_archive_sync import ACCOUNT, home  # noqa: F401 - fixture
 
 FORUM_ID = -1001000000001
@@ -177,7 +178,7 @@ class FakeClient:
         raise ValueError("unknown entity")
 
     async def get_permissions(self, peer, user):
-        return SimpleNamespace(**{name: True for name in RIGHT_NAMES})
+        return holding(RIGHT_NAMES, chat=isinstance(peer, types.InputPeerChat))
 
     async def __call__(self, request):
         name = type(request).__name__
@@ -537,8 +538,12 @@ def test_apply_to_an_existing_forum_makes_the_missing_topics_and_leaves_its_extr
         client=fake, capsys=capsys, isatty=True, answer="team hermes 2",
     )
     assert code == 0, out
-    result = envelope_of(out)["result"]
+    envelope = envelope_of(out)
+    result = envelope["result"]
     assert result["status"] == "ok"
+    # Topic steps need manage_topics, which the creator holds without a warning.
+    assert envelope["plan"]["preflight"]["required"] == ["manage_topics", "change_info"]
+    assert envelope["warnings"] == []
     assert "- topic:watercooler" in " ".join(result["extras"])
     titles = [title for title, _icon in fake.world.topics_of(world.marked_for(7777))]
     assert titles == ["General", "Deploys", "Watercooler", "Dobby", "Support"], "made what was missing, kept the extra, deleted nothing"

@@ -20,7 +20,9 @@ from telethon.tl.types import InputPeerChannel, InputPeerChat, InputUserSelf
 from telegram_tools import cli
 from test_cli import parse_args
 from telegram_tools.delete import format_leave_preview, leave_chat, leave_kind_for_type
+from telegram_tools.adapters.account import RIGHT_NAMES
 from telegram_tools.envelope import Reporter
+from test_adapters import holding
 from test_archive_sync import home  # noqa: F401 - fixture
 from test_manage import audit_lines
 from test_structure import BASIC_ID, CHANNEL_ID, FORUM_ID, FakeClient, envelope_of, run_cli  # noqa: F401 - fixture
@@ -145,9 +147,7 @@ class LeavingClient(FakeClient):
     """
 
     async def get_permissions(self, peer, user):
-        permissions = await super().get_permissions(peer, user)
-        permissions.is_creator = False
-        return permissions
+        return holding(set(RIGHT_NAMES) - {"is_creator"}, chat=isinstance(peer, InputPeerChat))
 
     async def __call__(self, request):
         name = type(request).__name__

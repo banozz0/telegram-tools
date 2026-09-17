@@ -15,12 +15,15 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from telethon.tl.types import PeerChannel
+from telethon.errors import UserNotParticipantError
+from telethon.tl.types import ChatBannedRights, InputPeerUser, PeerChannel, User
 
 from telegram_tools import cli
 from telegram_tools._core import redaction
 from telegram_tools._core.contract import validate_envelope
+from telegram_tools.adapters.account import RIGHT_NAMES
 from telegram_tools.envelope import Reporter
+from test_adapters import admin, creator, member
 
 ACCOUNT = SimpleNamespace(id=42, first_name="Sven", username="sven")
 CHAT_ID = -1001234567890
@@ -38,9 +41,8 @@ class FakeClient:
 
     def __init__(self, dialogs=None, rights=None):
         self.dialogs = list(dialogs if dialogs is not None else [dialog()])
-        self.rights = rights if rights is not None else SimpleNamespace(
-            is_creator=True, is_admin=True, send_messages=True, delete_messages=True
-        )
+        # What Telethon returns, or the exception it raises instead.
+        self.rights = rights if rights is not None else creator()
         self.sent = []
         self.disconnected = False
 
@@ -52,6 +54,8 @@ class FakeClient:
             yield item
 
     async def get_permissions(self, _entity, _user):
+        if isinstance(self.rights, Exception):
+            raise self.rights
         return self.rights
 
     async def get_entity(self, reference):
@@ -177,7 +181,8 @@ def test_send_under_json_carries_plan_evidence_and_an_audit_line(run_cli, home, 
     assert envelope["plan"]["approval"] == "yes_allowlist"
     assert envelope["plan"]["preflight"] == {
         "required": ["send_messages"],
-        "held": ["delete_messages", "is_admin", "is_creator", "send_messages"],
+        # A creator holds every right the preflight can name.
+        "held": sorted(RIGHT_NAMES),
         "missing": [],
     }
     assert envelope["evidence"]["readback"] == "message 9001 is in Agency"
@@ -253,7 +258,7 @@ def test_a_target_renamed_after_the_gate_refuses_as_drift(run_cli, monkeypatch, 
 
 
 def test_a_missing_right_refuses_before_the_send(run_cli, capsys):
-    fake = FakeClient(rights=SimpleNamespace(is_creator=False, is_admin=False, send_messages=False))
+    fake = FakeClient(rights=member("send_messages"))
 
     code, out, _err, _fake = run_cli(
         ["--json", "send", "--chat", str(CHAT_ID), "--text", "ship it", "--yes"], client=fake, capsys=capsys
@@ -267,10 +272,11 @@ def test_a_missing_right_refuses_before_the_send(run_cli, capsys):
 
 
 def test_a_right_telegram_will_not_report_warns_instead_of_refusing(run_cli, monkeypatch, capsys):
-    # A private chat has no participant permissions at all. Refusing there
-    # would break sends this tool has always made, so it says so and proceeds.
+    # Telegram answers no participant for an account outside a public chat.
+    # Refusing there would break sends this tool has always made, so it says
+    # so and proceeds, and Telegram decides.
     monkeypatch.setenv("TELEGRAM_SEND_ALLOWLIST", str(CHAT_ID))
-    fake = FakeClient(rights=SimpleNamespace())
+    fake = FakeClient(rights=UserNotParticipantError(None))
 
     code, out, _err, _fake = run_cli(
         ["--json", "send", "--chat", str(CHAT_ID), "--text", "ship it", "--yes"], client=fake, capsys=capsys
@@ -281,6 +287,69 @@ def test_a_right_telegram_will_not_report_warns_instead_of_refusing(run_cli, mon
     assert envelope["plan"]["preflight"]["missing"] == ["send_messages"]
     assert any("could not confirm send_messages" in warning for warning in envelope["warnings"])
     assert fake.sent
+
+
+@pytest.mark.parametrize(
+    "rights",
+    [creator(), admin(), member()],
+    ids=["creator", "admin", "member"],
+)
+def test_an_ordinary_send_confirms_its_right_and_warns_nothing(run_cli, monkeypatch, capsys, rights):
+    # What Telethon really returns names no send right: the preflight reads it
+    # off the participant and the chat, so a send anyone may make says nothing.
+    monkeypatch.setenv("TELEGRAM_SEND_ALLOWLIST", str(CHAT_ID))
+
+    code, out, _err, fake = run_cli(
+        ["--json", "send", "--chat", str(CHAT_ID), "--text", "ship it", "--yes"], client=FakeClient(rights=rights), capsys=capsys
+    )
+
+    envelope = envelope_of(out)
+    assert (code, envelope["status"]) == (0, "ok")
+    assert envelope["warnings"] == []
+    assert "send_messages" in envelope["plan"]["preflight"]["held"]
+    assert envelope["plan"]["preflight"]["missing"] == []
+    assert fake.sent
+
+
+def test_a_send_the_chats_defaults_forbid_is_refused_by_name(run_cli, monkeypatch, capsys):
+    monkeypatch.setenv("TELEGRAM_SEND_ALLOWLIST", str(CHAT_ID))
+    fake = FakeClient(rights=member())
+    fake.dialogs[0].entity.default_banned_rights = ChatBannedRights(until_date=None, send_messages=True)
+
+    code, out, _err, _fake = run_cli(
+        ["--json", "send", "--chat", str(CHAT_ID), "--text", "ship it", "--yes"], client=fake, capsys=capsys
+    )
+
+    envelope = envelope_of(out)
+    assert (code, envelope["error"]["code"]) == (2, "PERMISSION_DENIED")
+    assert "send_messages" in envelope["error"]["message"]
+    assert fake.sent == []
+
+
+def test_a_direct_chat_send_asks_for_no_rights_and_warns_nothing(run_cli, monkeypatch, capsys):
+    harry = SimpleNamespace(
+        id=777,
+        title="Harry",
+        entity=User(id=777, first_name="Harry", username="harry"),
+        input_entity=InputPeerUser(user_id=777, access_hash=1),
+    )
+
+    class DirectClient(FakeClient):
+        async def get_permissions(self, _entity, _user):
+            # What Telethon does for a person: ValueError, after a round trip.
+            raise ValueError("You must pass either a channel or a chat")
+
+    monkeypatch.setenv("TELEGRAM_SEND_ALLOWLIST", "777")
+    fake = DirectClient([harry])
+
+    code, out, err, _fake = run_cli(["--json", "send", "--chat", "777", "--text", "hi", "--yes"], client=fake, capsys=capsys)
+
+    envelope = envelope_of(out)
+    assert (code, envelope["status"]) == (0, "ok"), out
+    assert envelope["warnings"] == []
+    assert envelope["plan"]["preflight"]["missing"] == []
+    assert "ValueError" not in out + err
+    assert fake.sent == [(harry.input_entity, "hi", None)]
 
 
 def test_jsonl_streams_records_then_the_envelope(run_cli, capsys):

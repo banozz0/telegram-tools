@@ -26,6 +26,7 @@ from telegram_tools._core.redaction import find
 from telegram_tools.adapters.account import RIGHT_NAMES
 from telegram_tools.adapters.manage import TelegramManagePort, member_of
 from telegram_tools.envelope import CommandError
+from test_adapters import holding
 from test_archive_sync import ACCOUNT, home  # noqa: F401 - fixture
 from test_structure import DOBBY_ICON, FORUM_ID, CHANNEL_ID, BASIC_ID, FakeClient, World, envelope_of, run_cli  # noqa: F401 - fixture
 
@@ -134,7 +135,7 @@ class PeopledClient(FakeClient):
         return await super().get_input_entity(entity)
 
     async def get_permissions(self, peer, user):
-        return SimpleNamespace(**{name: name in self.held for name in RIGHT_NAMES})
+        return holding(self.held, chat=isinstance(peer, types.InputPeerChat))
 
     async def kick_participant(self, channel, user):
         # Telethon's kick: a ban then an unban, recorded here as the one call
@@ -721,6 +722,8 @@ def test_settings_set_on_a_topic_needs_manage_topics_and_carries_the_flags(run_c
     assert code == 0, out
     envelope = envelope_of(out)
     assert envelope["plan"]["preflight"]["required"] == ["manage_topics"]
+    # The creator holds it, and Telegram's participant object is what says so.
+    assert envelope["warnings"] == [] and envelope["plan"]["preflight"]["missing"] == []
     assert envelope["target"]["rid"] == f"tg:topic:{FORUM_ID}:217"
     sent = next(r for r in fake.world.requests if type(r).__name__ == "EditForumTopicRequest")
     # The fields the flags did not name stay None: Telegram leaves those alone.

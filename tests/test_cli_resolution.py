@@ -10,6 +10,7 @@ from telegram_tools.config import parse_send_allowlist
 from telegram_tools.send import SendNotAllowedError
 from telegram_tools.models import DeleteResult, TopicInfo
 from telegram_tools.resolver import ResolvedChat
+from test_adapters import creator
 
 
 class FakeClient:
@@ -17,7 +18,8 @@ class FakeClient:
         return SimpleNamespace(id=1)
 
     async def get_permissions(self, chat, user):
-        return SimpleNamespace(delete_messages=True)
+        # The creator: clear-messages needs delete_messages and delete group is_creator.
+        return creator()
 
     async def get_input_entity(self, chat):
         raise AssertionError("CLI handlers should use resolve_chat(), not direct get_input_entity().")

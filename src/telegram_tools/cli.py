@@ -658,14 +658,19 @@ def _in_bot_mode(report: Reporter) -> bool:
     return report.acting is not None and report.acting.mode == "bot"
 
 
-async def _rights(client, report: Reporter, peer) -> Rights:
-    """The rights this run's identity holds in `peer`: the bot's under --as-bot, else the account's."""
+async def _rights(client, report: Reporter, resolved) -> Rights:
+    """The rights this run's identity holds in the chat `resolved` names: the bot's under --as-bot, else the account's.
+
+    The probe is handed the chat entity the resolution already fetched as well
+    as its peer, because a member's send rights are the chat's defaults as much
+    as its own, and a direct chat is known by it.
+    """
     me = report.me
     if me is None:
         me = await client.get_me()
         report.me = me
     probe = BotPermissions(client, me) if _in_bot_mode(report) else ChatPermissions(client, me)
-    return await probe.probe(peer)
+    return await probe.probe(resolved.input_entity, resolved.entity)
 
 
 async def _resolve(client, report: Reporter, reference):
@@ -742,7 +747,7 @@ async def _run_clear_messages(client, args, *, report: Reporter | None = None) -
     report.set_target(chat)
     report.show_banner()
 
-    rights = await _rights(client, report, peer)
+    rights = await _rights(client, report, resolved)
     _require_delete_permission(rights, what="clearing messages")
 
     if args.all_topics:
@@ -1421,7 +1426,7 @@ async def _run_send(client, args, config, *, report: Reporter | None = None) -> 
     at = None if raw_at is None else watch_ops.require_future(watch_ops.parse_when(raw_at))
     target = SendTarget(chat_id=resolved.id, chat_title=chat.title, topic=topic, reply_to=reply_to, at=at)
 
-    rights = await _rights(client, report, peer)
+    rights = await _rights(client, report, resolved)
     identity = await _acting(client, report)
     mutation_params = {"files": len(files), "text": bool(text)}
     if reply_to is not None:
@@ -1609,9 +1614,9 @@ async def _run_message(client, args, config, *, report: Reporter | None = None) 
         required.append("edit_messages")
     if verb == "delete" and others:
         required.append("delete_messages")
-    rights = await _rights(client, report, peer)
+    rights = await _rights(client, report, resolved)
 
-    to_rights = rights if to_resolved is None else await _rights(client, report, to_resolved.input_entity)
+    to_rights = rights if to_resolved is None else await _rights(client, report, to_resolved)
 
     execute = bool(getattr(args, "execute", False))
     yes = bool(getattr(args, "yes", False))
@@ -1818,7 +1823,7 @@ async def _run_create(client, args, *, report: Reporter | None = None) -> int:
         chat = ChatTargets.chat_target(resolved, args.chat)
         chat_title = chat.title
         report.set_target(chat)
-        rights = await _rights(client, report, peer)
+        rights = await _rights(client, report, resolved)
 
     report.show_banner()
     forum = bool(getattr(args, "forum", False))
@@ -1915,7 +1920,7 @@ async def _run_delete(client, args, *, report: Reporter | None = None) -> int:
     chat = ChatTargets.chat_target(resolved, args.chat)
     title = chat.title
     identity = await _acting(client, report)
-    rights = await _rights(client, report, peer)
+    rights = await _rights(client, report, resolved)
     command = f"delete {args.delete_kind}"
 
     if args.delete_kind == "topic":
@@ -2066,7 +2071,7 @@ async def _run_leave(client, args, *, report: Reporter | None = None) -> int:
             "and its history is deleted in Telegram itself.",
             code="TARGET_KIND_MISMATCH",
         )
-    rights = await _rights(client, report, peer)
+    rights = await _rights(client, report, resolved)
     creator = bool(getattr(resolved.entity, "creator", False)) or "is_creator" in rights.held
     if creator:
         # Telegram has no call that takes a creator out of its own supergroup,
@@ -2257,7 +2262,7 @@ async def _run_structure_apply(client, args, config, *, report: Reporter) -> int
     else:
         target, kind, resolved = await _structure_target(client, report, args.chat)
         structure_ops.require_same_kind(blueprint, kind, target)
-        rights = await _rights(client, report, resolved.input_entity)
+        rights = await _rights(client, report, resolved)
     report.set_target(target)
     report.show_banner()
 
@@ -2973,7 +2978,7 @@ async def _run_manage(client, args, *, report: Reporter) -> int:
     report.show_banner()
     kind = _manage_kind(resolved.entity, target)
     port = TelegramManagePort(client)
-    rights = await _rights(client, report, peer)
+    rights = await _rights(client, report, resolved)
     if _in_bot_mode(report) and "is_admin" in rights.answered and "is_admin" not in rights.held:
         raise CommandError(
             f"{report.acting.label} is not an admin of {target.title}, so `{op.command}` cannot run as it.",
@@ -3653,11 +3658,10 @@ async def _run_schedule_post(args, schedules, identity: Identity, *, client, rep
     if not text:
         raise ValueError("schedule post needs --text.")
     resolved, _chat, _topic, destination = await _resolve_destination(client, report, args.chat, getattr(args, "topic", None))
-    peer = resolved.input_entity
     report.set_target(destination)
     when = None if args.at is None else watch_ops.require_future(watch_ops.parse_when(args.at))
     every = None if args.every is None else watch_ops.check_every(args.every)
-    rights = await _rights(client, report, peer)
+    rights = await _rights(client, report, resolved)
     plan, warnings = build_plan(
         identity=identity,
         command="schedule post",
@@ -3717,7 +3721,7 @@ async def _run_schedule_cancel(args, schedules, identity: Identity, *, client, r
                 code="TARGET_NOT_FOUND",
                 hint=f"telegram-tools schedule list --chat {reference}",
             )
-        rights = await _rights(client, report, resolved.input_entity)
+        rights = await _rights(client, report, resolved)
         plan, warnings = build_plan(
             identity=identity,
             command="schedule cancel",
