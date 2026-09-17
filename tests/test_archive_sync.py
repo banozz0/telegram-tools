@@ -650,6 +650,7 @@ def test_the_menus_status_row_prints_the_scopes_an_older_rendering_wrote(capsys,
 
         banner = None
         config = None
+        acting = None
 
         async def client(self):
             raise AssertionError("archive status opens no connection")

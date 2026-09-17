@@ -965,8 +965,8 @@ def test_the_menu_shows_a_warning_before_it_offers_the_real_row(home, monkeypatc
 
     session.client = connected
 
-    async def runner(args, *, client=None, config=None):
-        return await cli.run(args, client=client, config=config)
+    async def runner(args, *, client=None, config=None, acting=None):
+        return await cli.run(args, client=client, config=config, acting=acting)
 
     # Delete > a group or channel > Forum groups > Hermes > dry run, then back out.
     code, _calls, output = run_menu([DELETE, "1", "1", "1", "0", "0", "0", "0", "0"], session=session, runner=runner)
