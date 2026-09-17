@@ -23,7 +23,7 @@ from telethon.errors import FloodWaitError
 from telethon.errors.rpcbaseerrors import BadRequestError
 
 from telegram_tools import archive as archive_store
-from telegram_tools import cli
+from telegram_tools import cli, menu, records
 from telegram_tools._core.archive import Archive, SKIPPED_REASONS
 from telegram_tools._core.contract import validate_envelope
 from telegram_tools._core.identity import Identity
@@ -532,6 +532,203 @@ def test_a_rendering_nothing_is_behind_on_is_still_said_out_loud():
     assert archive_store.format_rendering(current) == [
         "rendering every scope holding messages has been walked whole since text rendering 2"
     ]
+
+
+# -- the rendering stamp this tool writes (card agent-bo-95422306) ---------
+#
+# The screen above had nothing to show: `open_archive` declared no rendering,
+# so the store stamped no scope and every status said "no rendering version is
+# declared". These drive the real store through the real commands.
+
+STALE_SUMMARY = "{scopes} scope(s) holding {messages} message(s) have not been walked whole since text rendering 2"
+REBUILD = "rebuild one with `archive sync --full --scope RID`"
+
+
+def written_by_an_older_release(*, render_version=0, only=None, full=False):
+    """The archive as an earlier release left it: the same walk, under an older rendering.
+
+    `render_version=0` is every release from 3.23.0 to 3.33.0: the text a row
+    holds changed twice in that range and none of them stamped a scope.
+    """
+    archive_store.open_archive().close()  # the 0600 file, made the way the tool makes it
+    with Archive.open(archive_store.paths_for().archive, render_version=render_version) as archive:
+        run(archive.sync(TelegramArchiveSource(FakeClient(), only=only), IDENTITY, full=full))
+
+
+def rendering_of(run_cli, capsys) -> dict:
+    code, out, _err, fake = run_cli(["--json", "archive", "status"], capsys=capsys)
+    assert code == 0 and not fake.pages, "status reads the file; it asks Telegram for nothing"
+    return envelope_of(out)["result"]["rendering"]
+
+
+def test_the_tool_declares_the_rendering_its_rows_are_written_with(home):
+    assert records.TEXT_RENDERING == 2, "3.23.0 derived a poll's and an event's text (1), 3.24.0 ten attachment kinds' (2)"
+    with archive_store.open_archive() as archive:
+        assert archive.render_version == records.TEXT_RENDERING
+
+
+def test_a_fresh_archive_reports_nothing_behind(run_cli, capsys, home):
+    rendering = rendering_of(run_cli, capsys)
+    assert rendering["version"] == 2 and rendering["behind"] == [] and rendering["scopes"] == 0
+
+    run_cli(["archive", "sync"], capsys=capsys)
+    rendering = rendering_of(run_cli, capsys)
+    assert rendering["behind"] == [] and rendering["messages"] == 0 and rendering["hint"] == ""
+    assert rendering["summary"] == "every scope holding messages has been walked whole since text rendering 2"
+
+    code, out, _err, _fake = run_cli(["archive", "status"], capsys=capsys)
+    assert code == 0
+    assert "rendering every scope holding messages has been walked whole since text rendering 2" in out
+    assert REBUILD not in out
+
+
+def test_a_scope_an_older_rendering_walked_is_named_with_its_count_and_the_rebuild(run_cli, capsys, home):
+    run_cli(["archive", "sync"], capsys=capsys)
+    # Deploys walked whole again, by a release one rendering older than this one.
+    written_by_an_older_release(render_version=1, only=[DEPLOYS], full=True)
+
+    rendering = rendering_of(run_cli, capsys)
+    assert rendering["behind"] == [{"rid": DEPLOYS, "title": "Deploys", "version": 1, "messages": 40}]
+    assert (rendering["scopes"], rendering["messages"]) == (1, 40)
+    assert rendering["summary"] == STALE_SUMMARY.format(scopes=1, messages=40)
+    assert rendering["hint"].endswith(REBUILD)
+
+    code, out, _err, _fake = run_cli(["archive", "status"], capsys=capsys)
+    assert code == 0
+    assert "rendering " + STALE_SUMMARY.format(scopes=1, messages=40) in out
+    assert f"          {DEPLOYS}\tDeploys\t40 message(s)" in out
+    assert SUPPORT not in out and ALERTS not in out, "the scopes this rendering walked are not named"
+    assert REBUILD in out
+
+    # The command the hint names is the one that clears it.
+    code, _out, _err, _fake = run_cli(["archive", "sync", "--full", "--scope", DEPLOYS], capsys=capsys)
+    assert code == 0
+    assert rendering_of(run_cli, capsys)["behind"] == []
+
+
+def test_an_archive_no_release_stamped_names_every_scope_holding_rows(run_cli, capsys, home):
+    """The upgrade: no release before this one stamped a scope, so nothing in the
+    store says which rows predate 3.23.0 and 3.24.0. Every scope holding rows is
+    behind -- the store's own conservative answer -- until a full walk rewrites it."""
+    written_by_an_older_release()
+
+    rendering = rendering_of(run_cli, capsys)
+    assert {row["rid"]: (row["title"], row["version"], row["messages"]) for row in rendering["behind"]} == {
+        DEPLOYS: ("Deploys", None, 40),
+        SUPPORT: ("Support", None, 5),
+        ALERTS: ("Alerts", None, 7),
+    }
+    assert rendering["summary"] == STALE_SUMMARY.format(scopes=3, messages=52)
+
+    code, out, _err, _fake = run_cli(["archive", "status"], capsys=capsys)
+    assert "rendering " + STALE_SUMMARY.format(scopes=3, messages=52) in out
+    assert f"          {ALERTS}\tAlerts\t7 message(s)" in out
+    assert REBUILD in out
+
+    # A resume walks only what arrived since, which proves nothing about the rows below it.
+    run_cli(["archive", "sync"], capsys=capsys)
+    assert len(rendering_of(run_cli, capsys)["behind"]) == 3
+    run_cli(["archive", "sync", "--full", "--scope", DEPLOYS], capsys=capsys)
+    assert [row["rid"] for row in rendering_of(run_cli, capsys)["behind"]] == [ALERTS, SUPPORT]
+    run_cli(["archive", "sync", "--full"], capsys=capsys)
+    assert rendering_of(run_cli, capsys)["behind"] == []
+
+
+def test_the_menus_status_row_prints_the_scopes_an_older_rendering_wrote(capsys, home, monkeypatch):
+    written_by_an_older_release()
+    fake = FakeClient()
+
+    async def started(_client, *, authorize=True):
+        return fake
+
+    # The account the offline status acts as, read once, as the CLI does.
+    monkeypatch.setattr(cli, "create_client", lambda _config: fake)
+    monkeypatch.setattr(cli, "start_client", started)
+
+    class Session:
+        """The menu's session with nothing in it: status never asks for its connection."""
+
+        banner = None
+        config = None
+
+        async def client(self):
+            raise AssertionError("archive status opens no connection")
+
+        async def close(self):
+            return None
+
+    keys = iter(["2", "3", "", "", "0"])  # Read > Archive status, every identity, Enter, exit
+    screens: list[str] = []
+    code = run(menu.run_menu(read=lambda _prompt: next(keys), write=screens.append, session=Session(), runner=cli.run))
+    out = capsys.readouterr().out
+
+    assert code == 0 and not any(str(line).startswith("error:") for line in screens)
+    assert "rendering " + STALE_SUMMARY.format(scopes=3, messages=52) in out
+    assert f"          {DEPLOYS}\tDeploys\t40 message(s)" in out
+    assert REBUILD in out
+    assert not fake.pages
+
+
+def test_the_two_human_archive_exports_carry_the_marks_the_search_table_does(run_cli, capsys, home):
+    """3.28.0 marked the printed table and left markdown and html bare, so an archived
+    forward and a copy of it were one row twice in a file. Those two formats have fixed
+    columns, so the marks ride in the text, as the live exports' do; json, jsonl and csv
+    keep the text as stored and carry the keys the marks come from."""
+
+    def row(number, text, **fields):
+        made = message(number)
+        vars(made).update(raw_text=text, **fields)
+        return made
+
+    origin = SimpleNamespace(sender_id=HARRY.id, sender=HARRY, chat_id=None, chat=None, from_name=None, date=None)
+    client = FakeClient(
+        rows={
+            (CHANNEL_ID, None): [
+                row(304, "deploy map", media=SimpleNamespace(geo=object())),
+                row(303, "deploy photo", media=SimpleNamespace(photo=SimpleNamespace(id=55, sizes=[]))),
+                row(302, "deploy notes"),
+                row(301, "deploy notes", forward=origin),
+            ]
+        }
+    )
+    run_cli(["archive", "sync", "--scope", ALERTS], client=client, capsys=capsys)
+
+    written = {}
+    for fmt in ("markdown", "html", "json", "jsonl", "csv"):
+        code, out, _err, _fake = run_cli(
+            ["--json", "archive", "export", "--query", "deploy", "--format", fmt, "--output", f"marks.{fmt}"],
+            capsys=capsys,
+        )
+        assert code == 0
+        written[fmt] = Path(envelope_of(out)["result"]["output"]).read_text(encoding="utf-8")
+
+    lines = {line.split(" | ")[0]: line for line in written["markdown"].splitlines() if line.startswith("| 30")}
+    assert "| [fwd @harry] «deploy» notes |" in lines["| 301"]
+    assert "| «deploy» notes |" in lines["| 302"], "a copy names nobody, and that is the whole difference"
+    assert lines["| 303"].endswith("| «deploy» photo | 📎 |"), "the media column already says it holds a file"
+    assert lines["| 304"].endswith("| [media] «deploy» map |  |"), "no file was noted, so the text says it"
+
+    assert '<td class="text">[fwd @harry] <mark>deploy</mark> notes</td>' in written["html"]
+    assert '<td class="text"><mark>deploy</mark> notes</td>' in written["html"]
+    assert '<td class="text">[media] <mark>deploy</mark> map</td>' in written["html"]
+
+    stored = {item["message_id"]: item for item in json.loads(written["json"])}
+    assert stored["301"]["text"] == "deploy notes" and stored["301"]["highlight"] == "«deploy» notes"
+    assert stored["301"]["forwarded_from"]["label"] == "@harry"
+    for fmt in ("json", "jsonl", "csv"):
+        assert "[fwd" not in written[fmt] and "[media]" not in written[fmt], f"{fmt} keeps the text as stored"
+
+    # `search --archive --output` is the same export by another door.
+    code, out, _err, _fake = run_cli(
+        ["--jsonl", "search", "--archive", "--chat", str(CHANNEL_ID), "--keyword", "deploy", "--format", "markdown", "--output", str(home / "door.md")],
+        capsys=capsys,
+    )
+    assert code == 0
+    assert "| [fwd @harry] «deploy» notes |" in (home / "door.md").read_text(encoding="utf-8")
+    streamed = [json.loads(line) for line in out.splitlines() if line.strip()]
+    assert {row["message_id"]: row["text"] for row in streamed if "message_id" in row}["301"] == "deploy notes", (
+        "the streamed records are the rows as stored; only the file is marked"
+    )
 
 
 def test_archive_search_and_all_five_export_formats_agree_on_ids_and_order(run_cli, capsys, home):

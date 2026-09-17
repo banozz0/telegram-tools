@@ -442,9 +442,13 @@ names the files).
   `result.messages[].highlight` carries the match marked `«…»`, `context_before` and
   `context_after` the neighbours. Its printed rows carry the same marks a live
   `search` row does — `[fwd …]`, `[poll]`, `[file] …`, `[event] …`, `[media]` —
-  so a message says the same thing about itself read back as it did read live. An empty answer on a fresh machine usually means
+  so a message says the same thing about itself read back as it did read live, and so
+  do the rows of a `markdown` or `html` archive export. An empty answer on a fresh machine usually means
   no sync has run: `archive status` says, and `result.coverage` on a sync names every
-  scope it could not read and why.
+  scope it could not read and why. A poll, an event or a file an older release archived
+  may hold no searchable text: `result.rendering.behind` on `archive status` lists those
+  scopes with their message counts, and `archive sync --full --scope <rid>` rebuilds one
+  by refetching the whole scope — offer it, do not run it unasked on a large chat.
 - **`archive sync` is the one archive command that connects.** It reads history and
   writes only the local file; it never posts, edits or deletes anything on Telegram,
   so it is fine to run when the user asked for the archive or a history question

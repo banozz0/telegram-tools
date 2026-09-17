@@ -243,6 +243,15 @@ The terms this codebase uses, and the boundaries they imply.
   A photo, a geo point, a story, paid media, a video stream and a web page keep
   `[media]`: none of them loses a string of its own, and a web page is a preview
   of a link the person typed.
+- **Text rendering** — `records.TEXT_RENDERING`, the count of changes to what
+  `message_body` derives (1 was 3.23.0, 2 was 3.24.0); bump it with the next
+  one. `open_archive` declares it, the store stamps a scope with it after a
+  walk that saw the whole scope (a first sync or `--full`, no `--since`), and
+  `archive status` names every scope holding rows under an older stamp or none,
+  because a resume never rewrites a row. No release up to 3.33.0 stamped
+  anything, so every scope they wrote reads as behind: the store cannot tell a
+  pre-3.23.0 row from a later one, and calling it current would hide rows no
+  search can find.
 - **Contact redaction** — a shared contact's `phone_number`, `vcard` and
   `user_id` are never read out of the media at all. The printed row, the
   archive's `text`, `platform_json` and every export column are places someone

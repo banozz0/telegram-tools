@@ -405,9 +405,18 @@ telegram-tools archive forget --scope tg:chat:-1001234567890 --execute        # 
 `archive search` is FTS5 full-text search — words, `"a phrase"`, `AND`, `OR`, `NOT`,
 `prefix*` — ranked by relevance and marked `«like this»` on screen, and it never
 connects. `archive export` writes the same rows the search printed in `json`, `csv`,
-`jsonl`, `markdown` or `html` (one self-contained page, no scripts); a bare `--output`
-name lands in `~/.telegram-tools/exports/`, an absolute path is honoured. `search
---archive` takes the live command's flags and answers them from the archive.
+`jsonl`, `markdown` or `html` (one self-contained page, no scripts); the last two put
+the row's marks (`[fwd …]`, `[file]`, …) in front of its text, as the live export does;
+a bare `--output` name lands in `~/.telegram-tools/exports/`, an absolute path is
+honoured. `search --archive` takes the live command's flags and answers them from the
+archive.
+
+A sync never rewrites a row it already holds, so a row keeps the text the release that
+stored it could derive: a poll, an event or a file archived before 3.24.0 has no text a
+search can find. `archive status` names every scope not walked whole under the current
+rendering, with its message count; `archive sync --full --scope RID` rebuilds one by
+fetching the whole scope again. Releases up to 3.33.0 recorded no rendering, so an archive
+they wrote lists every scope that holds messages until each is rebuilt.
 
 The archive is per profile's account, not per profile: every row records which
 identity synced it, and `--identity tg:user:ID` narrows a search or a status to one.
