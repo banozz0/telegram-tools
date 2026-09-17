@@ -563,11 +563,13 @@ The terms this codebase uses, and the boundaries they imply.
   a chat has), `yes_allowlist` (the unattended path, where an allowlist exists
   — only `send` and the message verbs have one; no administration or folder
   write does).
-- **Preflight** — the rights a plan needs against the rights the account holds.
-  The distinction that matters is between a right Telegram reports as absent,
-  which refuses the write by name, and one it will not answer for at all — a
-  private chat has no participant permissions — which is named as unconfirmed
-  and lets the write through, because that is what has always happened. The
+- **Preflight** — the rights a plan needs against the rights the account holds
+  (**Held rights** says where each one is read from). The distinction that
+  matters is between a right Telegram reports as absent, which refuses the
+  write by name, and one it will not answer for at all — an unbanned member's
+  `manage_topics`, which Telegram's own documentation disagrees about — which
+  is named as unconfirmed and lets the write through, because that is what has
+  always happened. A direct chat raises neither: it is not asked about. The
   naming is a **warning**: `Reporter.warn` keeps it for the envelope's
   `warnings` and prints `warning: <sentence>` the moment it is raised, which on
   every write is before the preview and the gate, dry runs included — a

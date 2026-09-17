@@ -22,7 +22,18 @@ def test_the_package_version_matches_pyproject():
 
 
 def test_the_changelog_leads_with_this_version():
-    heading = re.search(r"^## (\S+)", (ROOT / "CHANGELOG.md").read_text(), re.M)
-    assert heading and heading.group(1) == __version__, (
-        "a user-visible change gets its CHANGELOG entry and version bump in the same commit"
+    """One heading may sit above it, and only one: `## Unreleased`.
+
+    A wave of fix branches lands its entries as each merges and one release
+    commit afterwards renames that heading to the version it bumps to, so the
+    entries are never written twice from memory. What the file may still never
+    do is lag the installed version: the first *version* heading is the one
+    `__version__` reports, whether or not a staging heading leads.
+    """
+    headings = re.findall(r"^## (\S+)", (ROOT / "CHANGELOG.md").read_text(), re.M)
+    if headings[:1] == ["Unreleased"]:
+        headings = headings[1:]
+    assert headings[:1] == [__version__], (
+        "a user-visible change gets its CHANGELOG entry in the same commit, and the "
+        "release that ships it renames `## Unreleased` to the version it bumps to"
     )
