@@ -15,6 +15,7 @@ from telegram_tools.bots import IMPLICIT_OTHER_RIGHT, format_bot_profile, get_bo
 from telegram_tools.client import SessionInUseError, create_client, start_client
 from telegram_tools._core import rules as _rules
 from telegram_tools._core.columns import cell
+from telegram_tools._core.contract import CodedError
 from telegram_tools._core.identity import banner as identity_banner
 from telegram_tools.adapters import AccountIdentity
 from telegram_tools.adapters.archive import scope_rid_for
@@ -22,6 +23,7 @@ from telegram_tools import profiles as profile_store
 from telegram_tools.config import ConfigError, load_config, lookup_bot_token, resolve_bot_token
 from telegram_tools.delete import kind_for_type
 from telegram_tools.discovery import list_dialog_choices
+from telegram_tools.envelope import error_for
 from telegram_tools.records import parse_date_bound
 from telegram_tools import messages as message_ops
 from telegram_tools.prompts import BACK, CLEAR, EXIT, MENU, RULE, Extra, after_action, after_run, ask_int, ask_lines, ask_text, choose, edit_field, pick, pick_many
@@ -36,8 +38,11 @@ from telegram_tools.ui import crumb
 
 # What the menu turns into a printed line instead of an exit. EntityResolutionError
 # is a ValueError and PermissionError is an OSError, so both are already covered;
-# anything not named here is a bug and should still be loud.
-MENU_ERRORS = (ConfigError, SessionInUseError, ValueError, OSError, RPCError)
+# anything not named here is a bug and should still be loud. CodedError is the
+# shared store's own refusal -- a scope this archive lacks, no runner holding the
+# lock -- and it is not a ValueError, so without it here the whole menu ended on
+# one (Telegram 7, 2026-09-17: Runner > Stop with nothing running).
+MENU_ERRORS = (ConfigError, SessionInUseError, ValueError, OSError, RPCError, CodedError)
 
 ROOT_TITLE = "telegram-tools"
 MAIN = "Main"
@@ -210,9 +215,17 @@ async def _call(args, *, session, runner, write, connect: bool = True, execute_r
 def write_error(write, exc: BaseException) -> None:
     """The error line every catch in here prints, and under it the hint when
     the refusal carries one: the menu has no envelope to read a hint from, and
-    the hint is the way out (transfer ownership, run delete, ask an admin)."""
-    write(f"error: {exc}")
-    hint = getattr(exc, "hint", None)
+    the hint is the way out (transfer ownership, run delete, ask an admin).
+
+    The envelope error is what the two lines come from when the contract has a
+    code for this failure, exactly as `cli.main` prints it on the flag path: a
+    `CodedError` keeps its message and hint on `.error` and stringifies as
+    `CODE: message`, so reading the exception itself would print the code twice
+    and drop the hint."""
+    error = error_for(exc)
+    message = str(exc) if error is None else error.message
+    hint = getattr(exc, "hint", None) if error is None else error.hint
+    write(f"error: {message}")
     if hint:
         write(f"hint: {hint}")
 
