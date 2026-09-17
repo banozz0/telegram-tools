@@ -840,3 +840,138 @@ def test_the_readback_sentence_stays_off_stdout_under_json(run_cli, monkeypatch,
     assert envelope["evidence"]["readback"] == "message 9001 is in Agency"
     # stdout is one envelope; the sentence is in it, not printed beside it.
     assert "Read back:" not in out and "Read back:" not in err
+
+
+# -- the warnings a person reads ------------------------------------------
+#
+# A warning is raised before a write's gate, which is the one moment it can
+# change what the person answers. It prints where it is raised, on the stream
+# the preview uses, so it always lands above the question -- and a dry run
+# shows it too, because the dry run is where the decision to execute is made.
+
+UNREPORTED = SimpleNamespace()  # a chat Telegram answers no rights for
+
+
+def _warning_lines(text: str) -> list[str]:
+    return [line for line in text.splitlines() if line.startswith("warning: ")]
+
+
+def test_a_human_send_prints_its_warning_above_the_question(run_cli, capsys):
+    code, out, _err, fake = run_cli(
+        ["send", "--chat", str(CHAT_ID), "--text", "ship it"],
+        client=FakeClient(rights=UNREPORTED),
+        capsys=capsys,
+        answer="y",
+    )
+
+    assert code == 0 and fake.sent
+    [warning] = _warning_lines(out)
+    assert "could not confirm send_messages" in warning
+    # Above the preview and the question, below the banner that names the account.
+    assert out.index("Acting as:") < out.index(warning) < out.index("ship it") < out.index("Send it? [y/N]")
+    # Read before anything was sent, so it cannot say the write already happened.
+    assert "was attempted" not in warning
+
+
+def test_the_envelope_carries_the_same_warning_and_the_gate_reader_sees_it(run_cli, monkeypatch, capsys):
+    monkeypatch.setenv("TELEGRAM_SEND_ALLOWLIST", str(CHAT_ID))
+
+    code, out, err, _fake = run_cli(
+        ["--json", "send", "--chat", str(CHAT_ID), "--text", "ship it", "--yes"],
+        client=FakeClient(rights=UNREPORTED),
+        capsys=capsys,
+    )
+
+    envelope = envelope_of(out)
+    assert (code, envelope["status"]) == (0, "ok")
+    [carried] = envelope["warnings"]
+    # stdout is still one envelope; the words a person would read are on
+    # stderr, where the banner and a gate's preview already go under --json.
+    assert _warning_lines(err) == [f"warning: {carried}"]
+
+
+def test_the_human_line_and_the_envelope_say_the_same_thing(run_cli, monkeypatch, capsys):
+    monkeypatch.setenv("TELEGRAM_SEND_ALLOWLIST", str(CHAT_ID))
+    argv = ["send", "--chat", str(CHAT_ID), "--text", "ship it", "--yes"]
+
+    _code, human, _err, _fake = run_cli(argv, client=FakeClient(rights=UNREPORTED), capsys=capsys)
+    _code, machine, _err, _fake = run_cli(["--json", *argv], client=FakeClient(rights=UNREPORTED), capsys=capsys)
+
+    assert _warning_lines(human) == [f"warning: {text}" for text in envelope_of(machine)["warnings"]]
+
+
+def test_a_dry_run_shows_the_warning_the_real_run_would_raise(run_cli, capsys):
+    code, out, _err, _fake = run_cli(
+        ["delete", "group", "--chat", str(CHAT_ID)], client=FakeClient(rights=UNREPORTED), capsys=capsys
+    )
+
+    assert code == 0
+    [warning] = _warning_lines(out)
+    assert "could not confirm is_creator" in warning
+    assert out.index(warning) < out.index("Dry-run:")
+
+
+def test_a_run_with_no_warnings_prints_no_warning_line_and_no_heading(run_cli, monkeypatch, capsys):
+    monkeypatch.setenv("TELEGRAM_SEND_ALLOWLIST", str(CHAT_ID))
+
+    code, out, err, _fake = run_cli(
+        ["send", "--chat", str(CHAT_ID), "--text", "ship it", "--yes"], capsys=capsys
+    )
+    assert code == 0
+    assert "warning" not in out.lower() and "warning" not in err.lower()
+
+    code, out, err, _fake = run_cli(["--json", "send", "--chat", str(CHAT_ID), "--text", "ship it", "--yes"], capsys=capsys)
+    assert envelope_of(out)["warnings"] == []
+    assert "warning" not in err.lower()
+
+
+def test_a_warning_raised_twice_prints_once():
+    printed = []
+    report = Reporter(stdout=SimpleNamespace(write=printed.append, flush=lambda: None))
+
+    report.warn("the rules do not load: bad file")
+    report.warn("the rules do not load: bad file")
+
+    assert "".join(printed) == "warning: the rules do not load: bad file\n"
+    assert report.envelope()["warnings"] == ["the rules do not load: bad file"]
+
+
+def test_a_permission_answer_that_names_other_rights_is_not_called_no_answer(run_cli, capsys):
+    # What Telethon really returns for a supergroup: a participant object that
+    # answers is_creator, is_admin and the admin flags, and has no send_messages
+    # field at all. Telegram did report permissions; it did not name this one.
+    reported = SimpleNamespace(is_creator=False, is_admin=False, delete_messages=False)
+
+    _code, out, _err, _fake = run_cli(
+        ["send", "--chat", str(CHAT_ID), "--text", "ship it"], client=FakeClient(rights=reported), capsys=capsys, answer="n"
+    )
+
+    [warning] = _warning_lines(out)
+    assert "reports no permissions" not in warning
+    assert "send_messages" in warning
+
+
+def test_the_menu_shows_a_warning_before_it_offers_the_real_row(home, monkeypatch, capsys):
+    from test_menu import DELETE, FakeSession, run_menu, screens
+
+    fake = FakeClient([dialog(chat_id=-100111, title="Hermes", username="hermes")], rights=UNREPORTED)
+    session = FakeSession()
+
+    async def connected():
+        return fake
+
+    session.client = connected
+
+    async def runner(args, *, client=None, config=None):
+        return await cli.run(args, client=client, config=config)
+
+    # Delete > a group or channel > Forum groups > Hermes > dry run, then back out.
+    code, _calls, output = run_menu([DELETE, "1", "1", "1", "0", "0", "0", "0", "0"], session=session, runner=runner)
+
+    assert code == 0
+    printed = capsys.readouterr().out
+    [warning] = _warning_lines(printed)
+    assert "could not confirm is_creator" in warning
+    assert printed.index(warning) < printed.index("Dry-run:")
+    # The dry run ran and the real row was offered after it; nothing was deleted.
+    assert "Delete it for real" in screens(output)
