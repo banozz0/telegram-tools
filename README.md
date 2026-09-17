@@ -120,7 +120,7 @@ ask for the profile's exact name at a terminal, in either mode, and neither has 
 ### More than one account
 
 ```bash
-telegram-tools auth --profile work           # log a second account in
+telegram-tools --profile work auth           # log a second account in
 telegram-tools --profile work discover       # act as it (the flag goes before the command)
 export TELEGRAM_TOOLS_PROFILE=work           # or make it this shell's default
 ```

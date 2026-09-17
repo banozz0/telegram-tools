@@ -46,7 +46,7 @@ class LoginRequired(CommandError):
         super().__init__(
             f"Profile {profile!r} is not logged in.",
             code="LOGIN_REQUIRED",
-            hint=f"telegram-tools auth --profile {profile}",
+            hint=f"telegram-tools --profile {profile} auth",
         )
 
 

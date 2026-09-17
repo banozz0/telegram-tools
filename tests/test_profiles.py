@@ -753,7 +753,7 @@ def test_machine_mode_refuses_an_unauthorised_session_instead_of_prompting(run_c
     envelope = json.loads(out)
     assert code == 2
     assert envelope["error"]["code"] == "LOGIN_REQUIRED"
-    assert envelope["error"]["hint"] == "telegram-tools auth --profile default"
+    assert envelope["error"]["hint"] == "telegram-tools --profile default auth"
     assert client.sent_codes == []
 
 
@@ -762,7 +762,7 @@ def test_a_named_profile_is_named_in_the_refusal(run_cli, capsys):
         ["--json", "--profile", "work", "discover"], client=FakeClient(authorized=False), capsys=capsys
     )
 
-    assert json.loads(out)["error"]["hint"] == "telegram-tools auth --profile work"
+    assert json.loads(out)["error"]["hint"] == "telegram-tools --profile work auth"
 
 
 # -- nothing here ever prints a secret -------------------------------------
