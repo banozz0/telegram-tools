@@ -830,6 +830,7 @@ async def _run_search(client, args, *, report: Reporter | None = None) -> int:
         since=args.since,
         until=args.until,
         limit=args.limit,
+        chat_title=report.target_title,
     )
 
     for record in records:

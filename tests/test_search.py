@@ -5,6 +5,9 @@ from types import SimpleNamespace
 import pytest
 from telethon.tl import types as tl
 
+from telethon.errors.rpcbaseerrors import BadRequestError
+
+from telegram_tools.envelope import CommandError
 from telegram_tools.search import DERIVED_SCAN, format_message_records, search_messages
 
 
@@ -340,3 +343,65 @@ def test_a_whole_chat_search_without_a_keyword_still_makes_one_pass():
 
     assert len(client.iter_calls) == 1, "nothing is derived to look for, so nothing is read for it"
     assert [record["id"] for record in records] == [16, 15, 14]
+
+
+class ForumClient(FakeClient):
+    """A forum whose topics are 1, 2, 4, 6, 30 and 31: any other `reply_to` is Telegram's 400."""
+
+    TOPICS = (1, 2, 4, 6, 30, 31)
+
+    def __init__(self, messages, *, forum=True):
+        super().__init__(messages)
+        self.forum = forum
+        self.requests = []
+
+    def iter_messages(self, chat, **kwargs):
+        topic = kwargs.get("reply_to")
+        if topic is not None and topic not in self.TOPICS:
+            async def refused():
+                raise BadRequestError(request=None, message="TOPIC_ID_INVALID")
+                yield  # noqa: unreachable - makes this an async generator, as Telethon's is
+            return refused()
+        return super().iter_messages(chat, **kwargs)
+
+    async def __call__(self, request):
+        self.requests.append(type(request).__name__)
+        if not self.forum:
+            raise BadRequestError(request=None, message="CHANNEL_FORUM_MISSING")
+        topics = [SimpleNamespace(id=topic_id, title=f"t{topic_id}", top_message=topic_id) for topic_id in self.TOPICS]
+        return SimpleNamespace(topics=topics, count=len(topics))
+
+
+def test_a_topic_the_chat_does_not_have_is_refused_by_name_with_the_real_topic_ids():
+    """Live 2026-09-16: `search --topic 3` on a forum without a topic 3 printed a
+    40-line Telethon traceback ending `RPCError 400: TOPIC_ID_INVALID`, exit 1,
+    where every other bad target is refused by name."""
+    client = ForumClient([SimpleNamespace(id=1, date=datetime(2026, 7, 1, tzinfo=UTC), sender_id=1, raw_text="x")])
+
+    with pytest.raises(CommandError) as refused:
+        asyncio.run(search_messages(client, "@group", chat_id=-1001, topic_id=3, chat_title="campaign 4.7"))
+
+    assert refused.value.code == "TARGET_NOT_FOUND"
+    assert str(refused.value) == "No topic 3 in campaign 4.7."
+    assert refused.value.hint == "its topics are 1, 2, 4, 6, 30, 31 - telegram-tools discover names them"
+    assert client.requests == ["GetForumTopicsRequest"], "the hint reads the chat's topic list once"
+
+
+def test_the_refusal_still_names_the_topic_when_the_list_cannot_be_read():
+    client = ForumClient([], forum=False)
+
+    with pytest.raises(CommandError) as refused:
+        asyncio.run(search_messages(client, "@group", chat_id=-1001, topic_id=3))
+
+    assert refused.value.code == "TARGET_NOT_FOUND"
+    assert str(refused.value) == "No topic 3 in this chat."
+    assert refused.value.hint == "telegram-tools discover lists its topics"
+
+
+def test_a_topic_the_chat_has_still_searches():
+    client = ForumClient([SimpleNamespace(id=1, date=datetime(2026, 7, 1, tzinfo=UTC), sender_id=1, raw_text="x")])
+
+    records = asyncio.run(search_messages(client, "@group", chat_id=-1001, topic_id=4))
+
+    assert [record["id"] for record in records] == [1]
+    assert client.requests == [], "nothing lists topics on the happy path"

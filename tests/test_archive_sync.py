@@ -20,6 +20,7 @@ from types import SimpleNamespace
 
 import pytest
 from telethon.errors import FloodWaitError
+from telethon.errors.rpcbaseerrors import BadRequestError
 
 from telegram_tools import archive as archive_store
 from telegram_tools import cli
@@ -138,6 +139,10 @@ class FakeClient:
     async def iter_messages(self, peer, *, offset_id=None, min_id=0, reply_to=None, wait_time=None, **_):
         key = (getattr(peer, "chat_id", None), reply_to)
         self.pages.append({"scope": key, "offset_id": offset_id, "min_id": min_id})
+        known = {topic.id for topic in self.topics.get(key[0], [])}
+        if reply_to is not None and key[0] in self.topics and reply_to not in known:
+            # What Telegram answers a `GetReplies` for a topic the forum lacks.
+            raise BadRequestError(request=None, message="TOPIC_ID_INVALID")
         pending = self.flood.pop(key, None)
         if pending:
             raise FloodWaitError(request=None, capture=pending)
@@ -743,6 +748,21 @@ def test_search_gains_jsonl_markdown_and_html_over_the_same_records(tmp_path):
     html = (tmp_path / "out.html").read_text(encoding="utf-8")
     assert f'data-rid="{DEPLOYS}" data-message-id="2"' in html and "<script" not in html
     assert _ids_from(tmp_path / "out.html", "html") == [(DEPLOYS, "2"), (DEPLOYS, "1")]
+
+
+def test_the_live_search_refuses_a_topic_the_chat_does_not_have(run_cli, capsys):
+    code, out, _err, _fake = run_cli(["--json", "search", "--chat", str(FORUM_ID), "--topic", "3", "--limit", "5"], capsys=capsys)
+    envelope = envelope_of(out)
+    assert code == 2 and envelope["status"] == "refused"
+    assert envelope["error"]["code"] == "TARGET_NOT_FOUND"
+    assert envelope["error"]["message"] == "No topic 3 in Team Hermes."
+    assert envelope["error"]["hint"] == "its topics are 141, 217 - telegram-tools discover names them"
+
+    code, _out, err, _fake = run_cli(["search", "--chat", str(FORUM_ID), "--topic", "3"], capsys=capsys)
+    assert code == 2 and "No topic 3 in Team Hermes." in err and "Traceback" not in err
+
+    code, out, _err, _fake = run_cli(["--json", "search", "--chat", str(FORUM_ID), "--topic", "141", "--limit", "2"], capsys=capsys)
+    assert code == 0 and len(envelope_of(out)["result"]["messages"]) == 2
 
 
 def test_the_live_search_refuses_a_file_format_without_an_output(run_cli, capsys):
