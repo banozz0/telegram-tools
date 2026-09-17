@@ -506,11 +506,12 @@ The terms this codebase uses, and the boundaries they imply.
   screens print, a rid and the profile it came from, plus `via` when a bot acts
   through an account. Never a credential; the
   label is redacted on the way out, not checked and refused. A `@username` is
-  the label whenever there is one; with none, section 5.1 asks for the name plus
-  the **last two digits** of the account's number, because a display name is
-  chosen by its owner and need not distinguish anything — Sven's own reads `--`,
-  which named nothing until the digits were added. Two digits, never more, and
-  the full number does not leave `phone_tail`.
+  the label whenever there is one; with none it is the name plus the account's
+  **user id** — `-- (user 4242)` — because a display name is chosen by its owner
+  and need not distinguish anything, and Sven's own reads `--`. It was the last
+  two digits of the number until 2026-09-17: an account with no username is
+  common, so that put part of a phone number on every screen of a shared
+  terminal. Nothing in a label reads the number now.
 - **Rule** — one `cli-tools/rule/1` JSON file in `~/.telegram-tools/rules/`,
   `0600`, named by its own file (`watch rules remove <name>` is honest that
   way). A trigger (which event kinds), a filter (scope, sender, identity,

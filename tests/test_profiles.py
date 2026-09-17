@@ -681,13 +681,22 @@ def test_migrate_needs_no_credentials(run_cli, home, monkeypatch, capsys):
     assert code == 0
 
 
-def test_doctor_suggests_the_migration_without_performing_it(home, capsys):
+def test_doctor_warns_about_the_migration_without_performing_it(home, capsys):
+    """Card 329: the line carried the hint under an `OK`, which reads as nothing to do.
+
+    `doctor` is the setup screen, so an `OK` beside `auth --migrate` is the
+    only nudge a person gets toward Identity 8.5 and it says there is none.
+    A WARN still exits 0 -- only a FAIL is a failure -- so nothing that passed
+    stops passing.
+    """
     session = legacy_login(home)
 
-    run_doctor(root=home, env={"TELEGRAM_API_ID": "1", "TELEGRAM_API_HASH": "h"}, version_info=(3, 11, 0), home=home)
+    code = run_doctor(root=home, env={"TELEGRAM_API_ID": "1", "TELEGRAM_API_HASH": "h"}, version_info=(3, 11, 0), home=home)
 
     out = capsys.readouterr().out
-    assert "auth --migrate" in out
+    line = next(row for row in out.splitlines() if "auth --migrate" in row)
+    assert line.startswith("WARN"), line
+    assert code == 0, "a suggestion is not a failed check"
     assert session.exists()
     assert str(home) not in out
 
@@ -837,35 +846,43 @@ def test_a_username_is_the_label_whenever_there_is_one():
     assert account_label(_user(username="sven")) == "@sven"
 
 
-def test_an_account_with_no_username_is_told_apart_by_two_digits():
+def test_an_account_with_no_username_is_told_apart_by_its_user_id():
     """Sven's own account, 2026-09-06: first name `--`, no username.
 
     The banner read `Acting as: -- · account` and named nothing, which is the
-    case section 5.1 puts the digits there for -- a display name is chosen by
-    its owner and is not required to distinguish anything.
+    case section 5.1 wants a second half for -- a display name is chosen by
+    its owner and is not required to distinguish anything. That half is the
+    user id, not two digits of the number (card agent-bo-95422329).
     """
     from telegram_tools.adapters.account import account_label
 
-    assert account_label(_user("--", phone=PHONE)) == "-- (…78)"
-    assert account_label(_user("Sven", "Medina", phone="+35679000012")) == "Sven Medina (…12)"
+    assert account_label(_user("--", phone=PHONE, id=4242)) == "-- (user 4242)"
+    assert account_label(_user("Sven", "Medina", phone="+35679000012", id=99)) == "Sven Medina (user 99)"
 
 
-def test_the_label_carries_two_digits_and_never_the_number():
-    from telegram_tools.adapters.account import account_label
+def test_the_label_never_reads_the_phone_number():
+    """Live Telegram 8, 2026-09-17: `Acting as: -- (…NN) · account` on every screen.
 
-    label = account_label(_user("--", phone=PHONE))
+    The account has no username, so a shared terminal and every screenshot of
+    one carried two digits of its owner's number. Two accounts with the same
+    display name are still told apart -- by the id -- and the function that
+    used to read the number is gone, so no label touches it at all.
+    """
+    from telegram_tools.adapters import account as account_adapter
+
+    label = account_adapter.account_label(_user("--", phone=PHONE, id=4242))
 
     assert PHONE not in label
-    assert PHONE.lstrip("+")[:-2] not in label
-    assert sum(character.isdigit() for character in label) == 2
+    assert PHONE.lstrip("+")[-2:] not in label, "not even the tail"
     assert redaction.find(label) == []
+    assert not hasattr(account_adapter, "phone_tail"), "nothing reads the number for a label any more"
 
 
-def test_a_name_with_no_number_to_add_stays_the_name():
+def test_a_name_is_still_told_apart_when_the_account_has_no_number():
     from telegram_tools.adapters.account import account_label
 
-    assert account_label(_user("Sven")) == "Sven"
-    assert account_label(_user("Sven", phone="7")) == "Sven", "one digit is not two"
+    assert account_label(_user("Sven", id=4242)) == "Sven (user 4242)"
+    assert account_label(_user("Sven", phone="7", id=4242)) == "Sven (user 4242)"
 
 
 def test_an_account_with_nothing_of_its_own_falls_back_to_its_id():
@@ -880,5 +897,5 @@ def test_the_banner_names_an_account_that_has_only_a_number(run_cli, capsys, mon
 
     _code, out, _err, _fake = run_cli(["discover"], client=bare, capsys=capsys)
 
-    assert out.splitlines()[0] == "Acting as: -- (…78) · account"
+    assert out.splitlines()[0] == "Acting as: -- (user 4242) · account"
     assert PHONE not in out

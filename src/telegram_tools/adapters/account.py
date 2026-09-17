@@ -63,26 +63,21 @@ DIRECT_RIGHTS = ("send_messages", "send_media", "delete_messages", "pin_messages
 _DIRECT_PEERS = (types.InputPeerUser, types.InputPeerSelf, types.InputPeerUserFromMessage)
 
 
-def phone_tail(user: Any) -> str | None:
-    """The last two digits of this account's number, or None when there are none.
-
-    Two digits and never more. Section 5.1 puts them in the label of an account
-    with no username precisely because a display name is not required to be
-    distinguishing -- a name of `--`, or the same name on two accounts, leaves
-    nothing else to tell them apart. The full number is read here and does not
-    leave this function.
-    """
-    digits = "".join(character for character in str(getattr(user, "phone", "") or "") if character.isdigit())
-    return digits[-2:] if len(digits) >= 2 else None
-
-
 def account_label(user: Any) -> str:
     """What screens call this account: a name, and something to tell it apart.
 
     A `@username` is the best answer and is used whenever there is one. With no
-    username, section 5.1 asks for the name plus the last two digits of the
-    number, because a display name is chosen by its owner and can be anything --
-    blank, punctuation, the same as another account's.
+    username the distinguishing half is the user id, because a display name is
+    chosen by its owner and can be anything -- blank, punctuation, the same as
+    another account's.
+
+    It used to be the last two digits of the number, which section 5.1 asked
+    for. An account with no username is common (Sven's own has none), so the
+    banner put part of a phone number on every screen of a shared terminal and
+    into every screenshot of one -- and unlike the id, which this tool already
+    prints in every rid it resolves, a number is nobody else's business. The
+    id distinguishes absolutely where two digits only mostly did, so nothing
+    is lost by never reading the number at all.
 
     Redacted on the way out, not checked afterwards: a display name is text
     someone else chose, and a name that happens to read as a phone number
@@ -91,16 +86,16 @@ def account_label(user: Any) -> str:
     parts = [getattr(user, "first_name", None), getattr(user, "last_name", None)]
     name = " ".join(part for part in parts if part).strip()
     username = getattr(user, "username", None)
-    tail = phone_tail(user)
+    whoever = f"user {getattr(user, 'id', '?')}"
 
     if username:
         label = f"{name} (@{username})" if name else f"@{username}"
     elif name:
-        label = f"{name} (…{tail})" if tail else name
+        label = f"{name} ({whoever})"
     else:
-        # Nothing the account chose; the id is what is left, and two digits
-        # would add nothing to a number that is already on screen.
-        label = f"user {getattr(user, 'id', '?')}"
+        # Nothing the account chose; the id is all there is, and naming it
+        # twice would say nothing twice.
+        label = whoever
     return redact_text(label)
 
 

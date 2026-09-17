@@ -171,7 +171,9 @@ def format_bot_table(bots: list[BotInfo]) -> str:
     return "\n".join(lines)
 
 
-def format_bot_profile(bot: BotInfo) -> str:
+def format_bot_profile(bot: BotInfo, *, commands_shown: int | None = None) -> str:
+    """One bot as a screen. `commands_shown` caps the command list for a caller
+    that has rows of its own underneath it; `None` prints every one."""
     lines = [
         bot.name or "(unnamed)",
         f"Bot ID: {bot.id}",
@@ -187,8 +189,16 @@ def format_bot_profile(bot: BotInfo) -> str:
 
     lines.extend(["", "Commands", "--------------------------------------------"])
     if bot.commands:
-        width = max(len(command.command) for command in bot.commands)
-        lines.extend(f"/{command.command:<{width}}  {command.description}" for command in bot.commands)
+        shown = bot.commands if commands_shown is None else bot.commands[:commands_shown]
+        width = max(len(command.command) for command in shown)
+        lines.extend(f"/{command.command:<{width}}  {command.description}" for command in shown)
+        hidden = len(bot.commands) - len(shown)
+        if hidden:
+            # Not a pager: this is a display, and the command that prints the
+            # whole list is one line away. A bot with sixty commands otherwise
+            # scrolls its own screen's title out of the terminal.
+            named = f"@{bot.username}" if bot.username else bot.id
+            lines.append(f"… and {hidden} more: telegram-tools bots --bot {named}")
     else:
         lines.append("(none)")
     return "\n".join(lines)
