@@ -79,7 +79,7 @@ from telegram_tools.adapters.blueprint import TelegramBlueprintPort, chat_kind
 from telegram_tools.resolver import EntityResolutionError, resolve_chat
 from telegram_tools.search import format_message_records, search_messages
 from telegram_tools.send import SendTarget, confirm_send, format_send_preview, require_send_allowed, send_message
-from telegram_tools.topics import get_forum_topics, get_forum_topics_by_ids
+from telegram_tools.topics import get_forum_topics, get_forum_topics_by_ids, in_id_order
 from telegram_tools.writes import build_plan, read_back, recheck_for, require_rights
 from telegram_tools import __version__
 
@@ -745,10 +745,12 @@ async def _run_clear_messages(client, args, *, report: Reporter | None = None) -
     rights = await _rights(client, report, peer)
     _require_delete_permission(rights, what="clearing messages")
 
+    # The order the menu's tick screen lists them in. Telegram serves both
+    # lists in its own order, most recent activity first.
     if args.all_topics:
-        topics = await get_forum_topics(client, peer)
+        topics = in_id_order(await get_forum_topics(client, peer))
     else:
-        topics = await get_forum_topics_by_ids(client, peer, args.topics)
+        topics = in_id_order(await get_forum_topics_by_ids(client, peer, args.topics))
 
     identity = await _acting(client, report)
     targets = [ChatTargets.topic_target(chat, topic) for topic in topics]
@@ -766,7 +768,9 @@ async def _run_clear_messages(client, args, *, report: Reporter | None = None) -
         report.warn(warning)
 
     async def rebuild():
-        fresh = await get_forum_topics_by_ids(client, peer, [topic.id for topic in topics])
+        # Sorted like the plan it is compared with: the recheck reads the
+        # mutations in order, and Telegram's order is not the one shown.
+        fresh = in_id_order(await get_forum_topics_by_ids(client, peer, [topic.id for topic in topics]))
         return build_plan(
             identity=identity,
             command="clear-messages",
@@ -797,7 +801,13 @@ async def _run_clear_messages(client, args, *, report: Reporter | None = None) -
         )
         report.set_evidence(evidence)
         report.audit(plan, status=status, evidence=evidence)
-    report.printed_result(result.to_dict(), status=status)
+    payload = result.to_dict()
+    report.result(payload, status=status)
+    if not report.machine:
+        # A person has read each topic's count on its scan line, so the JSON
+        # under them keeps the four keys it has always had; the rows are the
+        # envelope's, where an agent reads them.
+        report.info(json_text({key: value for key, value in payload.items() if key != "topics"}))
     return 1 if result.cancelled else 0
 
 

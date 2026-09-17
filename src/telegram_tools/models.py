@@ -84,11 +84,29 @@ class ChatInfo:
 
 
 @dataclass(frozen=True)
+class TopicCount:
+    """How many of a clear's messages one topic holds.
+
+    Counted once across the run: a message already found under an earlier
+    topic is not counted again, so the rows add up to `DeleteResult.matched`.
+    """
+
+    id: int
+    title: str
+    matched: int
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"id": self.id, "title": self.title, "matched": self.matched}
+
+
+@dataclass(frozen=True)
 class DeleteResult:
     matched: int
     deleted: int
     dry_run: bool
     cancelled: bool = False
+    # One row per topic, in the order the topics were scanned.
+    topics: tuple[TopicCount, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -96,6 +114,7 @@ class DeleteResult:
             "cleared": self.deleted,
             "dry_run": self.dry_run,
             "cancelled": self.cancelled,
+            "topics": [topic.to_dict() for topic in self.topics],
         }
 
 
