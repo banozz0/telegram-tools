@@ -34,7 +34,9 @@ audit line. What is specific to these commands is settled in this module:
   may rejoin, and leaves no ban row behind. The dry-run says so.
 * **Invite links are shown only where they were asked for**: `invite list`
   and `invite create` carry them; every other screen, envelope and audit line
-  goes through the shared redaction, which blanks them.
+  goes through the shared redaction, which blanks them. The one exception is
+  `invite revoke`'s human preview, which shows the link the person typed,
+  because that is what its y/N is about.
 
 Nothing here talks to Telegram: the calls are `adapters/manage.py`.
 """
@@ -525,7 +527,7 @@ def format_members(rows: Sequence[Member], *, chat_title: str, what: str) -> str
         line = f"{member.id:>14}  {member.status:<10} {member.label}"
         if member.rank:
             line += f"  [{member.rank}]"
-        if member.rights and member.status in ("admin", "restricted"):
+        if member.rights and member.status in ("creator", "admin", "restricted"):
             line += f"  {', '.join(member.rights)}"
         if member.until:
             line += f"  until {member.until}"
@@ -543,11 +545,12 @@ def format_requests(rows: Sequence[Mapping[str, Any]], *, chat_title: str) -> st
     return "\n".join(lines)
 
 
-def format_invites(rows: Sequence[Mapping[str, Any]], *, chat_title: str) -> str:
+def format_invites(rows: Sequence[Mapping[str, Any]], *, chat_title: str, revoked: bool = False) -> str:
     """The one screen that shows links: `invite list` and `invite create` asked for them."""
+    what = "revoked invite link" if revoked else "invite link"
     if not rows:
-        return f"No invite link in {chat_title}."
-    lines = [f"{len(rows)} invite link(s) in {chat_title}", RULE]
+        return f"No {what} in {chat_title}."
+    lines = [f"{len(rows)} {what}(s) in {chat_title}", RULE]
     for row in rows:
         flags = []
         if row.get("revoked"):

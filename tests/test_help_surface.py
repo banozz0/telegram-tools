@@ -259,6 +259,10 @@ ALLOWED_ADDITIONS = {
     "message-draft": (
         "--clear Remove the draft this chat or topic holds instead of writing one",
     ),
+    # The manage-polish card (agent-bo-95422301): `invite revoke`'s y/N is about
+    # one link, so its human preview shows the link the person typed; the plan,
+    # the envelope, the audit line and a --json run's stderr still redact it.
+    "invite": ("and the human preview",),
     # The archive card gave the live `search` a switch that is the documented
     # alias of `archive search`.
     "search": (

@@ -2947,3 +2947,68 @@ def test_the_leave_flow_never_offers_the_real_row_when_the_dry_run_refuses():
     text = screens(output)
     assert "Telegram does not let the creator of a group leave it." in text
     assert "Leave it for real" not in text
+
+
+# -- card agent-bo-95422301: the Manage screens say what they do ---------------
+
+
+def _prompts_of(answers):
+    """run_menu, plus every prompt the menu read an answer to."""
+    asked, output = [], []
+    keys = iter([key for answer in answers for key in (answer if isinstance(answer, tuple) else (answer,))])
+
+    def read(prompt):
+        asked.append(prompt)
+        return next(keys)
+
+    calls, runner = recorder()
+    asyncio.run(menu.run_menu(read=read, write=output.append, session=FakeSession(), runner=runner))
+    return asked, output, calls
+
+
+def test_a_read_only_manage_form_says_it_only_reads():
+    # A list asks nothing, so its run row must not promise a question.
+    _code, calls, output = run_menu([MANAGE_MEMBERS, "1", "1", "1", "4", "", "0"])
+    assert calls[0].member_kind == "list"
+    text = screens(output)
+    assert "4. Run it (reads only, asks nothing)" in text
+    assert "shows the preview, then asks" not in text
+    _code, calls, output = run_menu([MANAGE_INVITES, "1", "1", "1", "2", "", "0"])
+    assert calls[0].invite_kind == "list" and "2. Run it (reads only, asks nothing)" in screens(output)
+    _code, calls, output = run_menu([MANAGE_SETTINGS, "1", "1", "1", "2", "", "0"])
+    assert calls[0].settings_kind == "show" and "2. Run it (reads only, asks nothing)" in screens(output)
+
+
+def test_a_blank_answer_means_one_thing_on_every_manage_prompt():
+    # settings show: the topic row, 31, run. An unset row says what it means.
+    asked, output, calls = _prompts_of([MANAGE_SETTINGS, "1", "1", "1", "1", "31", "2", "", "0"])
+    assert calls[0].topic == 31
+    text = screens(output)
+    assert "[(the chat itself)]" in text and "[31]" in text
+    # invite create: the Expires row reads never until one is typed.
+    more, output, calls = _prompts_of([MANAGE_INVITES, "2", "1", "1", "2", "7d", "5", "", "0"])
+    assert calls[0].expires == "7d"
+    text += screens(output)
+    assert "[never]" in text and "[7d]" in text
+    assert "blank =" not in text
+    for prompt in asked + more:
+        assert prompt.count("blank") <= 1, prompt
+
+
+def test_the_folders_list_row_promises_only_what_the_list_prints():
+    _code, _calls, output = run_menu([MANAGE, "6", "0", "0", "0"])
+    text = screens(output)
+    assert "1. List your folders, with their categories and chat counts" in text
+    assert "with their chats and categories" not in text
+
+
+def test_a_long_form_label_keeps_the_value_column_in_line():
+    import re
+
+    zeros = ["0"] * 8
+    _code, _calls, output = run_menu([MANAGE_SETTINGS, "2", "1", "1", *zeros])
+    _code, _calls, more = run_menu([MANAGE, "6", "2", *zeros])
+    for form, text in ((menu.MANAGE_FORMS[("settings", "set")], screens(output)), (menu.FOLDERS_FORMS["create"], screens(more))):
+        rows = [line for line in text.splitlines() if re.match(r"^\d+\. ", line) and any(line[line.index(" ") + 1 :].startswith(label + " ") for _key, label, _kind in form)]
+        assert len(rows) >= len(form), rows
+        assert len({line.index(" [") for line in rows}) == 1, rows

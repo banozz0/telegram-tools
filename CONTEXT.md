@@ -455,7 +455,9 @@ The terms this codebase uses, and the boundaries they imply.
   redaction blanks that a command can legitimately need to print. `invite
   list` and `invite create` show links and carry them in `result` through
   `Reporter.result(show_invites=True)`; every other screen, envelope field and
-  audit line, `invite revoke`'s own included, goes through the redaction.
+  audit line, `invite revoke`'s own included, goes through the redaction. The
+  one exception is `invite revoke`'s human preview: its y/N is about the link
+  the person typed, so it shows it; a `--json` run's preview on stderr does not.
 - **Trail** — the breadcrumb a screen's title carries (`Main › Clear › Ops`),
   built by `ui.crumb`. A flow passes its own trail down; a screen never invents
   one.
