@@ -62,7 +62,7 @@ from telegram_tools.delete import (
 )
 from telegram_tools.discovery import classify_entity, discover_chats, filter_chats, format_discovery_table
 from telegram_tools.doctor import require_tight_modes, run_doctor
-from telegram_tools.envelope import PLATFORM, PREFIX, TOOL, ApprovalRequired, CommandError, Reporter, account_command, error_for, platform_error
+from telegram_tools.envelope import BROKE, PLATFORM, PREFIX, TOOL, ApprovalRequired, CommandError, Reporter, account_command, error_for, platform_error
 from telegram_tools.exporters import SEARCH_FORMATS, json_text, write_records
 from telegram_tools import messages as message_ops
 from telegram_tools.prompts import BACK, pick_many
@@ -4088,15 +4088,23 @@ def main(argv: Sequence[str] | None = None) -> int:
             return report.failed(error_for(exc))
         print()
         return 130
+    except CommandError as exc:
+        # A refusal this tool named. Usage text is for a flag argparse never
+        # heard of, not for a command it understood and would not run, so the
+        # human path prints the message and, under it, the hint that names the
+        # way out - the same two the envelope carries - and exits as the
+        # envelope would (3 for a gate with no terminal, section 9.1).
+        error = exc.as_error()
+        if report.machine:
+            return report.failed(error)
+        print(f"error: {error.message}", file=sys.stderr)
+        if error.hint:
+            print(f"hint: {error.hint}", file=sys.stderr)
+        return exit_code("failed" if error.code in BROKE else "refused", error.code)
     except (ConfigError, EntityResolutionError, ValueError) as exc:
         error = error_for(exc)
         if report.machine and error is not None:
             return report.failed(error)
-        if isinstance(exc, ApprovalRequired):
-            # The review queue's gates refuse without a terminal in either mode
-            # (section 9.1), and 3 is the code that says so.
-            print(f"error: {exc}", file=sys.stderr)
-            return exit_code("refused", exc.code)
         parser.error(str(exc))
     except PermissionError as exc:
         if report.machine:

@@ -189,14 +189,15 @@ def test_an_account_only_command_under_as_bot_refuses_before_any_connection(run_
 
 
 def test_the_refusal_names_the_command_and_reads_the_same_in_human_mode(run_cli, capsys):
-    # Human mode hands a refusal to argparse, as every ValueError has always been.
-    with pytest.raises(SystemExit) as raised:
-        run_cli(["--as-bot", "alerts", "discover"], capsys=capsys)
+    # Human mode prints the refusal and its hint, not argparse's usage text: a
+    # command the tool understood and would not run is not a usage mistake.
+    code, _out, err, _bot, _account = run_cli(["--as-bot", "alerts", "discover"], capsys=capsys)
 
-    assert raised.value.code == 2
-    err = capsys.readouterr().err
+    assert code == 2
+    assert "usage:" not in err
     assert "`discover` needs the account" in err
     assert "Run it without --as-bot" in err
+    assert "hint: telegram-tools discover" in err.splitlines()
 
 
 def test_account_command_strips_the_flag_in_both_spellings():

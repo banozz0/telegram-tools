@@ -416,9 +416,12 @@ def test_auth_prints_no_phone_number_back(run_cli, capsys):
 def test_auth_cancels_on_a_blank_phone_number(run_cli, home, capsys):
     client = FakeClient(authorized=False)
 
-    code, _out, _err, _fake = run_cli(["--profile", "work", "auth"], client=client, capsys=capsys, answers=[""])
+    code, _out, err, _fake = run_cli(["--profile", "work", "auth"], client=client, capsys=capsys, answers=[""])
 
-    assert code == 2
+    # A blank answer is the login's own INTERRUPTED, and 130 is what that code
+    # exits with everywhere else - the same as Ctrl-C at the same prompt.
+    assert code == 130
+    assert err.splitlines()[-2:] == ["error: No phone number was given, so nothing was logged in.", "hint: telegram-tools auth"]
     assert client.sent_codes == []
     assert not profiles.load("work", home=home).logged_in
 
