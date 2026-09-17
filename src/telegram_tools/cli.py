@@ -3182,7 +3182,8 @@ async def _run_manage(client, args, *, report: Reporter) -> int:
         made = await port.revoke_invite(peer, args.link)
     elif op.verb == "set":
         if change.scope == "topic":
-            await port.set_topic(
+            # What the edit's own reply says it set: the readback's first witness.
+            edited = await port.set_topic(
                 peer,
                 args.topic,
                 title=change.fields.get("title"),
@@ -3230,7 +3231,10 @@ async def _run_manage(client, args, *, report: Reporter) -> int:
         extra["invite"] = made
     else:
         async def settings_now() -> str:
-            now = await (port.topic_settings(peer, args.topic) if change.scope == "topic" else port.settings(resolved))
+            if change.scope == "topic":
+                now = await port.topic_readback(peer, args.topic, asked=change.fields, told=edited)
+            else:
+                now = await port.settings(resolved)
             extra["settings"] = now
             fields = manage_ops.TOPIC_FIELDS if change.scope == "topic" else manage_ops.CHAT_FIELDS
             return f"{plan_target.display}: " + manage_ops.settings_diff(before, now, fields)

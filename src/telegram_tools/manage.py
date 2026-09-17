@@ -426,7 +426,8 @@ def _setting_text(name: str, value: Any) -> str:
     if name == "slow_mode_seconds":
         return "off" if not value else f"{value}s"
     if name == "icon_emoji_id":
-        return "(none)" if not int(value) else str(value)
+        # The flag spells "no icon" 0; a topic read without one is None.
+        return "(none)" if not int(value or 0) else str(value)
     return f"{value!r}"
 
 

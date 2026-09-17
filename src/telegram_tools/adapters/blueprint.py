@@ -280,9 +280,13 @@ class TelegramBlueprintPort:
         icon_emoji_id: int | None = None,
         closed: bool | None = None,
         hidden: bool | None = None,
-    ) -> None:
-        """One `messages.editForumTopic`. A field left None is left alone, which is what the flag absent means."""
-        await self.client(
+    ) -> Any:
+        """One `messages.editForumTopic`. A field left None is left alone, which is what the flag absent means.
+
+        Returns Telegram's reply, the `Updates` carrying the service message the
+        edit posted: `settings set --topic` reads what was set from it.
+        """
+        return await self.client(
             EditForumTopicRequest(
                 peer=peer,
                 topic_id=int(topic_id),

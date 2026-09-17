@@ -22,8 +22,10 @@ admin touches its settings.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
-from typing import Any, Sequence
+from types import SimpleNamespace
+from typing import Any, Mapping, Sequence
 
 from telethon import utils
 from telethon.errors import UserNotParticipantError
@@ -44,14 +46,19 @@ from telethon.tl.types import (
     ChatBannedRights,
     InputUserEmpty,
     InputUserSelf,
+    MessageActionTopicEdit,
 )
 
 from telegram_tools.adapters.blueprint import ADMIN_RIGHT_NAMES, TelegramBlueprintPort, banned_right_names, chat_kind
 from telegram_tools.envelope import CommandError
-from telegram_tools.manage import LIST_LIMIT, Member, until_text, user_label
-from telegram_tools.topics import get_forum_topic
+from telegram_tools.manage import GENERAL_TOPIC_ID, LIST_LIMIT, Member, until_text, user_label
+from telegram_tools.records import topic_id_for_message
+from telegram_tools.topics import get_forum_topic, resolve_icon_emoji
 
 PAGE = 200
+# The waits before a topic is read again after an edit its reply did not
+# describe: about three and a half seconds, then the read is believed.
+TOPIC_READBACK_WAITS = (0.5, 1.0, 2.0)
 
 
 def admin_right_names(rights: Any) -> tuple[str, ...]:
@@ -126,6 +133,45 @@ def invite_row(invite: Any) -> dict[str, Any]:
         "usage": getattr(invite, "usage", None),
         "requested": getattr(invite, "requested", None),
     }
+
+
+def topic_edit_of(reply: Any, topic_id: int) -> dict[str, Any]:
+    """What an `editForumTopic` reply says the edit set on `topic_id`, spelled as `topic_settings` spells it.
+
+    The edit posts a service message into the topic, and its
+    `messageActionTopicEdit` names exactly the fields that changed. A reply
+    with no such message for this topic -- a bare `updatesTooLong`, or an
+    edit that moved nothing -- is an empty mapping, never a guess. A message
+    with no topic header is General's, which is how Telegram files them.
+    """
+    updates = getattr(reply, "updates", None)
+    if updates is None:
+        single = getattr(reply, "update", None)
+        updates = [single] if single is not None else []
+    told: dict[str, Any] = {}
+    for update in updates:
+        message = getattr(update, "message", None)
+        action = getattr(message, "action", None)
+        if not isinstance(action, MessageActionTopicEdit):
+            continue
+        if int(topic_id_for_message(message) or GENERAL_TOPIC_ID) != int(topic_id):
+            continue
+        if action.title is not None:
+            told["title"] = str(action.title)
+        if action.icon_emoji_id is not None:
+            told["icon_emoji_id"] = int(action.icon_emoji_id) or None
+        if action.closed is not None:
+            told["closed"] = bool(action.closed)
+        if action.hidden is not None:
+            told["hidden"] = bool(action.hidden)
+    return told
+
+
+def _reads_as(name: str, now: Any, asked: Any) -> bool:
+    if name == "icon_emoji_id":
+        # The flag says 0 for "no icon"; a topic without one reads None.
+        return int(now or 0) == int(asked or 0)
+    return now == asked
 
 
 class TelegramManagePort:
@@ -301,6 +347,31 @@ class TelegramManagePort:
             "hidden": topic.hidden,
         }
 
+    async def topic_readback(self, peer: Any, topic_id: int, *, asked: Mapping[str, Any], told: Mapping[str, Any]) -> dict[str, Any]:
+        """The topic a `settings set --topic` left behind: `topic_settings`, with what the edit's reply named.
+
+        Telegram can serve a topic as it was straight after an edit that
+        landed: live on 2026-09-17 a rename read back "no field changed" while
+        the next read showed the new title. So the reply is the first witness:
+        a field the edit's service message named (`told`) is taken from it. A
+        field it did not name and the read does not yet show is read again
+        after each of `TOPIC_READBACK_WAITS`, and then the read is believed --
+        an edit Telegram accepted and never applied still reads "no field
+        changed", only a few seconds later.
+        """
+        now = await self.topic_settings(peer, topic_id)
+        for wait in TOPIC_READBACK_WAITS:
+            if all(name in told or _reads_as(name, now.get(name), value) for name, value in asked.items()):
+                break
+            await asyncio.sleep(wait)
+            now = await self.topic_settings(peer, topic_id)
+        emoji_id = told.get("icon_emoji_id", now["icon_emoji_id"])
+        if emoji_id != now["icon_emoji_id"]:
+            icons = await resolve_icon_emoji(self.client, [SimpleNamespace(icon_emoji_id=emoji_id)])
+            now["icon_emoji"] = icons.get(emoji_id)
+        now.update(told)
+        return now
+
     async def set_slow_mode(self, channel: Any, seconds: int) -> None:
         await self.rights.set_slow_mode(channel, seconds)
 
@@ -313,8 +384,9 @@ class TelegramManagePort:
     async def set_forum(self, channel: Any, enabled: bool) -> None:
         await self.rights.set_forum(channel, enabled)
 
-    async def set_topic(self, peer: Any, topic_id: int, **fields: Any) -> None:
-        await self.rights.set_topic(peer, topic_id, **fields)
+    async def set_topic(self, peer: Any, topic_id: int, **fields: Any) -> dict[str, Any]:
+        """The blueprint port's edit, and what its reply says it set (`topic_edit_of`)."""
+        return topic_edit_of(await self.rights.set_topic(peer, topic_id, **fields), topic_id)
 
 
-__all__ = ["TelegramManagePort", "admin_right_names", "invite_row", "member_of"]
+__all__ = ["TelegramManagePort", "admin_right_names", "invite_row", "member_of", "topic_edit_of"]
