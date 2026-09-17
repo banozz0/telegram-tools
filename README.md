@@ -147,10 +147,10 @@ Acting as: Sven (@sven) · account · Target: Agency › 💻 Deploys (-10012345
 ```
 
 The same identity and target are fields in the `--json` envelope. An account with no
-username is named by its first name and the last two digits of its number — `-- (…23)` —
-because a display name is whatever its owner typed and need not tell two accounts apart.
-Two digits, never more: the number itself is never part of a label, and a session path is
-never printed anywhere.
+username is named by its first name and its user id — `-- (user 4242)` — because a display
+name is whatever its owner typed and need not tell two accounts apart. The id is the one
+this tool already prints in every `tg:user:…` it resolves: no part of a phone number is
+ever in a label, and a session path is never printed anywhere.
 
 ### Acting as a bot
 

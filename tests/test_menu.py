@@ -1,4 +1,5 @@
 import asyncio
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -816,6 +817,29 @@ def test_bots_lists_and_prints_a_profile():
     assert "1. @harrybot  Harry" in text
     assert "Bio: Runs the agency" in text
     assert "1. Edit this bot" in text
+
+
+def test_a_bot_with_many_commands_keeps_its_screen_title_on_the_terminal():
+    """Live Telegram 8.6, 2026-09-17: @Harrylibbot's 60-odd commands, unpaged.
+
+    The whole list went straight into the scrollback above `Main › My bots ›
+    @Harrylibbot`, pushing the title and its rows off a 24-row terminal. This
+    screen prints the profile itself rather than through `run()`, so the list
+    it shows is capped and names where every command still is.
+    """
+    many = replace(PROFILE, commands=[BotCommandInfo(command=f"cmd{n}", description=f"Command {n}") for n in range(60)])
+    session = FakeSession(profile=many)
+    # 6 = my bots, 1 = harrybot, 0 = back to the list, 0 = root, 0 = exit
+    code, _calls, output = run_menu([BOTS_ROW, "1", "0", "0", "0", "0"], session=session)
+
+    lines = screens(output).splitlines()
+    profile_at = lines.index("Harry")
+    title_at = lines.index("Main \u203a My bots \u203a @harrybot")
+    assert code == 0
+    assert title_at - profile_at <= 24, "the title has to share a normal terminal with the profile"
+    assert any(line.startswith("/cmd0 ") and line.endswith("Command 0") for line in lines)
+    assert not any(line.startswith("/cmd59") for line in lines)
+    assert any("52 more" in line and "bots --bot @harrybot" in line for line in lines), lines
 
 
 def test_bots_with_no_username_matches_the_existing_formatters():

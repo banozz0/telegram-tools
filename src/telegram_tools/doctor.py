@@ -87,9 +87,12 @@ def check_profiles(home: Path | None = None) -> DoctorCheck:
         return DoctorCheck("WARN", "No profiles yet (run `telegram-tools auth` to make one)")
     if profiles.migration_needed(home):
         # A suggestion, never an action: the file is a login, and moving one
-        # belongs behind a y/N that the person reading this line answers.
+        # belongs behind a y/N that the person reading this line answers. WARN
+        # rather than OK because this is the only screen that mentions the move
+        # at all, and an OK beside the hint reads as nothing to do; a WARN is
+        # not a failure, so the exit code is unchanged.
         return DoctorCheck(
-            "OK",
+            "WARN",
             f"{len(found)} profile(s): {', '.join(found)} "
             "(default still uses the session from before profiles; `telegram-tools auth --migrate` moves it)",
         )

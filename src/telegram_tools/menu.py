@@ -44,6 +44,11 @@ from telegram_tools.ui import crumb
 # one (Telegram 7, 2026-09-17: Runner > Stop with nothing running).
 MENU_ERRORS = (ConfigError, SessionInUseError, ValueError, OSError, RPCError, CodedError)
 
+# How many of a bot's commands its screen lists before naming the rest. The
+# screen prints the profile above its own title, so an uncapped list scrolls
+# that title -- and every row under it -- out of a 24-row terminal.
+BOT_COMMANDS_SHOWN = 8
+
 ROOT_TITLE = "telegram-tools"
 MAIN = "Main"
 # The nine-row root of spec section 14, landed once so nobody learns new numbers
@@ -1685,7 +1690,7 @@ async def _flow_bot_screen(profile, *, session, runner, read, write, trail: str)
     # API calls for the same text. Every edit still goes through run().
     # The profile itself says "not owned by you - read-only" when that is so; the
     # missing Edit row below is the same fact.
-    write(format_bot_profile(profile))
+    write(format_bot_profile(profile, commands_shown=BOT_COMMANDS_SHOWN))
 
     bot = crumb(trail, f"@{profile.username}" if profile.username else f"bot {profile.id}")
     while True:

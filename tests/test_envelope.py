@@ -10,6 +10,7 @@ what they always printed.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -197,6 +198,42 @@ def test_send_under_json_carries_plan_evidence_and_an_audit_line(run_cli, home, 
     assert line["plan_id"] == envelope["plan"]["plan_id"]
     assert line["approval"] == "yes_allowlist"
     assert not redaction.find(lines[0])
+
+
+def test_the_profile_a_run_resolved_is_the_profile_every_surface_stamps(run_cli, home, monkeypatch, capsys):
+    """Card 331: `--profile work` ran and all three surfaces said `default`.
+
+    `_acting` built the identity with `AccountIdentity.open(client)`, whose
+    `profile` argument defaults, so the name the run actually resolved never
+    reached the one identity the envelope, the plan and the audit line share --
+    and an audit trail kept on a second account named the wrong login.
+    """
+    monkeypatch.setenv("TELEGRAM_SEND_ALLOWLIST", str(CHAT_ID))
+
+    code, out, _err, _fake = run_cli(
+        ["--json", "--profile", "work", "send", "--chat", str(CHAT_ID), "--text", "ship it", "--yes"], capsys=capsys
+    )
+
+    envelope = envelope_of(out)
+    assert code == 0
+    assert envelope["identity"]["profile"] == "work"
+    line = json.loads((home / ".telegram-tools" / "audit.jsonl").read_text(encoding="utf-8").splitlines()[0])
+    assert line["identity"]["profile"] == "work"
+
+
+def test_the_identity_a_plan_is_built_from_names_the_profile_the_run_resolved():
+    """The third surface: the object `build_plan` is handed, which the audit line signs.
+
+    One `Identity` reaches all three -- `report.acting` is what every command
+    passes to `build_plan` -- so this pins the seam the envelope and the log
+    read through rather than a fourth rendering of the same string.
+    """
+    report = Reporter(profile="work")
+
+    identity = asyncio.run(cli._acting(FakeClient(), report))
+
+    assert (identity.profile, identity.id) == ("work", "tg:user:42")
+    assert report.acting is identity
 
 
 def test_an_unallowlisted_send_refuses_by_code(run_cli, capsys):
