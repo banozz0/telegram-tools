@@ -5,6 +5,7 @@ from telegram_tools import menu
 from telegram_tools import messages as message_ops
 from telegram_tools import surface
 from telegram_tools._core.columns import width
+from telegram_tools._core.contract import CodedError
 from telegram_tools.bots import IMPLICIT_OTHER_RIGHT, right_names
 from telegram_tools.config import ConfigError
 from telegram_tools.envelope import CommandError
@@ -1691,6 +1692,23 @@ RUNNER = ("7", "2")
 SCHEDULED = ("7", "3")
 
 
+def test_a_core_refusal_in_the_menu_lands_on_failed_and_keeps_the_menu_open():
+    """Telegram 7 on 2026-09-17: Runner > Stop with nothing running printed the
+    refusal and ended the whole session. A CodedError is not a ValueError, so
+    nothing in here caught it and cli.main exited 2 under the menu."""
+    for row, verb in (("3", "stop"), ("4", "reload")):
+        _calls, runner = recorder(
+            error=CodedError("RUNNER_NOT_RUNNING", "no runner holds the lock", hint="`watch run` starts one")
+        )
+        code, _unused, output = run_menu([RUNNER, row, "", "0", "0", "0"], runner=runner)
+
+        assert code == 0, verb
+        lines = screens(output).splitlines()
+        at = lines.index("error: no runner holds the lock")
+        assert lines[at + 1] == "hint: `watch run` starts one", verb
+        assert f"Main › Watch › Runner › {verb} › Failed\n" in screens(output), verb
+
+
 def test_watch_lists_its_four_screens_and_runs_nothing_by_itself():
     _code, calls, output = run_menu([WATCH, "0", "0"])
 
@@ -2297,6 +2315,26 @@ def test_archive_prunes_stop_at_a_failed_dry_run():
     assert code == 0
     assert len(calls) == 1 and calls[0].execute is False
     assert "error: not a scope in this archive" in screens(output)
+
+    # The real refusal is the shared store's, not a ValueError: a scope this
+    # archive lacks is CodedError TARGET_NOT_FOUND, which used to leave the menu
+    # altogether. It prints message and hint, and the for-real row never shows.
+    for rows, answers in ((ARCHIVE_FORGET, ["1", "1"]), (ARCHIVE_RETENTION, ["1", "90d"])):
+        calls, runner = recorder(
+            error=CodedError(
+                "TARGET_NOT_FOUND",
+                "tg:topic:-100111:141 is not a scope in this archive",
+                hint="`archive status` lists the scopes this archive holds",
+            )
+        )
+        code, _unused, output = run_menu([rows, *answers, "", "0"], runner=runner)
+        assert code == 0
+        assert len(calls) == 1 and calls[0].execute is False
+        text = screens(output)
+        lines = text.splitlines()
+        at = lines.index("error: tg:topic:-100111:141 is not a scope in this archive")
+        assert lines[at + 1] == "hint: `archive status` lists the scopes this archive holds"
+        assert "Dry-run done" not in text and "for real" not in text
 
 
 def test_the_live_search_export_offers_all_five_formats():
