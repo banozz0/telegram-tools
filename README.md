@@ -345,6 +345,9 @@ menu does, from a terminal. The verbs:
 Every verb resolves the chat, fetches the message it is about to act on, and shows both
 — the chat, and the message's id, date, sender and first line — before asking. A
 message id that is not there refuses with `TARGET_NOT_FOUND` before any prompt.
+Once it is done, a verb says so in one sentence, as `send` does —
+`Sent message 9001 to Agency › Deploys (-1001234567890:141).` — with its `Read back:`
+line under it, and prints no mapping: the ids are in `result`, under `--json`.
 
 **A verb reports what Telegram says afterwards, not what it was asked for.** `react`
 and `unreact` carry the reaction set the message now holds (`result.reactions`), `pin`
@@ -590,7 +593,7 @@ telegram-tools schedule list --chat @teamhermes
 telegram-tools schedule cancel --id 12ab34cd56ef                                 # --chat too, for one Telegram holds
 ```
 
-`send --at` hands the message to Telegram, which holds it and posts it with this machine off, your laptop shut and the tool uninstalled: **server-held**. A time with no offset is this machine's local time, and the tool echoes it back with the offset applied so there is no doubt which moment was meant. Telegram has no repeat, so `--every` is always the other kind: `schedule post` stores a row **this runner** posts, and every listing spells it out — `runner-held: fires only while watch run is up on this machine`. `--every` takes an interval (`15m`, `2h`, `1d`) or a five-field cron expression. Both kinds are checked against the right to post before they are stored, and `schedule list --chat C` shows them together, each row carrying its own guarantee. `schedule cancel --id N --chat C` cancels one Telegram is holding; without `--chat` it cancels one of this runner's. Scheduling is account-only: Telegram gives a bot no way to hand it a message for later, so `--as-bot` refuses `send --at` and `schedule` by name. Watching is not — a bot receives updates for the chats it is in, and `--as-bot watch run` works.
+`send --at` hands the message to Telegram, which holds it and posts it with this machine off, your laptop shut and the tool uninstalled: **server-held**. A time with no offset is this machine's local time, and the tool echoes it back with the offset applied so there is no doubt which moment was meant. Once Telegram has it, the run says so in one line — `Scheduled message 77 in Agency (-1001234567890) for 2026-09-09T09:00:00+02:00; Telegram holds it (server-held).` — and that id is the one `schedule cancel --chat` takes. Telegram has no repeat, so `--every` is always the other kind: `schedule post` stores a row **this runner** posts, and every listing spells it out — `runner-held: fires only while watch run is up on this machine`. `--every` takes an interval (`15m`, `2h`, `1d`) or a five-field cron expression. Both kinds are checked against the right to post before they are stored, and `schedule list --chat C` shows them together, each row carrying its own guarantee. `schedule cancel --id N --chat C` cancels one Telegram is holding; without `--chat` it cancels one of this runner's. Scheduling is account-only: Telegram gives a bot no way to hand it a message for later, so `--as-bot` refuses `send --at` and `schedule` by name. Watching is not — a bot receives updates for the chats it is in, and `--as-bot watch run` works.
 
 ## The menu
 

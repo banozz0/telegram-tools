@@ -611,7 +611,10 @@ def test_a_readback_that_failed_says_so_in_human_mode_and_still_exits_0(run_cli,
     # fact about how much could be confirmed, never a failure.
     assert "Read back: unverified: the sent message could not be read back (LookupError)" in out
     assert code == 0
-    assert '"sent": true' in out
+    # What was done is its own sentence, above the doubt about it, and it still
+    # names the id Telegram answered with: the JSON that used to say so is gone.
+    assert f"Sent message 9001 to Agency ({CHAT_ID}).\nRead back: unverified:" in out
+    assert "{" not in out
 
     line = json.loads((home / ".telegram-tools" / "audit.jsonl").read_text(encoding="utf-8").splitlines()[0])
     assert line["status"] == "ok"

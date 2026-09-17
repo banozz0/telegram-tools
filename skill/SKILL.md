@@ -280,6 +280,11 @@ The object always has the same keys. The ones worth reading:
 `--jsonl` streams one line per record (a chat, a message) and closes with the
 same object marked `"kind": "envelope"` — use it when the answer could be long.
 
+Without `--json`, `send` and the `message` verbs end on one sentence for a person
+(`Sent message <id> to <chat> (<chat id>).`) and a `Read back:` line, and print no
+mapping at all: the ids are in `result`, so pass `--json` rather than scraping
+those lines.
+
 Exit codes: **0** done, **1** not done (cancelled, or `doctor` with a failed
 check), **2** refused, **3** a gate needs a human and there is no terminal,
 **130** interrupted. Exit 3 is the one to recognise: it means the command wanted

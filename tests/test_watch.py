@@ -951,6 +951,22 @@ def test_send_at_hands_the_message_to_telegram_and_reports_it_server_held(run_wa
     assert "is scheduled in" in readback and watch_ops.SERVER_HELD in readback
 
 
+def test_a_human_send_at_says_which_message_telegram_holds_and_until_when(run_watch, capsys):
+    """One sentence for a person: the id `schedule cancel` needs, the moment, the guarantee. No JSON."""
+    when = (datetime.now().astimezone() + timedelta(days=1)).replace(microsecond=0)
+    code, out, _err, fake = run_watch(
+        ["send", "--chat", "@agencyalerts", "--text", "standup", "--at", when.isoformat()], capsys=capsys, answer="y"
+    )
+    assert code == 0, out
+    assert fake.sent[0]["at"] == when
+    # The prompt ends without a newline, so the run's next words share its line.
+    assert out.split("Send it? [y/N]: ", 1)[1].splitlines() == [
+        f"Scheduled message 5001 in Alerts ({CHANNEL_ID}) for {when.isoformat()}; Telegram holds it ({watch_ops.SERVER_HELD}).",
+        f"Read back: message 5001 is scheduled in Alerts for {when.isoformat()} ({watch_ops.SERVER_HELD})",
+    ]
+    assert "{" not in out
+
+
 def test_a_send_at_in_the_past_refuses_before_anything_is_asked(run_watch, capsys):
     code, _out, err, fake = run_watch(
         ["send", "--chat", "@agencyalerts", "--text", "late", "--at", "2020-01-01T09:00"], capsys=capsys
