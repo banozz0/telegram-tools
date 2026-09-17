@@ -886,6 +886,14 @@ def _account_identity(config, label: str, user_id: int) -> Identity:
     )
 
 
+def _recorded_identity(config) -> Identity | None:
+    """The identity the profile record names, or None when `auth` has never written one."""
+    stored = profile_store.load(getattr(config, "profile", profile_store.DEFAULT_PROFILE))
+    if stored.label and stored.user_id:
+        return _account_identity(config, stored.label, int(stored.user_id))
+    return None
+
+
 def _local_identity(config, report: Reporter) -> Identity | None:
     """Who the three runner signals act as, from the profile record alone. Never connects.
 
@@ -897,14 +905,15 @@ def _local_identity(config, report: Reporter) -> Identity | None:
     envelope says which profile has no record and what writes it.
     """
     if report.acting is None:
-        stored = profile_store.load(getattr(config, "profile", profile_store.DEFAULT_PROFILE))
-        if not (stored.label and stored.user_id):
+        identity = _recorded_identity(config)
+        if identity is None:
+            name = getattr(config, "profile", profile_store.DEFAULT_PROFILE)
             report.warn(
-                f"profile {stored.name!r} has no record of which account it is, so this run is unsigned; "
+                f"profile {name!r} has no record of which account it is, so this run is unsigned; "
                 "`telegram-tools auth` writes one"
             )
             return None
-        report.set_identity(_account_identity(config, stored.label, int(stored.user_id)))
+        report.set_identity(identity)
     return report.acting
 
 
@@ -3409,11 +3418,7 @@ async def _run_watch_run(args, config, *, report: Reporter) -> int:
     # The lock and the log are made under the tool's root; `mkdir(parents=True)`
     # would give that root the umask, and the next write would refuse over it.
     profile_store.make_private_tree(paths.root, paths.root)
-    identity = await _offline_identity(config, report)
-    report.show_banner()
-    mode = "bot" if _in_bot_mode(report) else "account"
     rules = _rules_set()
-    report.info(f"{len(rules)} rule(s) loaded from {paths.rules}")
 
     client = create_detached_client(config)
     loop = watch_events.ClientLoop(client)
@@ -3421,6 +3426,22 @@ async def _run_watch_run(args, config, *, report: Reporter) -> int:
     try:
         if not loop.call(client.is_user_authorized()):
             raise login.LoginRequired(getattr(config, "profile", profile_store.DEFAULT_PROFILE))
+        # Who this runner acts as, off the detached client when the profile has
+        # no record: `create_client` is the session file itself, and opening it
+        # to learn a label would lock out every one-shot command for as long as
+        # the runner ran -- the one thing a detached client exists to prevent.
+        # The client belongs to the loop's thread, so the question goes through it.
+        if report.acting is None:
+            identity = _recorded_identity(config)
+            if identity is None:
+                user = loop.call(client.get_me())
+                identity = _account_identity(config, account_label(user), int(getattr(user, "id", 0)))
+                report.me = user
+            report.set_identity(identity)
+        identity = report.acting
+        report.show_banner()
+        mode = "bot" if _in_bot_mode(report) else "account"
+        report.info(f"{len(rules)} rule(s) loaded from {paths.rules}")
         source = watch_events.TelegramEventSource(client, loop, mode=mode)
         source.register()
         sender = watch_events.TelegramMessageSender(client, loop, config.send_allowlist)

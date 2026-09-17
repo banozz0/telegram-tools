@@ -1262,3 +1262,28 @@ def test_a_profile_with_no_record_is_asked_once_and_never_through_a_second_clien
     identity = run(cli._offline_identity(config, cli.Reporter(), client=None))
     assert identity.id == "tg:user:4242"
     assert opened.get_me_calls == 1 and opened.disconnected == 1
+
+
+def test_the_runner_never_opens_the_session_file_it_is_built_to_leave_alone(home, monkeypatch, capsys):
+    """`watch run` connects detached so a one-shot command keeps working; the identity did not.
+
+    A profile with no record sent the lookup through `create_client`, which is
+    the SQLite session file itself -- so a runner started beside an open menu
+    refused with the lock error, on the one command whose whole design is to
+    hold that file open for nobody.
+    """
+    fake = SendingClient()
+
+    def refuse(_config):
+        raise AssertionError("the runner opened the profile's own session file")
+
+    monkeypatch.setattr(cli, "create_client", refuse)
+    monkeypatch.setattr(cli, "create_detached_client", lambda _config: fake)
+    monkeypatch.setattr(cli.watch_events, "TelegramEventSource", lambda *_a, **_k: RecordedSource(live=[]))
+    monkeypatch.setattr(cli.sys, "stdin", SimpleNamespace(isatty=lambda: False, read=lambda: "", readline=lambda: "\n"))
+
+    code = cli.main(["--json", "watch", "run"])
+    payload = json.loads(capsys.readouterr().out)
+    assert code == 0, payload
+    # It still acts as somebody: the detached client answered for the account.
+    assert payload["identity"]["id"] == "tg:user:4242"
