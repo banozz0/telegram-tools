@@ -51,7 +51,11 @@ pipx install telegram-tools
 uv tool install telegram-tools
 ```
 
-Or from source: `pipx install git+https://github.com/banozz0/telegram-tools.git`
+Or straight from GitHub, which carries the newest version before PyPI does:
+
+```bash
+pipx install git+https://github.com/banozz0/telegram-tools.git
+```
 
 Two optional extras, each for one capability that needs a library and refuses rather
 than degrade without it — a proxy (`telegram-tools[proxy]`) and the QR block that
