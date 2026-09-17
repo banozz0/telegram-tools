@@ -319,7 +319,7 @@ def build_parser() -> argparse.ArgumentParser:
     admin_promote.add_argument("--rights", required=True, help=admin_rights_help)
     admin_promote.add_argument("--rank", help="A custom title shown beside their name")
     admin_promote.add_argument("--yes", action="store_true", help=yes_help)
-    admin_rights = admin_kinds.add_parser("rights", help="Set an admin's rights to exactly the ones you name (y/N)")
+    admin_rights = admin_kinds.add_parser("rights", help="Set an admin's rights to exactly the ones you name, plus Telegram's own other (y/N)")
     admin_rights.add_argument("--chat", required=True, help=chat_help)
     admin_rights.add_argument("--user", required=True, help=user_help)
     admin_rights.add_argument("--rights", required=True, help=admin_rights_help)
@@ -3079,8 +3079,13 @@ async def _run_manage(client, args, *, report: Reporter) -> int:
             raise CommandError(f"{member.label} is not an admin of {target.title}.", code="TARGET_KIND_MISMATCH", hint=f"telegram-tools admin promote --chat {args.chat} --user {args.user} --rights …")
         actor = await port.participant(peer, me, InputUserSelf())
         manage_ops.require_hierarchy(actor, target=member if member.is_admin else None, granting=names, chat_title=target.title)
-        params = {"status": member.status, "rights": list(names), "rank": args.rank or ""}
-        details.append(f"Rights  {', '.join(names) or 'none'}")
+        # `names` is what was asked for: what the hierarchy rule reads and what
+        # reaches Telegram. `taking` is what will be set, `other` included.
+        taking = manage_ops.expand_admin_rights(names)
+        params = {"status": member.status, "rights": list(taking), "rank": args.rank or ""}
+        details.append(f"Rights  {', '.join(taking) or 'none'}")
+        if set(taking) - set(names):
+            details.append("Note    Telegram sets other on every admin: the admin log, chat statistics, the member list and ignoring slow mode come with it.")
         if args.rank:
             details.append(f"Rank    {args.rank}")
     elif op.verb == "demote":
@@ -3112,7 +3117,13 @@ async def _run_manage(client, args, *, report: Reporter) -> int:
             details.append("Note    Telegram stores no reason for a kick; the local audit line is the only record.")
         elif op.verb == "ban":
             names = manage_ops.BAN_RIGHTS
-            params = {"status": member.status, "rights": list(names), "reason": args.reason or ""}
+            taking = manage_ops.expand_rights(names)
+            params = {"status": member.status, "rights": list(taking), "reason": args.reason or ""}
+            # The widest write this tool makes, and the one whose preview said
+            # least: every right there is, and no end. The plan carries all
+            # of them by name; a y/N screen reads better as the sentence.
+            details.append(f"Takes   every right there is ({len(taking)}), view_messages among them: they cannot even read {target.title}")
+            details.append("Until   permanent (Telegram stores a ban with no end; `member unban` is what lifts it)")
             if args.reason:
                 details.append(f"Reason  {args.reason}")
             details.append("Note    Telegram stores no reason for a ban; the local audit line is the only record.")
@@ -3121,8 +3132,11 @@ async def _run_manage(client, args, *, report: Reporter) -> int:
             names = manage_ops.MUTE_RIGHTS if op.verb == "mute" else manage_ops.parse_rights(args.rights, universe=manage_ops.BANNED_RIGHT_NAMES, what="banned")
             if "view_messages" in names:
                 raise ValueError("Taking view_messages away is a ban: use `member ban`.")
-            params = {"status": member.status, "rights": list(names), "until": manage_ops.until_text(until)}
-            details.append(f"Takes   {', '.join(names)}")
+            taking = manage_ops.expand_rights(names)
+            params = {"status": member.status, "rights": list(taking), "until": manage_ops.until_text(until)}
+            details.append(f"Takes   {', '.join(taking)}")
+            if set(taking) - set(names):
+                details.append(f"Note    Telegram widens {', '.join(names)} into the family beneath it; every right above is taken.")
             details.append(f"Until   {manage_ops.until_text(until)}")
     elif op.verb in ("unban", "unmute"):
         if member.status not in ("banned", "restricted"):
@@ -3284,7 +3298,7 @@ async def _run_manage(client, args, *, report: Reporter) -> int:
             if after.rights and after.status in ("admin", "restricted"):
                 line += f" with {', '.join(after.rights)}"
             if after.until:
-                line += f" until {after.until}"
+                line += f" {manage_ops.until_phrase(after.until)}"
             if op.verb in ("ban", "kick") and args.reason:
                 line += f" (reason: {args.reason})"
             return line

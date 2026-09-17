@@ -333,6 +333,17 @@ ALLOWED_REWRITES = {
     # The member-kick card (agent-bo-95422192): the choice list grew by one
     # verb, in the middle, because ban and kick belong side by side.
     "member": (("{list,ban,kick,unban,mute,unmute,restrict}", "{list,ban,unban,mute,unmute,restrict}"),),
+    # The understating-preview card (agent-bo-95422334): `admin rights` said it
+    # set exactly the rights you name, and every readback after it carried
+    # `other` as well, which Telegram sets for itself on any promotion. The
+    # line keeps its words and admits the one it never mentioned; nothing was
+    # removed, and `exactly` still says the list replaces rather than adds.
+    "admin": (
+        (
+            "rights Set an admin's rights to exactly the ones you name, plus Telegram's own other (y/N)",
+            "rights Set an admin's rights to exactly the ones you name (y/N)",
+        ),
+    ),
     # The topic-drafts card (agent-bo-95422233). `--text` was the only way to
     # run `draft`, so it was required on its own; it and `--clear` are now a
     # required mutually exclusive group, which argparse spells with parentheses

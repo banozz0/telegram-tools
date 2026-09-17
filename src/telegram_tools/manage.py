@@ -26,6 +26,13 @@ audit line. What is specific to these commands is settled in this module:
 * **Bounded restrictions.** `mute` and `restrict` need `--until`, at least a
   minute ahead and at most a year, because Telegram reads anything further as
   forever and a restriction with no end is a ban with a different name.
+* **Telegram widens what it is asked for** (`BANNED_FAMILY`, `ADMIN_ALWAYS`).
+  One send flag sets the family beneath it, `view_messages` sets every right
+  there is, and any promotion also sets `other`. The call still sends what was
+  asked for; the plan and the preview name what will land, because the preview
+  is the screen a `y` answers and a preview that understates approves less
+  than it takes. A ban has no end at all: Telegram stores it as `FOREVER`,
+  which the screens print as `permanent`.
 * **No audit reason on Telegram** (section 16). The platform stores no reason
   beside a ban or a kick, so `--reason` is recorded in the plan and in the
   local audit line, and the docs say that is the only record.
@@ -63,6 +70,33 @@ RULE = "--------------------------------------------"
 MUTE_RIGHTS = ("send_messages",)
 # What a ban is, in Telegram's vocabulary: not even reading.
 BAN_RIGHTS = ("view_messages",)
+# The six kinds `send_media` stands over, spelled separately since layer 152.
+_MEDIA_RIGHTS = ("send_audios", "send_docs", "send_photos", "send_roundvideos", "send_videos", "send_voices")
+# What Telegram takes when it is asked for one of these: the family beneath it.
+# `chatBannedRights` calls `send_messages` "does not allow a user to send
+# messages" and `send_media` "does not allow a user to send any media"; the
+# finer flags are the layer-152 refinement of those two umbrellas, and the
+# server writes the whole family out, so a mute asked for one flag reads back
+# as fifteen. The constructor page spells each flag's meaning and no
+# implication between them, so the membership here is what live Telegram
+# returned on 2026-09-17 (the 6.2.5 and 6.2.7 runs of the member-rows
+# transcript), read against those two wordings. `view_messages` is the widest
+# of them: a ban takes every right there is.
+BANNED_FAMILY: dict[str, tuple[str, ...]] = {
+    "send_media": _MEDIA_RIGHTS,
+    "send_messages": _MEDIA_RIGHTS + ("embed_links", "send_games", "send_gifs", "send_inline", "send_media", "send_plain", "send_polls", "send_stickers"),
+    "view_messages": BANNED_RIGHT_NAMES,
+}
+# The one admin right Telegram sets for itself. `chatAdminRights` documents
+# `other` as what carries an admin's baseline -- "if this or any of the other
+# flags are set, the admin can get the chat admin log, get chat statistics, ...
+# and ignore slow mode" -- and the server turns it on beside whatever was
+# named, on every promotion of the 2026-09-17 run. Nothing sends it: what is
+# asked for is what reaches Telegram and what the hierarchy rule reads.
+ADMIN_ALWAYS = ("other",)
+# Telegram stores a restriction with no end as the 32-bit time ceiling. A
+# screen that prints it as a date reads as an end that exists.
+FOREVER = "2038-01-19T03:14:07Z"
 # The bounds on `--until`, and why: below a minute the restriction would lapse
 # before the readback, and Telegram treats more than a year as forever.
 UNTIL_MIN = timedelta(minutes=1)
@@ -176,7 +210,7 @@ class Member:
 
     @property
     def typed_label(self) -> str:
-        """What the typed gate asks for: the `@username`, or the name when there is none."""
+        """The short form the typed gate also takes: the `@username`, or the name when there is none."""
         return f"@{self.username}" if self.username else self.label
 
     @property
@@ -249,6 +283,45 @@ def parse_rights(text: str | None, *, universe: Sequence[str], what: str, noun: 
     if not names:
         raise ValueError(f"names at least one {what} {noun}, or `none`.")
     return tuple(sorted(set(names)))
+
+
+def expand_rights(names: Sequence[str]) -> tuple[str, ...]:
+    """Every banned right Telegram will set when it is asked for `names`.
+
+    Asking for one flag of a family sets the family (`BANNED_FAMILY`): a mute
+    comes back holding fifteen rights, a `restrict` on `send_media` seven, a
+    ban every one there is. What is sent stays what was asked for -- the
+    widening is Telegram's -- but the plan and the preview name what will
+    land, because the preview is the screen a `y` answers and understating it
+    approves less than it takes.
+    """
+    taken = set(names)
+    for name in names:
+        taken.update(BANNED_FAMILY.get(name, ()))
+    return tuple(sorted(taken))
+
+
+def expand_admin_rights(names: Sequence[str]) -> tuple[str, ...]:
+    """Every admin right Telegram will set when it is asked for `names`; none for none.
+
+    `ADMIN_ALWAYS` is Telegram's own doing on any promotion. Naming no right
+    is not a promotion -- it takes the last one away -- so nothing is added to
+    an empty set.
+    """
+    if not names:
+        return ()
+    return tuple(sorted(set(names) | set(ADMIN_ALWAYS)))
+
+
+def until_phrase(until: str | None) -> str:
+    """How a screen says when a restriction ends; the machine field keeps the date.
+
+    `FOREVER` is not a date anyone set, it is Telegram's way of spelling no
+    end, and "until 2038-01-19T03:14:07Z" reads as an end that exists.
+    """
+    if not until:
+        return ""
+    return "permanently" if until == FOREVER else f"until {until}"
 
 
 def parse_until(text: str, *, now: datetime | None = None) -> datetime:
@@ -510,9 +583,14 @@ def approval_for(kind: str, answered: bool) -> Approval:
 def confirm_typed_label(
     preview: str, member: Member, *, read: Callable[[str], str] = input, write: Callable[[str], None] = print
 ) -> bool:
-    """`delete`'s gate on a person: their exact label typed back proves which one."""
+    """`delete`'s gate on a person: their exact label typed back proves which one.
+
+    The hint names the label every screen around it printed -- the `Who` line,
+    the listing, the readback. `labels_match` still takes the `@username`
+    alone; the gate just stops being the one place a second spelling appears.
+    """
     write(preview)
-    typed = read(f"Type the exact label ({member.typed_label}) to continue: ")
+    typed = read(f"Type the exact label ({member.label}) to continue: ")
     return labels_match(typed, member)
 
 
@@ -530,7 +608,7 @@ def format_members(rows: Sequence[Member], *, chat_title: str, what: str) -> str
         if member.rights and member.status in ("creator", "admin", "restricted"):
             line += f"  {', '.join(member.rights)}"
         if member.until:
-            line += f"  until {member.until}"
+            line += f"  {until_phrase(member.until)}"
         lines.append(line)
     return "\n".join(lines)
 
@@ -657,11 +735,14 @@ class Outcome:
 
 
 __all__ = [
+    "ADMIN_ALWAYS",
     "ADMIN_RIGHT_NAMES",
+    "BANNED_FAMILY",
     "BANNED_RIGHT_NAMES",
     "BAN_RIGHTS",
     "CHAT_FIELDS",
     "FLAG_OF",
+    "FOREVER",
     "GENERAL_TOPIC_ID",
     "GROUPS",
     "LIST_LIMIT",
@@ -675,6 +756,8 @@ __all__ = [
     "TOPIC_FIELDS",
     "approval_for",
     "confirm_typed_label",
+    "expand_admin_rights",
+    "expand_rights",
     "format_invites",
     "format_members",
     "format_preview",
@@ -691,6 +774,7 @@ __all__ = [
     "settings_diff",
     "require_hierarchy",
     "terminal_present",
+    "until_phrase",
     "until_text",
     "user_label",
     "user_rid",
