@@ -381,7 +381,12 @@ The terms this codebase uses, and the boundaries they imply.
   (`manage.settings_diff`): the fields read before the call against the fields
   read after it, `old -> new`, and only those that moved. A write the platform
   accepted and did not apply reads as `no field changed` rather than as a
-  success, which is the whole reason the readback exists.
+  success, which is the whole reason the readback exists. A topic's "after"
+  is `TelegramManagePort.topic_readback`: Telegram can serve the old topic
+  straight after an edit that landed, so a field the edit's own service
+  message names (`messageActionTopicEdit`, `adapters.manage.topic_edit_of`) is
+  taken from there, and one it does not name is read again a few times before
+  the read is believed.
 - **Folder** — one of the account's own shelves over its chat list, which
   Telegram calls a dialog filter (`folders.Folder`, `adapters/folders.py`):
   an id from 2, a title, an emoji, the chats it holds and leaves out as rids,

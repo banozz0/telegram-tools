@@ -11,6 +11,7 @@ checked by looking at what reached the fake rather than trusting the message.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
@@ -24,7 +25,7 @@ from telegram_tools import cli
 from telegram_tools import manage as manage_ops
 from telegram_tools._core.redaction import find
 from telegram_tools.adapters.account import RIGHT_NAMES
-from telegram_tools.adapters.manage import TelegramManagePort, member_of
+from telegram_tools.adapters.manage import TelegramManagePort, member_of, topic_edit_of
 from telegram_tools.envelope import CommandError
 from test_adapters import holding
 from test_archive_sync import ACCOUNT, home  # noqa: F401 - fixture
@@ -731,6 +732,153 @@ def test_settings_set_on_a_topic_needs_manage_topics_and_carries_the_flags(run_c
     readback = envelope["evidence"]["readback"]
     assert "--title 'Support' -> 'Help'" in readback and "--closed off -> on" in readback
     assert [line["command"] for line in audit_lines(home)] == ["settings set"]
+
+
+class StaleTopicClient(PeopledClient):
+    """Telegram as the live run of 2026-09-17 met it: a topic edit lands, and the read straight after serves the topic as it was.
+
+    `witness` is whether the edit's own reply carries the service message the
+    edit posted (`messageActionTopicEdit`, naming what it set) or nothing a
+    reader can use; `stale` is how many topic reads after the edit still get
+    the old topic; `applies=False` is an edit Telegram accepts and never applies.
+    """
+
+    def __init__(self, *, witness: bool = True, stale: int = 1, applies: bool = True) -> None:
+        super().__init__()
+        self.witness, self.stale, self.applies = witness, stale, applies
+        self.old = None
+        self.stale_left = 0
+
+    async def __call__(self, request):
+        name = type(request).__name__
+        if name == "EditForumTopicRequest":
+            _marked, chat = self.world.by_peer(request.peer)
+            self.old = SimpleNamespace(**vars(next(topic for topic in chat["topics"] if topic.id == request.topic_id)))
+            if self.applies:
+                await super().__call__(request)
+            else:
+                self.world.requests.append(request)
+            self.stale_left = self.stale
+            updates = []
+            if self.witness:
+                action = types.MessageActionTopicEdit(title=request.title, icon_emoji_id=request.icon_emoji_id, closed=request.closed, hidden=request.hidden)
+                # General's messages carry no topic header; every other topic's name it.
+                header = None if request.topic_id == 1 else types.MessageReplyHeader(forum_topic=True, reply_to_msg_id=request.topic_id)
+                message = types.MessageService(id=9001, peer_id=types.PeerChannel(channel_id=1000000001), date=None, out=True, reply_to=header, action=action)
+                updates.append(types.UpdateNewChannelMessage(message=message, pts=1, pts_count=1))
+            return types.Updates(updates=updates, users=[], chats=[], date=None, seq=0)
+        if name == "GetForumTopicsByIDRequest" and self.stale_left:
+            self.stale_left -= 1
+            self.world.requests.append(request)
+            return SimpleNamespace(topics=[self.old], count=1)
+        return await super().__call__(request)
+
+
+@pytest.fixture
+def slept(monkeypatch):
+    """Every wait a readback asks for, recorded rather than slept."""
+    waits: list[float] = []
+
+    async def sleep(seconds, *_args, **_kwargs):
+        waits.append(seconds)
+
+    monkeypatch.setattr(asyncio, "sleep", sleep)
+    return waits
+
+
+def test_a_topic_rename_reads_back_the_title_the_edit_set_when_telegram_serves_the_old_one(run_cli, capsys, home, slept):
+    # Live, 2026-09-17: a rename that landed printed "no field changed" and
+    # wrote the old title into its result and its audit line.
+    code, out, _err, fake = run_cli(
+        ["--json", "settings", "set", "--chat", FORUM, "--topic", "217", "--title", "Help"],
+        client=StaleTopicClient(witness=True, stale=1), capsys=capsys, isatty=True, answer="y",
+    )
+    assert code == 0, out
+    envelope = envelope_of(out)
+    readback = envelope["evidence"]["readback"]
+    assert readback.endswith(": --title 'Support' -> 'Help'"), readback
+    assert envelope["result"]["settings"]["title"] == "Help"
+    assert audit_lines(home)[-1]["evidence"]["readback"] == readback
+    # The reply named the title, so nothing waited for Telegram to catch up.
+    assert slept == []
+    assert mutations(fake) == ["EditForumTopicRequest"]
+
+
+def test_the_edit_reply_is_read_only_for_its_own_topic():
+    def service(action, header):
+        return types.MessageService(id=9001, peer_id=types.PeerChannel(channel_id=1000000001), date=None, reply_to=header, action=action)
+
+    in_217 = types.MessageReplyHeader(forum_topic=True, reply_to_msg_id=217)
+    renamed = types.UpdateNewChannelMessage(message=service(types.MessageActionTopicEdit(title="Help", closed=True), in_217), pts=1, pts_count=1)
+    reply = types.Updates(updates=[renamed], users=[], chats=[], date=None, seq=0)
+    assert topic_edit_of(reply, 217) == {"title": "Help", "closed": True}
+    # Another topic's service message says nothing about this one.
+    assert topic_edit_of(reply, 141) == {}
+    # General's messages carry no topic header; an icon of 0 is no icon.
+    hidden = types.UpdateNewChannelMessage(message=service(types.MessageActionTopicEdit(hidden=True, icon_emoji_id=0), None), pts=1, pts_count=1)
+    assert topic_edit_of(types.UpdateShort(update=hidden, date=None), 1) == {"hidden": True, "icon_emoji_id": None}
+    # A reply with nothing usable is nothing, never a guess.
+    assert topic_edit_of(types.UpdatesTooLong(), 217) == {}
+    assert topic_edit_of(None, 217) == {}
+
+
+def test_the_settings_diff_reads_a_topic_with_no_icon_as_none():
+    # A topic without an icon reads None, not 0, so an icon set or removed
+    # has None on one side of the diff.
+    assert manage_ops.settings_diff({"icon_emoji_id": DOBBY_ICON}, {"icon_emoji_id": None}, manage_ops.TOPIC_FIELDS) == f"--icon-emoji-id {DOBBY_ICON} -> (none)"
+    assert manage_ops.settings_diff({"icon_emoji_id": None}, {"icon_emoji_id": DOBBY_ICON}, manage_ops.TOPIC_FIELDS) == f"--icon-emoji-id (none) -> {DOBBY_ICON}"
+
+
+def test_an_icon_the_edit_removed_reads_back_removed_despite_a_stale_read(run_cli, capsys, slept):
+    code, out, _err, _fake = run_cli(
+        ["--json", "settings", "set", "--chat", FORUM, "--topic", "141", "--icon-emoji-id", "0"],
+        client=StaleTopicClient(witness=True, stale=1), capsys=capsys, isatty=True, answer="y",
+    )
+    assert code == 0, out
+    envelope = envelope_of(out)
+    assert envelope["evidence"]["readback"].endswith(f": --icon-emoji-id {DOBBY_ICON} -> (none)"), envelope["evidence"]
+    assert envelope["result"]["settings"]["icon_emoji_id"] is None
+    assert slept == []
+
+
+def test_a_topic_edit_whose_reply_names_nothing_is_read_again_until_telegram_serves_it(run_cli, capsys, slept):
+    code, out, _err, _fake = run_cli(
+        ["--json", "settings", "set", "--chat", FORUM, "--topic", "217", "--title", "Help", "--closed", "on"],
+        client=StaleTopicClient(witness=False, stale=2), capsys=capsys, isatty=True, answer="y",
+    )
+    assert code == 0, out
+    envelope = envelope_of(out)
+    readback = envelope["evidence"]["readback"]
+    assert "--title 'Support' -> 'Help'" in readback and "--closed off -> on" in readback, readback
+    assert (envelope["result"]["settings"]["title"], envelope["result"]["settings"]["closed"]) == ("Help", True)
+    # Two stale reads, two waits, and the third read is believed.
+    assert len(slept) == 2
+
+
+def test_a_topic_edit_telegram_never_applies_still_reads_no_field_changed_after_a_bounded_wait(run_cli, capsys, slept):
+    code, out, _err, _fake = run_cli(
+        ["--json", "settings", "set", "--chat", FORUM, "--topic", "217", "--title", "Help"],
+        client=StaleTopicClient(witness=False, stale=0, applies=False), capsys=capsys, isatty=True, answer="y",
+    )
+    assert code == 0, out
+    envelope = envelope_of(out)
+    assert envelope["evidence"]["readback"].endswith(": no field changed"), envelope["evidence"]
+    assert envelope["result"]["settings"]["title"] == "Support"
+    # It waited, and not for long: the read is believed in the end.
+    assert 0 < len(slept) <= 3 and sum(slept) <= 5
+
+
+@pytest.mark.parametrize("witness", [True, False], ids=["reply-names-it", "reply-silent"])
+def test_a_rename_to_the_title_a_topic_already_has_still_reads_no_field_changed(run_cli, capsys, slept, witness):
+    code, out, _err, _fake = run_cli(
+        ["--json", "settings", "set", "--chat", FORUM, "--topic", "217", "--title", "Support"],
+        client=StaleTopicClient(witness=witness, stale=1), capsys=capsys, isatty=True, answer="y",
+    )
+    assert code == 0, out
+    envelope = envelope_of(out)
+    assert envelope["evidence"]["readback"].endswith(": no field changed"), envelope["evidence"]
+    assert envelope["result"]["settings"]["title"] == "Support"
+    assert slept == []
 
 
 def test_a_missing_manage_topics_is_named_before_any_topic_mutation(run_cli, capsys):
