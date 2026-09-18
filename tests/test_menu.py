@@ -1827,6 +1827,32 @@ def test_review_status_runs_offline_and_comes_straight_back():
     assert (args.command, args.review_kind) == ("review", "status")
 
 
+def test_the_rule_form_says_what_it_really_does_and_names_the_two_traps():
+    """The Add form's own rows, as Telegram 7 on 2026-09-17 read them.
+
+    `watch rules add` writes the file and reads it back; it asks nothing. The
+    row promising a prompt was the only thing on the screen that said one was
+    coming. The name is a file name, and a rule scope is matched against the
+    event's own rid -- which in a forum is the topic, never the chat -- so both
+    traps are on the rows a person fills in.
+    """
+    _code, calls, output = run_menu([RULES, "2", "0", "0", "0", "0"])
+
+    text = screens(output)
+    assert calls == []
+    assert "Do it (writes the rule file, then reads it back)" in text
+    assert "the CLI shows the plan, then asks" not in text
+    assert "Name (also the file name: letters, digits, dot, dash, underscore)" in text
+    assert "Only these scopes (rids; in a forum that is the topic)" in text
+
+
+def test_the_schedule_form_still_promises_the_prompt_it_does_ask():
+    """`schedule post` asks y/N and has no --yes, so its row keeps saying so."""
+    _code, _calls, output = run_menu([SCHEDULED, "2", "2", "1", "3", "0", "0", "0", "0", "0"])
+
+    assert "Do it (the CLI shows the plan, then asks)" in screens(output)
+
+
 def test_build_holds_create_delete_and_the_structure_rows():
     _code, _calls, output = run_menu([BUILD, "0", "0"])
 

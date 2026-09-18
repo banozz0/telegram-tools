@@ -234,7 +234,11 @@ run it; the same for `watch run`, which is a process they start and stop, and wh
 blocks until they do. The reads are yours: `watch rules list`, `watch status`,
 `schedule list`, and `watch rules test --event FILE`, which says what a recorded event
 *would* do and fires none of it. `watch rules remove` asks `y/N` or takes `--yes`;
-pass it only for a rule the user named. Every schedule in `result` carries
+pass it only for a rule the user named. `--name` is the rule's file name, so it
+takes letters, digits, dot, dash and underscore and nothing else — a name with a
+space is refused before anything is written — and `--scope` is compared with the
+event's own rid, which in a forum is the topic (`tg:topic:CHAT:TOPIC`), so a chat
+rid matches nothing there. Every schedule in `result` carries
 `guarantee`: `server-held` means Telegram holds the message and will post it with the
 user's machine off; `runner-held: fires only while watch run is up on this machine`
 means it will not post unless their runner is running. Quote the field, do not

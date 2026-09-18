@@ -1200,6 +1200,24 @@ def test_the_runner_replays_then_handles_the_live_stream_and_reports_what_it_did
     assert again.sent == []
 
 
+def test_the_runner_says_what_it_did_when_it_stops(run_watch, capsys, home, monkeypatch):
+    """The Done screen printed nothing after a four-minute run (Telegram 7, 2026-09-17).
+
+    The counts were already in the envelope; a person driving the menu never
+    saw one of them, so a runner that fired nothing and a runner that fired
+    forty looked identical on the way out.
+    """
+    monkeypatch.setenv("TELEGRAM_SEND_ALLOWLIST", str(CHANNEL_ID))
+    add_a_rule(run_watch, capsys, "--alert-to", ALERTS_RID)
+    stream = [watch_events.message_events(fake_message(number))[0] for number in (1, 2)]
+    source = RecordedSource(live=stream)
+    code, out, _err, _fake = run_watch(["watch", "run"], capsys=capsys, source=source)
+    assert code == 0
+    assert "Runner stopped" in out
+    assert "Events        2 seen" in out
+    assert "Fired         2" in out
+
+
 def test_a_first_write_on_a_fresh_machine_leaves_the_tree_private(run_watch, capsys, home):
     """`mkdir(parents=True)` modes the leaf only, and every later write refuses over a loose root.
 
@@ -1228,7 +1246,27 @@ def test_status_says_who_holds_the_lock_and_how_many_rules_load(run_watch, capsy
     assert result["guarantees"] == list(_runner.GUARANTEES)
 
     code, out, err, _fake = run_watch(["watch", "status"], capsys=capsys)
-    assert "Not running (no lock file)" in out and "Rules loaded  1" in out
+    assert "Not running (nothing holds the lock)" in out and "Rules loaded  1" in out
+
+
+def test_status_does_not_claim_there_is_no_lock_file_when_one_is_lying_there(run_watch, capsys, home):
+    """A released lock is an empty file, not an absent one (Telegram 7, 2026-09-17).
+
+    `Lock.release()` truncates and unlocks; the file stays on disk, so a status
+    that said "no lock file" told a person to go looking for something that was
+    right there. What it knows is that nobody holds it.
+    """
+    paths = archive_store.paths_for(home)
+    paths.root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    lock = _runner.Lock(paths.runner_lock)
+    lock.acquire()
+    lock.release()
+    assert paths.runner_lock.exists() and paths.runner_lock.read_text() == ""
+
+    code, out, _err, _fake = run_watch(["watch", "status"], capsys=capsys)
+    assert code == 0
+    assert "no lock file" not in out
+    assert "Not running (nothing holds the lock)" in out
 
 
 def test_status_says_why_no_rules_load_to_a_person_as_well(run_watch, capsys, home):
@@ -1360,6 +1398,26 @@ def test_schedule_list_shows_both_kinds_each_with_its_own_guarantee(run_watch, c
 
     code, out, _err, _fake = run_watch(["schedule", "list", "--chat", "@agencyalerts"], capsys=capsys, client=client)
     assert "Held by Telegram (server-held)" in out and "Held by this runner (runner-held" in out
+
+
+def test_asking_telegram_for_a_chat_says_so_even_when_it_holds_nothing(run_watch, capsys, home):
+    """A chat Telegram holds nothing for gets a block saying that, not silence.
+
+    Telegram 7, 2026-09-17: the list for a chat printed only the runner's own
+    row, so the one question the `--chat` was asked -- what does the server
+    hold? -- came back with no answer at all.
+    """
+    client = SendingClient()
+    run_watch(["schedule", "post", "--chat", "@agencyalerts", "--text", "local", "--every", "1d"], capsys=capsys, client=client, answer="y")
+
+    code, out, _err, _fake = run_watch(["schedule", "list", "--chat", "@agencyalerts"], capsys=capsys, client=client)
+    assert code == 0
+    assert "Held by Telegram (server-held): nothing" in out
+    assert "Held by this runner (runner-held" in out
+
+    # Without --chat nothing was asked, so nothing is claimed about Telegram.
+    code, out, _err, _fake = run_watch(["schedule", "list"], capsys=capsys, client=client)
+    assert "Held by Telegram" not in out
 
 
 def test_cancelling_one_telegram_holds_needs_its_chat_and_reads_back_that_it_is_gone(run_watch, capsys):
