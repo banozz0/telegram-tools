@@ -250,6 +250,37 @@ def record_login(profile: Profile, *, label: str, user_id: int, proxy: str | Non
     return save(updated)
 
 
+def record_identity(profile: Profile, *, label: str, user_id: int) -> Profile:
+    """Fill in what the record does not know about the account, and nothing else.
+
+    A profile from before records existed has no label and no id, so every run
+    of it is unsigned until someone knows to run `auth`. Any run that has
+    already asked Telegram who it is can answer that, and this is where the
+    answer is written -- but a read is not a login, so `last_login`, `created`
+    and `proxy` are left exactly as they were: the profile was not made now and
+    nothing logged into it now.
+
+    Only what is missing is filled. A stored label or id that disagrees with
+    the account on the session is a second account on this profile, and moving
+    the record to it is `auth`'s business, where a person typed a code for it;
+    here it is left alone and nothing is written at all.
+    """
+    if profile.label and profile.user_id:
+        return profile
+    updated = Profile(
+        name=profile.name,
+        directory=profile.directory,
+        session=profile.session,
+        legacy=profile.legacy,
+        label=profile.label or label,
+        user_id=profile.user_id or user_id,
+        created=profile.created,
+        last_login=profile.last_login,
+        proxy=profile.proxy,
+    )
+    return save(updated)
+
+
 def names(home: Path | None = None) -> list[str]:
     """Every profile that exists on disk, `default` included when it has a session.
 

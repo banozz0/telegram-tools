@@ -309,6 +309,19 @@ def test_a_profile_with_no_record_asks_the_account_once(run_cli, capsys, monkeyp
     assert "(via Sven (@sven))" in err
 
 
+def test_a_bot_run_records_the_account_it_ran_through_and_never_the_bot(run_cli, home, capsys, monkeypatch):
+    """Card 332: the record a run heals is the account's, because the bot is not what the profile is."""
+    monkeypatch.setenv("TELEGRAM_SEND_ALLOWLIST", str(CHAT_ID))
+    run_cli(
+        ["--json", "--as-bot", "alerts", "send", "--chat", str(CHAT_ID), "--text", "ship it", "--yes"], capsys=capsys
+    )
+
+    healed = profile_store.load("default", home=home)
+    assert (healed.label, healed.user_id) == ("Sven (@sven)", 42)
+    assert healed.user_id != BOT.id
+    assert bot_label(BOT) not in json.dumps(healed.to_dict())
+
+
 def test_a_bot_mode_create_topic_runs_as_the_bot(run_cli, home, capsys):
     record_account(home)
     forum = channel(title="Forum")

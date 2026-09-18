@@ -132,6 +132,11 @@ id, when it was created and last used, and the name of any proxy — never a pho
 never a token, never a password. A profile may keep its own `.env` beside it when it
 needs a second application id or its own proxy.
 
+`auth` writes that record, and a login made before profiles existed has none. The first
+run that connects and has to ask Telegram whose login it is fills in the missing label
+and id, so no command has to be re-run to sign the ones that follow; it never replaces an
+id already recorded, and it is not a login, so the last-used time stays what it was.
+
 If you were using telegram-tools before profiles existed, nothing moved: your
 `~/.telegram-tools/telegram-tools.session` *is* the `default` profile, read where it has
 always been, and `TELEGRAM_TOOLS_SESSION` still wins over everything. `doctor` mentions
@@ -180,8 +185,9 @@ before the preview. `--yes` needs the destination in `TELEGRAM_SEND_ALLOWLIST`, 
 as for an account send. There is no bot-mode menu: a bare `telegram-tools --as-bot NICK`
 refuses.
 
-The account named after `via` comes from the profile record `auth` wrote, so a bot-mode
-run opens no account session at all.
+The account named after `via` comes from the profile record, so a bot-mode run with a
+recorded profile opens no account session at all; one without a record is asked through
+its own session, and what it answers is written down for the next run.
 
 ### Optional: a proxy
 
