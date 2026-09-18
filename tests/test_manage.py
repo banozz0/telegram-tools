@@ -12,6 +12,7 @@ checked by looking at what reached the fake rather than trusting the message.
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
@@ -29,7 +30,7 @@ from telegram_tools.adapters.manage import TelegramManagePort, member_of, topic_
 from telegram_tools.envelope import CommandError
 from test_adapters import holding
 from test_archive_sync import ACCOUNT, home  # noqa: F401 - fixture
-from test_structure import DOBBY_ICON, FORUM_ID, CHANNEL_ID, BASIC_ID, FakeClient, World, envelope_of, run_cli  # noqa: F401 - fixture
+from test_structure import DOBBY_ICON, FORUM_ID, PLAIN_ID, CHANNEL_ID, BASIC_ID, FakeClient, World, envelope_of, run_cli, slept  # noqa: F401 - fixture
 
 FORUM = "@teamhermes"
 INVITE = "https://t.me/+AbCdEfGh12345"
@@ -808,18 +809,6 @@ class StaleTopicClient(PeopledClient):
         return await super().__call__(request)
 
 
-@pytest.fixture
-def slept(monkeypatch):
-    """Every wait a readback asks for, recorded rather than slept."""
-    waits: list[float] = []
-
-    async def sleep(seconds, *_args, **_kwargs):
-        waits.append(seconds)
-
-    monkeypatch.setattr(asyncio, "sleep", sleep)
-    return waits
-
-
 def test_a_topic_rename_reads_back_the_title_the_edit_set_when_telegram_serves_the_old_one(run_cli, capsys, home, slept):
     # Live, 2026-09-17: a rename that landed printed "no field changed" and
     # wrote the old title into its result and its audit line.
@@ -912,6 +901,181 @@ def test_a_rename_to_the_title_a_topic_already_has_still_reads_no_field_changed(
     envelope = envelope_of(out)
     assert envelope["evidence"]["readback"].endswith(": no field changed"), envelope["evidence"]
     assert envelope["result"]["settings"]["title"] == "Support"
+    assert slept == []
+
+
+class StaleSettingsClient(PeopledClient):
+    """Telegram serving a chat as it was straight after a settings write that landed.
+
+    Card 299's topic read on the chat read: one `channels.getFullChannel` fired
+    straight after `editTitle`, `editChatAbout`, `toggleForum` or
+    `toggleSlowMode` can answer with the chat as it was. `stale` is how many
+    full reads after the write still get the old chat; `applies=False` is a
+    write Telegram accepts and never applies. `toggleForum` replaces the chat's
+    entity rather than mutating it, because Telegram does not update the copy
+    the caller resolved before the write.
+    """
+
+    CHAT_WRITES = ("EditTitleRequest", "EditChatAboutRequest", "ToggleForumRequest", "ToggleSlowModeRequest")
+
+    def __init__(self, *, stale: int = 1, applies: bool = True) -> None:
+        super().__init__()
+        self.stale, self.applies = stale, applies
+        self.old: tuple | None = None
+        self.stale_left = 0
+
+    async def __call__(self, request):
+        name = type(request).__name__
+        if name in self.CHAT_WRITES:
+            _marked, chat = self.world.by_peer(getattr(request, "channel", None) or request.peer)
+            self.old = (copy.copy(chat["entity"]), chat["about"], chat["slowmode_seconds"])
+            if not self.applies:
+                self.world.requests.append(request)
+            elif name == "ToggleForumRequest":
+                self.world.requests.append(request)
+                entity = copy.copy(chat["entity"])
+                entity.forum = bool(request.enabled)
+                chat["entity"] = entity
+                if not request.enabled:
+                    chat["topics"] = []
+            else:
+                await super().__call__(request)
+            self.stale_left = self.stale
+            return SimpleNamespace(updates=[])
+        if name == "GetFullChannelRequest" and self.stale_left:
+            self.stale_left -= 1
+            entity, about, slow_mode = self.old
+            self.world.requests.append(request)
+            return SimpleNamespace(
+                chats=[entity],
+                full_chat=SimpleNamespace(about=about, slowmode_seconds=slow_mode, linked_chat_id=None, participants_count=12, exported_invite=None),
+            )
+        return await super().__call__(request)
+
+
+class StalePersonClient(PeopledClient):
+    """Telegram serving a person as they were straight after a write that landed.
+
+    `channels.getParticipant` has the topic read's staleness: `stale` is how
+    many participant reads after a promote, a demote, a ban, a kick or an
+    approval still get the person as they were, and `applies=False` is a write
+    Telegram accepts and never applies.
+    """
+
+    PERSON_WRITES = ("EditAdminRequest", "EditBannedRequest", "HideChatJoinRequestRequest")
+
+    def __init__(self, *, stale: int = 1, applies: bool = True) -> None:
+        super().__init__()
+        self.stale, self.applies = stale, applies
+        self.old = None
+        self.stale_left = 0
+
+    def _target(self, request) -> int:
+        return self._user_id(getattr(request, "user_id", None) or request.participant)
+
+    async def __call__(self, request):
+        name = type(request).__name__
+        if name in self.PERSON_WRITES:
+            marked, _chat = self.world.by_peer(getattr(request, "channel", None) or request.peer)
+            self.old = self.world.participant_of(marked, self._target(request))
+            if self.applies:
+                await super().__call__(request)
+            else:
+                self.world.requests.append(request)
+            self.stale_left = self.stale
+            return SimpleNamespace(updates=[])
+        if name == "GetParticipantRequest" and self.stale_left:
+            self.stale_left -= 1
+            self.world.requests.append(request)
+            if self.old is None:
+                from telethon.errors import UserNotParticipantError
+
+                raise UserNotParticipantError(request)
+            return SimpleNamespace(participant=self.old, users=[USERS[self._user_id(request.participant)]])
+        return await super().__call__(request)
+
+
+def test_a_chat_rename_reads_back_the_title_the_write_set_when_telegram_serves_the_old_one(run_cli, capsys, home, slept):
+    code, out, _err, _fake = run_cli(
+        ["--json", "settings", "set", "--chat", FORUM, "--title", "Team Hermes 2"],
+        client=StaleSettingsClient(stale=2), capsys=capsys, isatty=True, answer="y",
+    )
+    assert code == 0, out
+    envelope = envelope_of(out)
+    assert envelope["evidence"]["readback"] == "Team Hermes: --title 'Team Hermes' -> 'Team Hermes 2'"
+    assert envelope["result"]["settings"]["title"] == "Team Hermes 2"
+    assert audit_lines(home)[-1]["evidence"]["readback"] == envelope["evidence"]["readback"]
+    # Two stale reads, two waits, and the third read is believed.
+    assert len(slept) == 2
+
+
+def test_turning_topics_on_reads_the_flag_back_on_rather_than_off_the_chat_it_resolved(run_cli, capsys, slept):
+    """The forum flag is `toggleForum`'s own, so it is read off the chat the full read
+    returns. Off the entity resolved before the write it could never change, and no
+    amount of waiting would have helped."""
+    code, out, _err, _fake = run_cli(
+        ["--json", "settings", "set", "--chat", str(PLAIN_ID), "--forum", "on"],
+        client=StaleSettingsClient(stale=1), capsys=capsys, isatty=True, answer="y",
+    )
+    assert code == 0, out
+    envelope = envelope_of(out)
+    assert envelope["evidence"]["readback"] == "Agency: --forum off -> on"
+    assert envelope["result"]["settings"]["forum"] is True
+    assert len(slept) == 1
+
+
+def test_a_chat_setting_telegram_never_applies_still_reads_no_field_changed_after_a_bounded_wait(run_cli, capsys, slept):
+    code, out, _err, _fake = run_cli(
+        ["--json", "settings", "set", "--chat", FORUM, "--slow-mode", "60"],
+        client=StaleSettingsClient(stale=0, applies=False), capsys=capsys, isatty=True, answer="y",
+    )
+    assert code == 0, out
+    assert envelope_of(out)["evidence"]["readback"].endswith(": no field changed")
+    # It waited, and not for long: the read is believed in the end.
+    assert 0 < len(slept) <= 3 and sum(slept) <= 5
+
+
+def test_a_promote_reads_back_the_admin_it_made_when_telegram_serves_the_person_as_they_were(run_cli, capsys, home, slept):
+    code, out, _err, _fake = run_cli(
+        ["--json", "admin", "promote", "--chat", FORUM, "--user", "@harry", "--rights", "pin_messages"],
+        client=StalePersonClient(stale=2), capsys=capsys, isatty=True, answer="y",
+    )
+    assert code == 0, out
+    envelope = envelope_of(out)
+    assert envelope["evidence"]["readback"].startswith("Harry (@harry) is now admin in Team Hermes")
+    assert envelope["result"]["member"]["status"] == "admin"
+    assert audit_lines(home)[-1]["evidence"]["readback"] == envelope["evidence"]["readback"]
+    assert len(slept) == 2
+
+
+def test_a_ban_reads_back_the_ban_when_telegram_serves_the_person_as_they_were(run_cli, capsys, slept):
+    code, out, _err, _fake = run_cli(
+        ["--json", "member", "ban", "--chat", FORUM, "--user", "@harry", "--execute"],
+        client=StalePersonClient(stale=1), capsys=capsys, isatty=True, answer="Harry (@harry)",
+    )
+    assert code == 0, out
+    assert "is now banned in Team Hermes" in envelope_of(out)["evidence"]["readback"]
+    assert len(slept) == 1
+
+
+def test_a_person_write_telegram_never_applies_is_believed_after_a_bounded_wait(run_cli, capsys, slept):
+    code, out, _err, _fake = run_cli(
+        ["--json", "admin", "promote", "--chat", FORUM, "--user", "@harry", "--rights", "pin_messages"],
+        client=StalePersonClient(stale=0, applies=False), capsys=capsys, isatty=True, answer="y",
+    )
+    assert code == 0, out
+    assert envelope_of(out)["evidence"]["readback"].startswith("Harry (@harry) is now member in Team Hermes")
+    assert 0 < len(slept) <= 3 and sum(slept) <= 5
+
+
+def test_a_declined_join_request_is_read_once_because_the_person_is_no_more_in_the_chat_than_before(run_cli, capsys, slept):
+    """A decline leaves the person exactly as they were -- outside the chat -- so there is
+    nothing to wait for and the read is made once."""
+    code, out, _err, _fake = run_cli(
+        ["--json", "join-requests", "decline", "--chat", FORUM, "--user", "@newbie"],
+        client=StalePersonClient(stale=1), capsys=capsys, isatty=True, answer="y",
+    )
+    assert code == 0, out
     assert slept == []
 
 

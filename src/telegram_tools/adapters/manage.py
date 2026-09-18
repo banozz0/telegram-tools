@@ -49,16 +49,13 @@ from telethon.tl.types import (
     MessageActionTopicEdit,
 )
 
-from telegram_tools.adapters.blueprint import ADMIN_RIGHT_NAMES, TelegramBlueprintPort, banned_right_names, chat_kind
+from telegram_tools.adapters.blueprint import ADMIN_RIGHT_NAMES, READBACK_WAITS, TelegramBlueprintPort, banned_right_names, chat_kind, reads_as
 from telegram_tools.envelope import CommandError
 from telegram_tools.manage import GENERAL_TOPIC_ID, LIST_LIMIT, Member, until_text, user_label
 from telegram_tools.records import topic_id_for_message
 from telegram_tools.topics import get_forum_topic, resolve_icon_emoji
 
 PAGE = 200
-# The waits before a topic is read again after an edit its reply did not
-# describe: about three and a half seconds, then the read is believed.
-TOPIC_READBACK_WAITS = (0.5, 1.0, 2.0)
 
 
 def admin_right_names(rights: Any) -> tuple[str, ...]:
@@ -165,13 +162,6 @@ def topic_edit_of(reply: Any, topic_id: int) -> dict[str, Any]:
         if action.hidden is not None:
             told["hidden"] = bool(action.hidden)
     return told
-
-
-def _reads_as(name: str, now: Any, asked: Any) -> bool:
-    if name == "icon_emoji_id":
-        # The flag says 0 for "no icon"; a topic without one reads None.
-        return int(now or 0) == int(asked or 0)
-    return now == asked
 
 
 class TelegramManagePort:
@@ -319,8 +309,11 @@ class TelegramManagePort:
         }
         if kind != "channel":
             # `forum` is the flag `settings set --forum` changes, so it is read
-            # here rather than inferred from `kind` by every caller in turn.
-            settings["forum"] = kind == "forum"
+            # here rather than inferred from `kind` by every caller in turn --
+            # and off the channel this read returned, because the entity
+            # resolved before a `toggleForum` is a copy Telegram never updates,
+            # so a readback taken from it could not change however long it waited.
+            settings["forum"] = bool(getattr(channel, "forum", False))
             settings["default_banned_rights"] = banned_right_names(getattr(channel, "default_banned_rights", None))
             settings["slow_mode_seconds"] = int(getattr(full_chat, "slowmode_seconds", 0) or 0)
         return settings
@@ -355,13 +348,13 @@ class TelegramManagePort:
         the next read showed the new title. So the reply is the first witness:
         a field the edit's service message named (`told`) is taken from it. A
         field it did not name and the read does not yet show is read again
-        after each of `TOPIC_READBACK_WAITS`, and then the read is believed --
+        after each of `READBACK_WAITS`, and then the read is believed --
         an edit Telegram accepted and never applied still reads "no field
         changed", only a few seconds later.
         """
         now = await self.topic_settings(peer, topic_id)
-        for wait in TOPIC_READBACK_WAITS:
-            if all(name in told or _reads_as(name, now.get(name), value) for name, value in asked.items()):
+        for wait in READBACK_WAITS:
+            if all(name in told or reads_as(name, now.get(name), value) for name, value in asked.items()):
                 break
             await asyncio.sleep(wait)
             now = await self.topic_settings(peer, topic_id)
@@ -370,6 +363,48 @@ class TelegramManagePort:
             icons = await resolve_icon_emoji(self.client, [SimpleNamespace(icon_emoji_id=emoji_id)])
             now["icon_emoji"] = icons.get(emoji_id)
         now.update(told)
+        return now
+
+    async def settings_readback(self, resolved: Any, *, asked: Mapping[str, Any]) -> dict[str, Any]:
+        """The chat a `settings set` left behind: `settings`, re-read while it still shows the old value.
+
+        Only a rename posts a service message, so unlike a topic edit there is
+        no reply to read what was set from: the description, the forum flag and
+        slow mode all come back from `channels.getFullChannel`, which -- like
+        the topic read of card 299 -- can serve the chat as it was straight
+        after the write. A field the read does not yet show is read again after
+        each of `READBACK_WAITS`, and then the read is believed: a change
+        Telegram accepted and never applied still reads "no field changed",
+        only a few seconds later.
+        """
+        now = await self.settings(resolved)
+        for wait in READBACK_WAITS:
+            if all(reads_as(name, now.get(name), value) for name, value in asked.items()):
+                break
+            await asyncio.sleep(wait)
+            now = await self.settings(resolved)
+        return now
+
+    async def participant_readback(self, channel: Any, user: Any, input_user: Any, *, before: Member, expected: str | None) -> Member:
+        """The person a write left behind: `participant`, re-read while it still reads as `before`.
+
+        `channels.getParticipant` has the staleness the topic read met live, and
+        a promote, a ban or an approval carries no participant on its own reply
+        to read the new status from. So the witness is the change itself: while
+        the read is both the status the verb must produce and identical to what
+        was there before it, it is read again after each of `READBACK_WAITS`.
+        `expected` is None for a verb whose result is not one status --
+        an unban, a decline -- and that read is made once, because there is
+        nothing it could wait for.
+        """
+        now = await self.participant(channel, user, input_user)
+        if expected is None:
+            return now
+        for wait in READBACK_WAITS:
+            if now.status == expected and now != before:
+                break
+            await asyncio.sleep(wait)
+            now = await self.participant(channel, user, input_user)
         return now
 
     async def set_slow_mode(self, channel: Any, seconds: int) -> None:

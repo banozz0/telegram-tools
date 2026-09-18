@@ -395,7 +395,14 @@ The terms this codebase uses, and the boundaries they imply.
   straight after an edit that landed, so a field the edit's own service
   message names (`messageActionTopicEdit`, `adapters.manage.topic_edit_of`) is
   taken from there, and one it does not name is read again a few times before
-  the read is believed.
+  the read is believed. A chat's "after" (`settings_readback`) and a person's
+  (`participant_readback`) have the same staleness and no service message to
+  read it from, so both re-read on the one bound every readback here shares
+  (`adapters.blueprint.READBACK_WAITS`): the chat until it shows the field the
+  write asked for, the person until they read as the status the verb makes of
+  them (`manage.RESULTING_STATUS`; a verb whose result is not one status, an
+  unban or a decline, is read once). A structure apply settles each topic it
+  edits the same way before its own export reads the chat back.
 - **Folder** — one of the account's own shelves over its chat list, which
   Telegram calls a dialog filter (`folders.Folder`, `adapters/folders.py`):
   an id from 2, a title, an emoji, the chats it holds and leaves out as rids,
