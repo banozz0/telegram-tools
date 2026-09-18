@@ -18,6 +18,12 @@ prose about where the flag goes, and neither is something anyone copies:
   assemble the command - "run `telegram-tools discover` (add --profile work if
   it is not the default)" - is the shape that broke, so it fails here too: the
   tool prints the command it means, whole.
+- A hint that *names a profile* and then hints a command is held to the same
+  rule even when it never spells the flag: "profile 'work' has no record ... run
+  `telegram-tools auth`" reads as an instruction about `work` and runs against
+  `default`, writing the record for the wrong login (card agent-bo-95422342).
+  Naming one is the signal - "No profiles yet, log one in with `telegram-tools
+  auth`" names none, and there is nothing to carry.
 - In the docs a reader and an agent work from, only the command itself is
   checked. Prose *about* the flag belongs there - README and SKILL.md are where
   "before the subcommand" gets explained, and neither line is copied and run.
@@ -40,6 +46,7 @@ from pathlib import Path
 import pytest
 
 import telegram_tools
+from telegram_tools import doctor
 from telegram_tools.cli import build_parser
 from telegram_tools.login import LoginRequired
 
@@ -63,6 +70,10 @@ COMMAND = re.compile(r"(?<![\w./-])telegram-tools(?![\w.-])")
 COMMAND_END = re.compile(r"[`\n,;()]")
 PLACEHOLDER = re.compile(r"<[^<>\s]+>")
 FLAG = "--profile"
+# A hint that names one profile: the word followed by a value the f-string fills
+# in - `profile {name!r}`, `profile {name}`. "No profiles yet" and `profile(s):`
+# name none, so neither is asked to carry a flag.
+NAMED_PROFILE = re.compile(rf"\bprofile\s+['\"]?{STAND_IN}")
 
 
 @dataclass(frozen=True)
@@ -145,7 +156,7 @@ def collect() -> list[Hint]:
     for path in sorted(PACKAGE.rglob("*.py")):
         source = path.read_text(encoding="utf-8")
         for node, text in strings_in(ast.parse(source)):
-            if FLAG in text and command_spans(text):
+            if (FLAG in text or NAMED_PROFILE.search(text)) and command_spans(text):
                 hints.append(Hint(f"{path.relative_to(ROOT)}:{node.lineno}", text, strays_matter=True))
     for name in DOCS:
         path = ROOT / name
@@ -158,6 +169,18 @@ def collect() -> list[Hint]:
 
 
 HINTS = collect()
+# The ones that name a profile, whether or not they spell the flag.
+NAMING = [hint for hint in HINTS if hint.strays_matter and NAMED_PROFILE.search(hint.text)]
+
+
+def carries_its_profile(where: str, text: str) -> None:
+    """A hint naming a profile puts that profile inside the command it prints."""
+    spans = command_spans(text)
+    assert spans, f"{where} names a profile but no command: {text!r}"
+    assert any(FLAG in text[start:stop] for start, stop in spans), (
+        f"{where} names a profile and then hints a command with no {FLAG}, so following it "
+        f"acts on the default login: {text!r}"
+    )
 
 
 @pytest.mark.parametrize("hint", HINTS, ids=lambda hint: hint.where)
@@ -213,3 +236,27 @@ def test_the_login_required_refusal_hints_a_command_that_runs(profile):
         assert any(start <= match.start() < stop for start, stop in spans), (
             f"LOGIN_REQUIRED names {FLAG} outside a command: {hint!r}"
         )
+
+
+@pytest.mark.parametrize("hint", NAMING, ids=lambda hint: hint.where)
+def test_a_hint_that_names_a_profile_carries_it_into_the_command(hint):
+    carries_its_profile(hint.where, hint.text)
+
+
+def test_the_scan_still_finds_the_hints_that_name_a_profile():
+    """The profile half fails silent the same way the flag half does."""
+    assert NAMING, "the extractor stopped seeing the hints that name a profile"
+
+
+def test_the_no_session_warning_carries_the_profile_it_names(tmp_path):
+    """`doctor`'s warning assembles its profile at run time, so it is checked there.
+
+    The static scan reads `f"{where}: no session yet ..."` and cannot know that
+    `where` is `profile work`; the warning a person reads does say so, and it is
+    the line they copy.
+    """
+    check = doctor.check_session_storage({}, home=tmp_path, profile="work")
+
+    assert check.status == "WARN", f"expected the no-session warning, got {check!r}"
+    assert "profile work" in check.message
+    carries_its_profile("doctor.check_session_storage", check.message)

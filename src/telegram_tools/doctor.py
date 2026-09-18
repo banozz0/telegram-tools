@@ -74,7 +74,13 @@ def check_session_storage(env: Mapping[str, str], home: Path | None = None, prof
     candidates = [session_path, Path(f"{session_path}.session")]
     if any(path.exists() for path in candidates):
         return DoctorCheck("OK", f"{where}: session present")
-    return DoctorCheck("WARN", f"{where}: no session yet (run `telegram-tools auth` to log in)")
+    if override:
+        return DoctorCheck("WARN", f"{where}: no session yet (run `telegram-tools auth` to log in)")
+    # The command carries the profile the line just named: without the flag the
+    # reader logs `default` in instead (card agent-bo-95422342).
+    return DoctorCheck(
+        "WARN", f"{where}: no session yet (run `telegram-tools --profile {name} auth` to log in)"
+    )
 
 
 def check_profiles(home: Path | None = None) -> DoctorCheck:

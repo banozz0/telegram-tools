@@ -930,7 +930,7 @@ def _local_identity(config, report: Reporter) -> Identity | None:
             name = getattr(config, "profile", profile_store.DEFAULT_PROFILE)
             report.warn(
                 f"profile {name!r} has no record of which account it is, so this run is unsigned; "
-                "`telegram-tools auth` writes one"
+                f"`telegram-tools --profile {name} auth` writes one"
             )
             return None
         report.set_identity(identity)
