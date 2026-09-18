@@ -507,6 +507,33 @@ class TelegramEventSource:
             except queue.Empty:
                 yield None
 
+    def carries(self, rid: str) -> bool:
+        """Whether an event of this source can still land on `rid`; the runner's optional check.
+
+        A forum's events all carry their topic's rid -- the scope of a message
+        in a forum is the topic, never the chat -- so a chat-level cursor on a
+        forum names a scope nothing will reach again. It could never advance,
+        and every start replayed the whole of it; the runner retires it.
+
+        Everything else is carried: a chat without topics under its own rid,
+        any topic rid, a rid this source cannot parse, and any chat it cannot
+        resolve, because a cursor wrongly retired loses the events that
+        arrived while the runner was down and one wrongly kept costs a replay.
+        A bot disowns nothing, for the same reason `replay` is account-only.
+
+        One lookup per stored cursor at start, and it shares `forums` with the
+        live handlers, so a chat already seen costs nothing.
+        """
+        if self.mode != "account":
+            return True
+        try:
+            parsed = _rid.parse(rid)
+        except _rid.RidError:
+            return True
+        if parsed.kind != "chat" or not str(parsed.ids[0]).lstrip("-").isdigit():
+            return True
+        return not self.loop.call(self._is_forum(int(parsed.ids[0])))
+
     def replay(self, rid: str, cursor: str) -> Iterator[Mapping[str, Any]]:
         """Every message of `rid` after `cursor`, oldest first (section 10.5).
 

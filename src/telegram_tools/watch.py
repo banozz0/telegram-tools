@@ -269,6 +269,10 @@ def _when(value: Any) -> str:
     return str(value or "-")
 
 
+# What counts as the runner having ticked, for `status`'s Last tick line.
+TICK_EVENTS = ("delivered", "schedule_fired", "replayed", "started", "dropped")
+
+
 def format_status(status: Mapping[str, Any], *, rules: int) -> str:
     """`watch status`: the lock and its holder, the cursors, the schedules, the last log lines."""
     lock = status.get("lock")
@@ -284,12 +288,24 @@ def format_status(status: Mapping[str, Any], *, rules: int) -> str:
         lines.append(f"Running: pid {lock['pid']} since {lock['started_at']}")
     lines.append(f"Rules loaded  {rules}")
     log = list(status.get("log") or ())
-    last = next((line for line in reversed(log) if line.get("event") in ("delivered", "schedule_fired", "replayed", "started")), None)
+    # A drop is a thing the runner did: a runner that discards everything it
+    # receives is exactly the one whose last tick a person is trying to read,
+    # and leaving `dropped` out of this list printed `-` for it.
+    last = next((line for line in reversed(log) if line.get("event") in TICK_EVENTS), None)
     lines.append("Last tick     " + (_when(last.get("at")) + f" ({last.get('event')})" if last else "-"))
+    drops = status.get("drops") or {}
+    if drops:
+        # Per reason, because a rare reason folded into a common one's total is
+        # the one worth seeing; commonest first.
+        totalled = sorted(drops.items(), key=lambda item: (-item[1], item[0]))
+        lines.append("Dropped       " + ", ".join(f"{count} {reason}" for reason, count in totalled))
     cursors = status.get("cursors") or {}
     lines.append(f"Cursors       {len(cursors)} scope(s)")
     for rid, cursor in sorted(cursors.items()):
         lines.append(f"  {rid} after {cursor}")
+    retired = status.get("retired") or []
+    if retired:
+        lines.append(f"Retired       {len(retired)} cursor(s) no event can reach: " + ", ".join(sorted(retired)))
     schedules = status.get("schedules") or []
     lines.append(f"Schedules     {len(schedules)} runner-held")
     for schedule in schedules:
@@ -463,6 +479,7 @@ __all__ = [
     "SCHEDULE_WRITES",
     "SERVER_HELD",
     "ScheduledMessage",
+    "TICK_EVENTS",
     "WATCH_VERBS",
     "WATCH_WRITES",
     "WatchError",

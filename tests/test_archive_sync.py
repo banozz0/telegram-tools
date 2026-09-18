@@ -908,6 +908,55 @@ def test_a_shared_exports_directory_is_not_a_reason_to_refuse_a_sync(run_cli, ca
     assert modes["status"] == "OK", modes
 
 
+def test_an_export_leaves_the_exports_directory_at_the_mode_the_user_gave_it(run_cli, capsys, home):
+    """0755 on exports/ is the user's choice, and an export landing there is not a reason
+    to close it: nothing private is written there and the file itself is still 0600."""
+    root = home / ".telegram-tools"
+    root.mkdir(mode=0o700, exist_ok=True)
+    exports = root / "exports"
+    exports.mkdir(mode=0o755)
+    run_cli(["archive", "sync"], capsys=capsys)
+    code, out, _err, _fake = run_cli(
+        ["--json", "archive", "export", "--query", "deploy", "--format", "json", "--output", "deploys.json"], capsys=capsys
+    )
+    assert code == 0, out
+    written = Path(envelope_of(out)["result"]["output"])
+    assert written.parent == exports
+    assert exports.stat().st_mode & 0o777 == 0o755, "the exports directory was re-tightened"
+    assert written.stat().st_mode & 0o077 == 0
+    code, out, _err, _fake = run_cli(["--json", "archive", "sync"], capsys=capsys)
+    assert code == 0, "a public exports directory is not a reason to refuse a write"
+
+
+def test_the_scope_picker_lists_every_scope_the_archive_holds_by_title(run_cli, capsys, home):
+    """The menu's scope picker reads the archive through the store, never a query of its
+    own: `(rid, title)` for every scope, title order, and nothing at all before a sync."""
+    assert archive_store.list_scopes() == []
+    run_cli(["archive", "sync"], capsys=capsys)
+    listed = archive_store.list_scopes()
+    assert [title for _rid, title in listed] == sorted(title for _rid, title in listed)
+    assert dict(listed)[DEPLOYS] == "Deploys"
+    assert set(dict(listed)) >= {DEPLOYS, SUPPORT, ALERTS}
+    assert FORUM_RID not in dict(listed), "a forum is its topics, never itself"
+
+
+def test_a_query_fts5_cannot_parse_is_searched_as_the_words_it_is(run_cli, capsys, home):
+    """A hyphenated build tag is what a person types, and it used to reach them as an
+    SQLite parse error. It is retried as literal words instead; deliberate syntax is
+    untouched, and an unbalanced quote finds nothing rather than raising."""
+    run_cli(["archive", "sync"], capsys=capsys)
+    code, out, _err, _fake = run_cli(["--json", "archive", "search", "--query", "rollback-the-deploy"], capsys=capsys)
+    assert code == 0, out
+    assert envelope_of(out)["result"]["messages"], "the words the tag is made of are in the archive"
+
+    for query in ("deploy AND", 'deploy "'):
+        code, out, _err, _fake = run_cli(["--json", "archive", "search", "--query", query], capsys=capsys)
+        assert code == 0, f"{query}: {out}"
+
+    code, out, _err, _fake = run_cli(["--json", "archive", "search", "--query", "deploy OR rollback"], capsys=capsys)
+    assert code == 0 and envelope_of(out)["result"]["messages"], "deliberate syntax still means what it says"
+
+
 def test_archive_writes_refuse_while_the_tools_files_are_loose(run_cli, capsys, home):
     root = home / ".telegram-tools"
     root.mkdir(mode=0o700, exist_ok=True)

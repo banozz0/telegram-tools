@@ -233,11 +233,7 @@ def remap_rows(archive: Archive, apply_id: str) -> list[dict[str, Any]]:
 
 def latest_apply_ids(archive: Archive, limit: int = 20) -> list[tuple[str, str, str]]:
     """(apply_id, created, blueprint_hash) newest first, for the menu's picker."""
-    rows = archive.connection.execute(
-        "SELECT apply_id, MIN(created) AS created, blueprint_hash FROM remaps GROUP BY apply_id ORDER BY created DESC LIMIT ?",
-        (limit,),
-    ).fetchall()
-    return [(row["apply_id"], row["created"], row["blueprint_hash"]) for row in rows]
+    return [(row["apply_id"], row["created"], row["blueprint_hash"]) for row in archive.apply_history(limit)]
 
 
 # -- the plan the audit line records -------------------------------------------

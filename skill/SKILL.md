@@ -447,8 +447,9 @@ names the files).
   or moved here": `message copy` drops the author on purpose, so a copy has no
   such key and reads as a plain line.
 - **`archive search` is offline and `--query` is FTS5 syntax**: words, `"a phrase"`,
-  `AND`, `OR`, `NOT`, `prefix*`. Punctuation inside a bare word (a hyphen, a dot) is
-  syntax to FTS5, so quote it: `--query '"v3.4.1"'`. `--scope <rid>`, `--from
+  `AND`, `OR`, `NOT`, `prefix*`. A query FTS5 cannot parse -- `v3.4.1`, a slug like
+  `campaign-alert-721`, an unbalanced quote -- is not an error: it is searched again as
+  the words it is made of, in that order, so a hyphenated tag finds its row unquoted. `--scope <rid>`, `--from
   tg:user:<id>`, `--since`/`--until`, `--regex` and `--context N` narrow or widen it;
   `result.messages[].highlight` carries the match marked `«…»`, `context_before` and
   `context_after` the neighbours. Its printed rows carry the same marks a live

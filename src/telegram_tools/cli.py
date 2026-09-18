@@ -15,7 +15,7 @@ from telegram_tools._core import rid as _rid
 from telegram_tools._core import rules as _rules
 from telegram_tools._core import runner as _runner
 from telegram_tools._core.audit import AuditLog
-from telegram_tools._core.contract import CodedError, exit_code, utc_now
+from telegram_tools._core.contract import CodedError, exit_code
 from telegram_tools._core.identity import Identity, Target
 from telegram_tools._core.plan import Evidence, Mutation
 from telegram_tools._core.redaction import redact_text
@@ -1105,10 +1105,8 @@ async def _run_archive_prune(args, config, *, report: Reporter) -> int:
         if args.scope:
             fresh = archive.scope_target(target.rid)
         else:
-            row = archive.connection.execute(
-                "SELECT label FROM identities WHERE identity_id = ?", (args.identity,)
-            ).fetchone()
-            fresh = None if row is None else Target(rid=target.rid, kind=target.kind, title=row["label"], path=target.path)
+            label = archive.identity_label(args.identity)
+            fresh = None if label is None else Target(rid=target.rid, kind=target.kind, title=label, path=target.path)
         if fresh is None or fresh.title != target.title:
             raise CommandError(
                 "The scope changed between the preview and the execution.",
@@ -1117,10 +1115,9 @@ async def _run_archive_prune(args, config, *, report: Reporter) -> int:
             )
 
         outcome = archive.retention(plan) if kind == "retention" else archive.forget(plan)
-        remaining = archive.connection.execute(
-            "SELECT COUNT(*) FROM messages WHERE rid = ?" if args.scope else "SELECT COUNT(*) FROM messages WHERE identity_id = ?",
-            (args.scope or args.identity,),
-        ).fetchone()[0]
+        remaining = (
+            archive.message_count(rid=args.scope) if args.scope else archive.message_count(identity_id=args.identity)
+        )
     evidence = Evidence.verified(f"{remaining} message(s) remain for {target.rid}")
     report.set_evidence(evidence)
     report.audit(plan, status="ok", evidence=evidence)
@@ -1128,7 +1125,7 @@ async def _run_archive_prune(args, config, *, report: Reporter) -> int:
     return 0
 
 
-def _archive_scope_rids(connection, reference: str, topic: int | None) -> list[str]:
+def _archive_scope_rids(archive, reference: str, topic: int | None) -> list[str]:
     """The archive's scope rids a live `--chat` reference names, for `search --archive`.
 
     A numeric id or a `@username` only: the archive has no dialog list to
@@ -1136,14 +1133,14 @@ def _archive_scope_rids(connection, reference: str, topic: int | None) -> list[s
     make an offline command connect.
     """
     reference = str(reference).strip()
-    rows = connection.execute("SELECT rid, platform_json FROM scopes").fetchall()
+    rows = archive.scope_rows()
     chat_ids: set[str] = set()
     if reference.lstrip("-").isdigit():
         chat_ids.add(reference)
     else:
         wanted = reference.lstrip("@").casefold()
         for row in rows:
-            extras = json.loads(row["platform_json"] or "{}")
+            extras = row["platform_json"] or {}
             username = extras.get("username")
             if username and str(username).casefold() == wanted:
                 chat_ids.add(_rid.parse(row["rid"]).ids[0])
@@ -1407,17 +1404,15 @@ async def _run_search_archive(args, config, *, report: Reporter) -> int:
     identity = await _offline_identity(config, report)
     report.show_banner()
     with archive_store.open_archive() as archive:
-        rids = _archive_scope_rids(archive.connection, args.chat, args.topic)
+        rids = _archive_scope_rids(archive, args.chat, args.topic)
         author = args.from_user
         if author == "me":
             author = identity.id
         elif author is not None and str(author).lstrip("@").isdigit():
             author = str(_rid.make(PREFIX, "user", str(author).lstrip("@")))
         elif author is not None:
-            row = archive.connection.execute(
-                "SELECT rid FROM authors WHERE LOWER(username) = ?", (str(author).lstrip("@").casefold(),)
-            ).fetchone()
-            author = row["rid"] if row else str(author)
+            # By username alone: a display label is not what `--from` takes here.
+            author = archive.author_rid(str(author).lstrip("@"), match_label=False) or str(author)
         # A keyword is a phrase, not FTS5 syntax: what `search` has always matched.
         query = '"' + args.keyword.replace('"', '""') + '"'
         hits = archive.search(
@@ -1625,7 +1620,7 @@ def _selection_ids(args, archive_scope) -> list[int]:
     """The ids a bulk verb acts on: `--ids` as typed, or `--from-search` answered by the archive."""
     if getattr(args, "from_search", None):
         with archive_store.open_archive() as archive:
-            rids = archive_scope(archive.connection)
+            rids = archive_scope(archive)
             return message_ops.ids_from_search(
                 archive, args.from_search, scope=rids, limit=getattr(args, "limit", None), i_know=bool(getattr(args, "i_know", False))
             )
@@ -1709,7 +1704,7 @@ async def _run_message(client, args, config, *, report: Reporter | None = None) 
     if verb in ("reply", "edit", "draft") and not clear:
         text = _message_text(args.text, has_files=False)
     if verb in message_ops.BULK_VERBS:
-        ids = _selection_ids(args, lambda connection: _archive_scope_rids(connection, str(resolved.id), None))
+        ids = _selection_ids(args, lambda archive: _archive_scope_rids(archive, str(resolved.id), None))
     elif verb in message_ops.SINGLE_VERBS or verb == "reply":
         ids = [int(args.message_id)]
     else:
@@ -1902,10 +1897,7 @@ async def _run_message(client, args, config, *, report: Reporter | None = None) 
     def bookmark_row(message_id: int) -> None:
         scope_rid = scope_rid_for(resolved.id, briefs[0].topic_id) if briefs and briefs[0].topic_id else scope_rid_for(resolved.id)
         with archive_store.open_archive() as archive:
-            archive.connection.execute(
-                "INSERT OR REPLACE INTO bookmarks (rid, message_id, identity_id, label, created, source) VALUES (?, ?, ?, ?, ?, 'manual')",
-                (scope_rid, str(message_id), identity.id, request.label, utc_now()),
-            )
+            archive.add_bookmark(rid=scope_rid, message_id=message_id, identity_id=identity.id, label=request.label)
 
     outcome = await message_ops.perform(client, request, bookmark_row=bookmark_row if verb == "bookmark" else None)
     if not report.machine:

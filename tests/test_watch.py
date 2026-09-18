@@ -688,6 +688,34 @@ def test_a_bot_replays_nothing_because_a_bot_has_no_history(loop_for):
     assert client.pages == []
 
 
+def test_a_forums_chat_level_cursor_is_disowned_and_everything_else_is_carried(loop_for):
+    """Since every event in a forum carries its topic's rid, a chat-level cursor on a forum
+    names a scope nothing can reach again: it never advances, and every start replayed the
+    whole forum. Nothing else is disowned -- a wrongly retired cursor loses events."""
+    client = SendingClient()
+    source = watch_events.TelegramEventSource(client, loop_for(client))
+    assert source.carries(CHAT_RID) is False, "the forum's chat rid can never carry an event again"
+    assert source.carries(f"tg:topic:{FORUM_ID}:141") is True
+    assert source.carries(ALERTS_RID) is True, "a chat without topics still carries its own rid"
+    assert source.carries("not-a-rid") is True
+    assert source.carries("tg:folder:7") is True
+
+
+def test_a_chat_that_will_not_resolve_keeps_its_cursor_rather_than_losing_it(loop_for):
+    """A lookup that fails is not a disavowal: the cursor stays and costs a replay, because
+    the other way round costs the events that arrived while the runner was down."""
+    client = SendingClient()
+    source = watch_events.TelegramEventSource(client, loop_for(client))
+    assert source.carries("tg:chat:-1009999999999") is True
+    assert -1009999999999 not in source.forums, "a failed lookup is not an answer to remember"
+
+
+def test_a_bot_disowns_no_cursor_because_it_replays_nothing_either(loop_for):
+    client = SendingClient()
+    source = watch_events.TelegramEventSource(client, loop_for(client), mode="bot")
+    assert source.carries(CHAT_RID) is True
+
+
 def test_a_cursor_this_source_did_not_write_replays_nothing(loop_for):
     client = SendingClient()
     source = watch_events.TelegramEventSource(client, loop_for(client))
@@ -1284,6 +1312,43 @@ def test_status_says_why_no_rules_load_to_a_person_as_well(run_watch, capsys, ho
     code, out, err, _fake = run_watch(["--json", "watch", "status"], capsys=capsys)
     assert [f"warning: {text}" for text in envelope_of(out)["warnings"]] == warnings
     assert broken in err.splitlines()
+
+
+def test_the_last_tick_names_a_drop_because_a_drop_is_the_last_thing_that_happened(run_watch, capsys, home):
+    """A runner that drops everything it receives did something, and `status` said `-`:
+    the picker listed delivered, schedule_fired, replayed and started and nothing else, so
+    the one line that explains a silent runner was the one line it could not name."""
+    paths = archive_store.paths_for(home)
+    paths.root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    paths.runner_log.write_text(
+        json.dumps({"at": "2026-09-18T09:00:00+00:00", "event": "started"})
+        + "\n"
+        + json.dumps({"at": "2026-09-18T09:05:00+00:00", "event": "dropped", "reason": "own_identity", "rid": CHAT_RID})
+        + "\n"
+    )
+    code, out, _err, _fake = run_watch(["watch", "status"], capsys=capsys)
+    assert code == 0
+    [tick] = [line for line in out.splitlines() if line.startswith("Last tick")]
+    assert "(dropped)" in tick and "09:05" in tick
+
+
+def test_status_totals_the_drops_by_reason_and_says_which_cursors_were_retired():
+    """Per-reason totals, because a rare reason buried in a common one's count is what a
+    person is looking for; and no line at all when the runner dropped nothing."""
+    live = {
+        "lock": None,
+        "log": [],
+        "drops": {"own_identity": 47, "origin_marker": 1},
+        "retired": [CHAT_RID],
+        "cursors": {GENERAL_RID: "50"},
+    }
+    printed = watch_ops.format_status(live, rules=1)
+    assert "Dropped       47 own_identity, 1 origin_marker" in printed
+    assert f"Retired       1 cursor(s) no event can reach: {CHAT_RID}" in printed
+
+    quiet = watch_ops.format_status({"lock": None, "log": [], "drops": {}, "retired": []}, rules=1)
+    assert "Dropped" not in quiet and "Retired" not in quiet
+    assert "Dropped" not in watch_ops.format_status({"lock": None, "log": []}, rules=1)
 
 
 def test_stop_and_reload_refuse_when_no_runner_holds_the_lock(run_watch, capsys):

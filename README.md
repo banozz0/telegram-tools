@@ -348,7 +348,7 @@ menu does, from a terminal. The verbs:
 | `poll` | posts a poll | `--question`, `--option` (2 to 10), `--multiple`, `--topic` |
 | `typing` | shows *typing…* | `--seconds` |
 | `read` / `unread` | marks the chat read, or unread | — |
-| `bookmark` | forwards to Saved Messages and writes a `bookmarks` row in the archive | `--id MSG`, `--label` |
+| `bookmark` | forwards to Saved Messages and writes a `bookmarks` row in the archive; bookmarking the same message again relabels it and keeps when it was first marked | `--id MSG`, `--label` |
 | `draft` | saves a draft in the chat, or a topic in it | `--text`, `--topic` |
 | `pins` | lists what is pinned, newest message first; a read, so no preview and no gate | `--topic`, `--limit` (100 by default) |
 
@@ -419,7 +419,8 @@ telegram-tools archive forget --scope tg:chat:-1001234567890 --execute        # 
 
 `archive search` is FTS5 full-text search — words, `"a phrase"`, `AND`, `OR`, `NOT`,
 `prefix*` — ranked by relevance and marked `«like this»` on screen, and it never
-connects. `archive export` writes the same rows the search printed in `json`, `csv`,
+connects. A query FTS5 cannot parse, such as `campaign-alert-721`, is searched again as
+the words it is made of rather than refused. `archive export` writes the same rows the search printed in `json`, `csv`,
 `jsonl`, `markdown` or `html` (one self-contained page, no scripts); the last two put
 the row's marks (`[fwd …]`, `[file]`, …) in front of its text, as the live export does;
 a bare `--output` name lands in `~/.telegram-tools/exports/`, an absolute path is
