@@ -1224,6 +1224,43 @@ def test_status_says_why_no_rules_load_to_a_person_as_well(run_watch, capsys, ho
     assert broken in err.splitlines()
 
 
+def test_the_last_tick_names_a_drop_because_a_drop_is_the_last_thing_that_happened(run_watch, capsys, home):
+    """A runner that drops everything it receives did something, and `status` said `-`:
+    the picker listed delivered, schedule_fired, replayed and started and nothing else, so
+    the one line that explains a silent runner was the one line it could not name."""
+    paths = archive_store.paths_for(home)
+    paths.root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    paths.runner_log.write_text(
+        json.dumps({"at": "2026-09-18T09:00:00+00:00", "event": "started"})
+        + "\n"
+        + json.dumps({"at": "2026-09-18T09:05:00+00:00", "event": "dropped", "reason": "own_identity", "rid": CHAT_RID})
+        + "\n"
+    )
+    code, out, _err, _fake = run_watch(["watch", "status"], capsys=capsys)
+    assert code == 0
+    [tick] = [line for line in out.splitlines() if line.startswith("Last tick")]
+    assert "(dropped)" in tick and "09:05" in tick
+
+
+def test_status_totals_the_drops_by_reason_and_says_which_cursors_were_retired():
+    """Per-reason totals, because a rare reason buried in a common one's count is what a
+    person is looking for; and no line at all when the runner dropped nothing."""
+    live = {
+        "lock": None,
+        "log": [],
+        "drops": {"own_identity": 47, "origin_marker": 1},
+        "retired": [CHAT_RID],
+        "cursors": {GENERAL_RID: "50"},
+    }
+    printed = watch_ops.format_status(live, rules=1)
+    assert "Dropped       47 own_identity, 1 origin_marker" in printed
+    assert f"Retired       1 cursor(s) no event can reach: {CHAT_RID}" in printed
+
+    quiet = watch_ops.format_status({"lock": None, "log": [], "drops": {}, "retired": []}, rules=1)
+    assert "Dropped" not in quiet and "Retired" not in quiet
+    assert "Dropped" not in watch_ops.format_status({"lock": None, "log": []}, rules=1)
+
+
 def test_stop_and_reload_refuse_when_no_runner_holds_the_lock(run_watch, capsys):
     for verb in ("stop", "reload"):
         code, out, _err, _fake = run_watch(["--json", "watch", verb], capsys=capsys)
