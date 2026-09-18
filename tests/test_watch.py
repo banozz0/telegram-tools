@@ -821,6 +821,58 @@ def test_leaving_the_runner_prints_nothing_after_the_done_screen():
     assert not printed, "the exit path printed:\n" + done.stderr
 
 
+class FailingTeardownClient(TelethonShapedClient):
+    """A client whose disconnect raises, so `stop()` has something to decide about."""
+
+    def __init__(self, failure: BaseException) -> None:
+        super().__init__()
+        self.failure = failure
+
+    async def _disconnect_coro(self) -> None:
+        await super()._disconnect_coro()
+        raise self.failure
+
+
+def test_a_transport_failure_at_shutdown_is_tolerated_and_said_out_loud(capsys):
+    """A disconnect that fails for a reason a network has is not the run's exit.
+
+    It still has to be visible: a teardown that silently did nothing is how the
+    exit path stayed broken for the life of the feature.
+    """
+    client = FailingTeardownClient(OSError("the socket went away"))
+
+    async def cli_loop():
+        bridge = watch_events.ClientLoop(client)
+        bridge.start()
+        bridge.stop()
+        return bridge
+
+    bridge = run(cli_loop())
+    assert (bridge.loop, bridge.thread) == (None, None), "the bridge was not torn down"
+    assert "the socket went away" in capsys.readouterr().err
+
+
+def test_a_programming_error_at_shutdown_reaches_the_caller_rather_than_vanishing(capsys):
+    """A `TypeError` from the bridge itself is a bug, and a bug must be seen.
+
+    The bare `except Exception` this replaces hid exactly this shape for the
+    life of the watch feature -- `call()` refusing a future it was handed --
+    which is why the exit path was broken from the day it shipped. The loop and
+    its thread still go down: the report is the point, not a leaked thread.
+    """
+    client = FailingTeardownClient(TypeError("a coroutine was expected"))
+
+    async def cli_loop():
+        bridge = watch_events.ClientLoop(client)
+        bridge.start()
+        with pytest.raises(TypeError, match="a coroutine was expected"):
+            bridge.stop()
+        return bridge
+
+    bridge = run(cli_loop())
+    assert (bridge.loop, bridge.thread) == (None, None), "the bridge outlived the failure"
+
+
 # -- the detached session ------------------------------------------------------
 
 

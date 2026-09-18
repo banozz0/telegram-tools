@@ -47,6 +47,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import queue
+import sys
 import threading
 from typing import Any, Iterator, Mapping, Sequence
 
@@ -81,6 +82,15 @@ MESSAGE_KINDS = ("message", "link", "media")
 
 class LoopClosed(RuntimeError):
     """A call was submitted to a client loop that is not running."""
+
+
+# What a disconnect at shutdown is allowed to fail with: it ran out of time
+# (`TimeoutError` is `asyncio`'s and `concurrent.futures`' too since 3.11), the
+# transport was already gone (`OSError`, `ConnectionError` under it), or this
+# bridge's loop had stopped before `stop()` reached it. Everything else -- a
+# `TypeError`, an `AttributeError` -- is a programming error in the bridge and
+# is reported rather than swallowed.
+TOLERATED_AT_SHUTDOWN = (TimeoutError, OSError, LoopClosed)
 
 
 def scope_rid(chat_id: int, topic_id: int | None) -> str:
@@ -387,11 +397,17 @@ class ClientLoop:
             return
         try:
             self.call(_disconnected(self.client), timeout_s=10.0)
-        except Exception:  # noqa: BLE001 - a teardown failure must not replace the real exit
-            pass
-        loop.call_soon_threadsafe(loop.stop)
-        thread.join(timeout=10.0)
-        self.loop, self.thread = None, None
+        except TOLERATED_AT_SHUTDOWN as exc:
+            # A network that went away, or a disconnect that ran out of time,
+            # must not replace the real exit -- but it is still worth saying,
+            # because a teardown that quietly did nothing is what kept this
+            # path broken. A `TypeError` or an `AttributeError` from the bridge
+            # itself is not tolerated here: it is a bug, and it goes up.
+            print(f"the client did not disconnect cleanly: {type(exc).__name__}: {exc}", file=sys.stderr)
+        finally:
+            loop.call_soon_threadsafe(loop.stop)
+            thread.join(timeout=10.0)
+            self.loop, self.thread = None, None
 
 
 class TelegramEventSource:
