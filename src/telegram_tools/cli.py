@@ -63,7 +63,18 @@ from telegram_tools.delete import (
 )
 from telegram_tools.discovery import classify_entity, discover_chats, filter_chats, format_discovery_table
 from telegram_tools.doctor import require_tight_modes, run_doctor
-from telegram_tools.envelope import BROKE, PLATFORM, PREFIX, TOOL, ApprovalRequired, CommandError, Reporter, error_for, platform_error
+from telegram_tools.envelope import (
+    BROKE,
+    PLATFORM,
+    PREFIX,
+    TOOL,
+    ApprovalRequired,
+    CommandError,
+    Reporter,
+    answered_by_platform,
+    error_for,
+    platform_error,
+)
 from telegram_tools.exporters import SEARCH_FORMATS, json_text, write_records
 from telegram_tools import messages as message_ops
 from telegram_tools.prompts import BACK, pick_many
@@ -4355,10 +4366,21 @@ def main(argv: Sequence[str] | None = None) -> int:
         # A missing or unreadable path is a usage mistake, not a crash. Must stay
         # below PermissionError, which is an OSError subclass with its own exit.
         parser.error(str(exc))
-    except Exception as exc:  # noqa: BLE001 - a platform failure is an answer under --json
-        if not report.machine:
+    except Exception as exc:  # noqa: BLE001 - a platform failure is an answer, not a crash
+        error = platform_error(exc)
+        if report.machine:
+            return report.failed(error)
+        if not answered_by_platform(exc):
+            # Not Telegram answering: a bug in this tool, and a swallowed bug
+            # is worse than a traceback (card agent-bo-95422383).
             raise
-        return report.failed(platform_error(exc))
+        # A refusal that came back from Telegram reads like every other named
+        # refusal -- the message, the hint under it -- with the platform's own
+        # error name in front, which is the name the envelope carries too.
+        print(f"error: {error.platform}: {error.message}", file=sys.stderr)
+        if error.hint:
+            print(f"hint: {error.hint}", file=sys.stderr)
+        return exit_code("failed", error.code)
 
 
 if __name__ == "__main__":

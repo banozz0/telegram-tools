@@ -17,6 +17,8 @@ import sys
 import time
 from typing import Any, Callable, Iterable, Sequence
 
+from telethon.errors import RPCError
+
 from telegram_tools import __version__
 from telegram_tools._core.contract import (
     CodedError,
@@ -152,6 +154,19 @@ def platform_error(exc: BaseException) -> Error:
             platform=name,
         )
     return Error(code="PLATFORM_ERROR", message=str(exc), platform=name)
+
+
+def answered_by_platform(exc: BaseException) -> bool:
+    """True when Telegram answered: the call went out and came back refused.
+
+    `platform_error` names any exception it is handed, because under `--json`
+    every failure has to leave an envelope. Human mode needs the narrower
+    question, and Telethon already draws the line: an `RPCError` -- FloodWait
+    included, it is a subclass -- is the platform's own answer, and anything
+    else reaching that point is this tool breaking. A dropped connection or a
+    timeout never asks: both are `OSError`s, which `main` answers above this.
+    """
+    return isinstance(exc, RPCError)
 
 
 def human_command(argv: Sequence[str]) -> str:

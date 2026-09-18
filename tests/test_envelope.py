@@ -16,7 +16,12 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from telethon.errors import ChatWriteForbiddenError, FloodWaitError, UserNotParticipantError
+from telethon.errors import (
+    ChatWriteForbiddenError,
+    FloodWaitError,
+    MessageAuthorRequiredError,
+    UserNotParticipantError,
+)
 from telethon.tl.types import ChatBannedRights, InputPeerUser, PeerChannel, User
 
 from telegram_tools import cli
@@ -817,6 +822,50 @@ def test_a_write_the_platform_refuses_leaves_one_failed_audit_line(run_cli, monk
     assert lines[0]["plan_id"] == envelope["plan"]["plan_id"]
     assert lines[0]["evidence"]["readback"].startswith("unverified:")
     assert platform in lines[0]["evidence"]["readback"]
+
+
+def test_a_write_the_platform_refuses_is_an_error_line_in_human_mode_too(run_cli, monkeypatch, capsys, home):
+    """Telegram's own refusal is an answer, not a crash: no traceback without `--json`.
+
+    The machine envelope named the error and exited 2 from the first day; human
+    mode re-raised, so a person got a Telethon traceback and exit 1 for a chat
+    the account may not write in (card agent-bo-95422383).
+    """
+    monkeypatch.setenv("TELEGRAM_SEND_ALLOWLIST", str(CHAT_ID))
+    fake = RefusingClient(MessageAuthorRequiredError(None))
+
+    exit_code, _out, err, _fake = run_cli(
+        ["send", "--chat", str(CHAT_ID), "--text", "ship it", "--yes"], client=fake, capsys=capsys
+    )
+
+    assert "Traceback" not in err
+    assert exit_code == 2
+    assert "error: MessageAuthorRequiredError: Message author required" in err
+    lines = (home / ".telegram-tools" / "audit.jsonl").read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 1 and json.loads(lines[0])["status"] == "failed"
+
+
+def test_a_rate_limit_in_human_mode_prints_the_wait_and_the_hint(run_cli, monkeypatch, capsys):
+    """The one platform answer that carries a hint prints it, as every named refusal does."""
+    monkeypatch.setenv("TELEGRAM_SEND_ALLOWLIST", str(CHAT_ID))
+    fake = RefusingClient(FloodWaitError(None, capture=30))
+
+    exit_code, _out, err, _fake = run_cli(
+        ["send", "--chat", str(CHAT_ID), "--text", "ship it", "--yes"], client=fake, capsys=capsys
+    )
+
+    assert exit_code == 2
+    assert "error: FloodWaitError: Telegram asked for a 30s wait" in err
+    assert "hint: Wait 30s" in err
+
+
+def test_a_bug_in_this_tool_still_raises_in_human_mode(run_cli, monkeypatch, capsys):
+    """A swallowed bug is worse than a traceback: only the platform's answer is caught."""
+    monkeypatch.setenv("TELEGRAM_SEND_ALLOWLIST", str(CHAT_ID))
+    fake = RefusingClient(TypeError("send_message() got an unexpected keyword argument"))
+
+    with pytest.raises(TypeError):
+        run_cli(["send", "--chat", str(CHAT_ID), "--text", "ship it", "--yes"], client=fake, capsys=capsys)
 
 
 def test_a_write_this_tool_refuses_before_the_call_leaves_nothing(run_cli, capsys, home):
