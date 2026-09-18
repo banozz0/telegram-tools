@@ -311,7 +311,10 @@ def confirm_bot_edits(plan: EditPlan, *, read: Callable[[str], str] = input, wri
         # being ignored.
         write("No answer read - cancelled.")
         return False
-    return answer == "y"
+    if answer != "y":
+        write("Answered no - cancelled.")
+        return False
+    return True
 
 
 async def apply_owner_edits(client, input_user, changes: list[EditChange], applied: list[str] | None = None) -> list[str]:

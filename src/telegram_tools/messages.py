@@ -452,7 +452,10 @@ def confirm_prompt_y(preview: str, *, read: Callable[[str], str] = input, write:
     if not answer:
         write("No answer read - cancelled.")
         return False
-    return answer == "y"
+    if answer != "y":
+        write("Answered no - cancelled.")
+        return False
+    return True
 
 
 def confirm_typed_delete(

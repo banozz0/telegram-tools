@@ -145,7 +145,10 @@ def confirm_send(preview: str, *, read: Callable[[str], str] = input, write: Cal
         # buffer reads as an empty answer, and a silent cancel looks like a bug.
         write("No answer read - cancelled.")
         return False
-    return answer == "y"
+    if answer != "y":
+        write("Answered no - cancelled.")
+        return False
+    return True
 
 
 def _destination(chat_id: int, topic_id: int | None) -> str:

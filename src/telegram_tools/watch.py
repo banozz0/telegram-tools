@@ -368,7 +368,10 @@ def confirm(preview: str, question: str, *, read: Callable[[str], str] = input, 
     if not answer:
         write("No answer read - cancelled.")
         return False
-    return answer == "y"
+    if answer != "y":
+        write("Answered no - cancelled.")
+        return False
+    return True
 
 
 # -- the schedule arguments -------------------------------------------------

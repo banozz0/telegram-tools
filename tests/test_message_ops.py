@@ -755,6 +755,38 @@ def test_send_reply_to_threads_the_message_and_says_so_in_the_preview(run_cli, c
     assert envelope_of(out)["args"]["reply_to"] == 11
 
 
+# -- the y/N gates ----------------------------------------------------------
+
+
+def _every_y_n_gate():
+    """Each y/N this tool asks, called the same way: (read, write) -> bool."""
+    from telegram_tools import bots, create, send
+    from telegram_tools import watch as watch_ops
+
+    plan = SimpleNamespace(changes=(), skipped=())
+    return {
+        "bots": lambda read, write: bots.confirm_bot_edits(plan, read=read, write=write),
+        "create": lambda read, write: create.confirm_create("preview", read=read, write=write),
+        "message": lambda read, write: ops.confirm_prompt_y("preview", read=read, write=write),
+        "send": lambda read, write: send.confirm_send("preview", read=read, write=write),
+        "watch": lambda read, write: watch_ops.confirm("preview", "Write it?", read=read, write=write),
+    }
+
+
+@pytest.mark.parametrize("gate", sorted(_every_y_n_gate()))
+def test_a_typed_no_says_it_cancelled_as_a_blank_answer_does(gate):
+    # A typed n went straight to the Not done screen while a blank answer
+    # printed its own line: both cancel, so both say so, and a y says nothing.
+    ask = _every_y_n_gate()[gate]
+    for typed, line in (("n", "Answered no - cancelled."), ("no", "Answered no - cancelled."), ("", "No answer read - cancelled.")):
+        said = []
+        assert ask(lambda _prompt: typed, said.append) is False
+        assert said[-1] == line, (typed, said)
+    said = []
+    assert ask(lambda _prompt: "y", said.append) is True
+    assert "Answered no - cancelled." not in said
+
+
 # -- the module's own pieces -----------------------------------------------------
 
 
@@ -1163,22 +1195,22 @@ def test_a_send_yes_says_the_same_sentence_with_no_gate_in_front_of_it(run_cli, 
     assert rest == [f"Sent message 5001 to {HERMES}.", "Read back: message 5001 is in Team Hermes"]
 
 
-def test_a_declined_send_prints_nothing_after_the_prompt(run_cli, capsys, home):
+def test_a_declined_send_says_it_cancelled_and_does_nothing_else(run_cli, capsys, home):
     code, out, _err, fake = run_cli(["send", "--chat", FORUM, "--text", "ship it"], capsys=capsys, answers=("n",))
 
     assert code == 1
     assert fake.calls == []
-    assert after_the_gate(out) == []
+    assert after_the_gate(out) == ["Answered no - cancelled."]
 
 
 @pytest.mark.parametrize("verb", sorted(DONE_SENTENCES))
-def test_a_declined_message_verb_prints_nothing_after_the_prompt(run_cli, capsys, home, verb):
+def test_a_declined_message_verb_says_it_cancelled_and_does_nothing_else(run_cli, capsys, home, verb):
     flags, _sentence, _readback = DONE_SENTENCES[verb]
     code, out, _err, fake = run_cli(["message", verb, "--chat", FORUM, *flags], capsys=capsys, answers=("n",))
 
     assert code == 1
     assert fake.calls == []
-    assert after_the_gate(out) == []
+    assert after_the_gate(out) == ["Answered no - cancelled."]
 
 
 def test_a_forward_of_several_names_the_count_and_the_last_one_posted(run_cli, capsys, home):
