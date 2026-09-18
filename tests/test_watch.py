@@ -442,15 +442,18 @@ class SendingClient(ArchiveFakeClient):
     async def connect(self):
         self.connected = True
 
-    async def send_message(self, peer, text, reply_to=None, schedule_date=None):
+    # `schedule`, spelled the way Telethon's own client methods spell it, and with
+    # no `**kwargs` to absorb a different spelling: this fake agreeing with a
+    # keyword Telethon does not name is how every `send --at` shipped broken.
+    async def send_message(self, peer, text, reply_to=None, schedule=None):
         if self.flood_on is not None:
             raise FloodWaitError(request=None, capture=self.flood_on)
         self.next_id += 1
         chat_id = getattr(peer, "chat_id", None)
         message = fake_message(self.next_id, text=text, chat_id=chat_id, topic=reply_to)
-        self.sent.append({"chat_id": chat_id, "text": text, "reply_to": reply_to, "at": schedule_date})
-        if schedule_date is not None:
-            message.date = schedule_date
+        self.sent.append({"chat_id": chat_id, "text": text, "reply_to": reply_to, "at": schedule})
+        if schedule is not None:
+            message.date = schedule
             self.scheduled.setdefault(chat_id, []).append(message)
         return message
 

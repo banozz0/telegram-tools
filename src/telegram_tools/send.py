@@ -195,9 +195,12 @@ async def send_message(
     if recheck is not None:
         await recheck()
 
-    # Telethon takes the moment straight through as `schedule_date`; Telegram
-    # holds the message and posts it itself, so nothing here waits for it.
-    when = {"schedule_date": target.at} if target.at is not None else {}
+    # Telethon's client methods name the moment `schedule` — `schedule_date` is
+    # the raw MTProto field they fill in for you, and passing that spelling here
+    # is a TypeError on `send_message` and silence on `send_file`, which takes a
+    # `**kwargs` it never reads. Telegram holds the message and posts it itself,
+    # so nothing here waits for it.
+    when = {"schedule": target.at} if target.at is not None else {}
     if files:
         # Always a list, even for one file: Telethon groups a list into a single
         # album, which is what several attachments in one send should look like.

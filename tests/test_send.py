@@ -1,7 +1,10 @@
 import asyncio
+import inspect
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
+from telethon import TelegramClient
 
 from telegram_tools.config import parse_send_allowlist
 from telegram_tools.models import TopicInfo
@@ -254,3 +257,88 @@ def test_preview_says_when_a_file_has_no_caption(tmp_path):
 
 def test_preview_without_files_has_no_files_row():
     assert "Files" not in format_send_preview(TARGET, "hi", sender="Sven")
+
+
+# --- scheduling: the keyword Telethon actually names -------------------------
+#
+# `--at` hands the message to Telegram, and the client method that does it spells
+# the moment `schedule`, not `schedule_date` — `schedule_date` is the raw MTProto
+# field Telethon fills in for you. Getting it wrong failed two different ways:
+# `send_message` names no `**kwargs` and raised TypeError, while `send_file` takes
+# a `**kwargs` it never reads, so the attachment posted immediately and nothing
+# said so. Both keyword sets are read off Telethon itself, with `**kwargs` left
+# out on purpose: a keyword a method swallows is not a keyword it honours.
+
+
+def _named_keywords(method) -> frozenset[str]:
+    return frozenset(
+        name
+        for name, param in inspect.signature(method).parameters.items()
+        if param.kind is not inspect.Parameter.VAR_KEYWORD
+    )
+
+
+TELETHON_KEYWORDS = {
+    "send_message": _named_keywords(TelegramClient.send_message),
+    "send_file": _named_keywords(TelegramClient.send_file),
+}
+
+
+class TelethonSignatureClient:
+    """A fake that refuses any keyword the real client would not honour.
+
+    A fake with a bare `**kwargs` is how the wrong spelling survived the whole
+    suite: the keyword never had to be right to stay green. This one checks each
+    call against Telethon's own signature, so it cannot hide the next one.
+    """
+
+    def __init__(self, message_id=9301):
+        self.message_id = message_id
+        self.calls: list[tuple[str, dict]] = []
+
+    def _record(self, method: str, kwargs: dict):
+        unknown = sorted(set(kwargs) - TELETHON_KEYWORDS[method])
+        if unknown:
+            raise TypeError(f"{method}() got an unexpected keyword argument {unknown[0]!r}")
+        self.calls.append((method, kwargs))
+
+    async def send_message(self, entity, message, **kwargs):
+        self._record("send_message", kwargs)
+        return SimpleNamespace(id=self.message_id)
+
+    async def send_file(self, entity, file, **kwargs):
+        self._record("send_file", kwargs)
+        return SimpleNamespace(id=self.message_id)
+
+
+WHEN = datetime(2031, 4, 5, 9, 30, tzinfo=timezone.utc)
+AT_TARGET = SendTarget(chat_id=-100111, chat_title="Hermes", topic=TOPIC, at=WHEN)
+
+
+def test_a_scheduled_send_passes_the_moment_under_the_name_telethon_names():
+    client = TelethonSignatureClient()
+
+    result = asyncio.run(send_message(client, "PEER", AT_TARGET, "standup", confirm=lambda: True))
+
+    assert client.calls == [("send_message", {"reply_to": 141, "schedule": WHEN})]
+    assert result.to_dict()["scheduled_at"] == WHEN.isoformat()
+
+
+def test_a_scheduled_file_send_passes_the_moment_too():
+    client = TelethonSignatureClient()
+
+    result = asyncio.run(
+        send_message(client, "PEER", AT_TARGET, "shipped", files=["/tmp/a.png"], confirm=lambda: True)
+    )
+
+    assert client.calls[0][0] == "send_file"
+    assert client.calls[0][1]["schedule"] == WHEN
+    assert result.to_dict()["scheduled_at"] == WHEN.isoformat()
+
+
+def test_an_unscheduled_send_passes_no_moment_at_all():
+    client = TelethonSignatureClient()
+
+    asyncio.run(send_message(client, "PEER", TARGET, "now", confirm=lambda: True))
+
+    assert "schedule" not in client.calls[0][1]
