@@ -10,10 +10,12 @@ proxy.
 
 Two rules the rest of the tool leans on:
 
-* **The old session is not moved.** A `default` with no directory of its own
-  resolves to `~/.telegram-tools/telegram-tools.session`, exactly where it has
-  always been, and `TELEGRAM_TOOLS_SESSION` still wins over both. `auth
-  --migrate` is the only thing that moves it, and only after a y/N.
+* **The old session is not moved.** A `default` with no session of its own
+  resolves to `~/.telegram-tools/telegram-tools.session` *when that file is
+  there*, exactly where it has always been, and `TELEGRAM_TOOLS_SESSION` still
+  wins over both. `auth --migrate` is the only thing that moves it, and only
+  after a y/N. With no such file, `default` is an ordinary profile and a fresh
+  login lands in its own directory.
 * **The path handed to Telethon has no suffix.** Telethon appends `.session`
   to whatever it is given, so this module stores `<dir>/session` and the file
   on disk is `<dir>/session.session`. `session_file` is the one that exists.
@@ -196,9 +198,17 @@ def load(name: str = DEFAULT_PROFILE, *, home: Path | None = None) -> Profile:
     stored_session = record.get("session")
     if stored_session:
         session, legacy = Path(stored_session), bool(record.get("legacy_session"))
-    elif name == DEFAULT_PROFILE and not (directory / f"{SESSION_STEM}.session").exists():
-        # The upgrade path: `default` is the login this machine already has,
-        # left exactly where every earlier version put it.
+    elif (
+        name == DEFAULT_PROFILE
+        and not (directory / f"{SESSION_STEM}.session").exists()
+        and Path(f"{legacy_session(home)}.session").exists()
+    ):
+        # The upgrade path, and only when there is something to upgrade: the
+        # pre-profile file has to be on disk. Without that last check a
+        # `default` with no session anywhere -- a machine that never had one,
+        # or one that has just logged out of a migrated profile -- resolved to
+        # the old path, and the next login wrote its session back outside the
+        # profile directory and recorded itself as legacy for good.
         session, legacy = legacy_session(home), True
     else:
         session, legacy = directory / SESSION_STEM, False

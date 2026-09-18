@@ -214,6 +214,43 @@ def test_default_prefers_its_own_session_once_it_has_one(home):
     assert profile.session_file == directory / "session.session"
 
 
+def test_default_is_only_the_pre_profile_login_when_that_file_is_there(home):
+    """Card 363: the upgrade path was taken on machines that had nothing to upgrade.
+
+    `default` with no record and no session of its own is not automatically the
+    old login -- it is only that when the old file exists. A machine that never
+    had one, or one whose old file has already been moved or logged out, gets
+    the same answer every other profile gets.
+    """
+    assert not Path(f"{profiles.legacy_session(home)}.session").exists()
+
+    profile = profiles.load("default", home=home)
+
+    assert not profile.legacy
+    assert profile.session_file == profiles.profile_dir("default", home) / "session.session"
+
+
+def test_a_login_after_a_logout_stays_in_the_default_profile_directory(home):
+    """Card 363: log out then in on `default` put the session back at the old path.
+
+    `forget` removes the record, and `load` read that absence as "this machine
+    predates profiles", so the next login wrote its session to the pre-profile
+    path and recorded itself as legacy -- undoing a migration every time, and
+    making `doctor` offer the move again forever.
+    """
+    legacy_login(home)
+    profiles.migrate(home)
+    profiles.forget(profiles.load("default", home=home))
+
+    saved = profiles.record_login(profiles.load("default", home=home), label="Sven (@sven)", user_id=4242)
+
+    directory = profiles.profile_dir("default", home)
+    assert not saved.legacy
+    assert saved.session_file == directory / "session.session"
+    assert json.loads((directory / "profile.json").read_text()).get("legacy_session") is None
+    assert not profiles.migration_needed(home)
+
+
 def test_a_profile_name_that_could_leave_the_tree_is_refused(home):
     for bad in ("../escape", "a/b", "", ".hidden"):
         with pytest.raises(profiles.ProfileError):

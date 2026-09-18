@@ -15,7 +15,11 @@ def test_load_config_uses_env_and_home_session_dir(tmp_path, monkeypatch):
 
     assert config.api_id == 123456
     assert config.api_hash == "abc123"
-    assert config.session_path == Path(home, ".telegram-tools", "telegram-tools")
+    # Card 363: a home with no pre-profile session file is not a machine to
+    # upgrade, so `default` keeps its session in its own profile directory like
+    # every other profile. The old path is still opened when the file is there
+    # -- test_profiles.py::test_the_legacy_session_is_what_default_opens.
+    assert config.session_path == Path(home, ".telegram-tools", "profiles", "default", "session")
 
 
 def test_load_config_session_env_override_wins(tmp_path, monkeypatch):
