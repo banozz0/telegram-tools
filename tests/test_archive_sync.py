@@ -940,6 +940,23 @@ def test_the_scope_picker_lists_every_scope_the_archive_holds_by_title(run_cli, 
     assert FORUM_RID not in dict(listed), "a forum is its topics, never itself"
 
 
+def test_a_query_fts5_cannot_parse_is_searched_as_the_words_it_is(run_cli, capsys, home):
+    """A hyphenated build tag is what a person types, and it used to reach them as an
+    SQLite parse error. It is retried as literal words instead; deliberate syntax is
+    untouched, and an unbalanced quote finds nothing rather than raising."""
+    run_cli(["archive", "sync"], capsys=capsys)
+    code, out, _err, _fake = run_cli(["--json", "archive", "search", "--query", "rollback-the-deploy"], capsys=capsys)
+    assert code == 0, out
+    assert envelope_of(out)["result"]["messages"], "the words the tag is made of are in the archive"
+
+    for query in ("deploy AND", 'deploy "'):
+        code, out, _err, _fake = run_cli(["--json", "archive", "search", "--query", query], capsys=capsys)
+        assert code == 0, f"{query}: {out}"
+
+    code, out, _err, _fake = run_cli(["--json", "archive", "search", "--query", "deploy OR rollback"], capsys=capsys)
+    assert code == 0 and envelope_of(out)["result"]["messages"], "deliberate syntax still means what it says"
+
+
 def test_archive_writes_refuse_while_the_tools_files_are_loose(run_cli, capsys, home):
     root = home / ".telegram-tools"
     root.mkdir(mode=0o700, exist_ok=True)

@@ -404,7 +404,8 @@ telegram-tools archive forget --scope tg:chat:-1001234567890 --execute        # 
 
 `archive search` is FTS5 full-text search — words, `"a phrase"`, `AND`, `OR`, `NOT`,
 `prefix*` — ranked by relevance and marked `«like this»` on screen, and it never
-connects. `archive export` writes the same rows the search printed in `json`, `csv`,
+connects. A query FTS5 cannot parse, such as `campaign-alert-721`, is searched again as
+the words it is made of rather than refused. `archive export` writes the same rows the search printed in `json`, `csv`,
 `jsonl`, `markdown` or `html` (one self-contained page, no scripts); the last two put
 the row's marks (`[fwd …]`, `[file]`, …) in front of its text, as the live export does;
 a bare `--output` name lands in `~/.telegram-tools/exports/`, an absolute path is
