@@ -1837,6 +1837,7 @@ async def _run_message(client, args, config, *, report: Reporter | None = None) 
         seconds=int(getattr(args, "seconds", 5) or 5),
         label=getattr(args, "label", "") or "",
         clear=clear,
+        premium=bool(getattr(me, "premium", False)),
         links={
             brief.id: message_ops.message_link(resolved.id, brief.id, username=username, topic_id=brief.topic_id)
             for brief in briefs

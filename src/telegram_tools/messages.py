@@ -31,6 +31,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Callable, Sequence
 
+from telethon.errors import PremiumAccountRequiredError, ReactionsTooManyError
 from telethon.tl.functions.messages import (
     ForwardMessagesRequest,
     GetForumTopicsByIDRequest,
@@ -226,20 +227,35 @@ def _reaction_rows(reactions: Sequence[tuple[str, bool]]) -> list[dict[str, Any]
     return [{"emoji": emoticon, "mine": mine} for emoticon, mine in reactions]
 
 
-def _reaction_set(verb: str, emoji: str | None, held: Sequence[tuple[str, bool]]) -> list[str]:
+# How many reactions one account may hold on one message: Telegram's own
+# `reactions_user_max_default` and `reactions_user_max_premium`
+# (core.telegram.org/api/config), one and three. A longer list is refused.
+REACTIONS_HELD_MAX = 1
+REACTIONS_HELD_MAX_PREMIUM = 3
+
+
+def _reaction_set(verb: str, emoji: str | None, held: Sequence[tuple[str, bool]], *, premium: bool = False) -> list[str]:
     """The reactions `SendReactionRequest` must carry: it replaces the whole set this identity holds.
 
-    `react` names the one to hold. `unreact` with no emoji clears them all, so
-    the list is empty -- but `unreact` naming one has to send this identity's
-    other reactions back, or the empty list takes those off the message too.
-    Only the ones `held` marks as this identity's: another account's reaction
-    sent here would be claimed as ours.
+    `react` names the one to add, so the ones already held go with it or the
+    call takes them off. `unreact` with no emoji clears them all, so the list
+    is empty -- but `unreact` naming one has to send this identity's other
+    reactions back, or the empty list takes those off the message too. Only
+    the ones `held` marks as this identity's: another account's reaction sent
+    here would be claimed as ours.
+
+    core.telegram.org/api/reactions: the set is sent in ascending order, the
+    new one last, and older ones are dropped to keep it within the account's
+    cap -- which is one reaction unless the account has Premium, so an
+    ordinary account still sends the named reaction alone.
     """
+    mine = [emoticon for emoticon, is_mine in held if is_mine and emoticon != emoji]
     if verb == "react":
-        return [str(emoji)]
+        cap = REACTIONS_HELD_MAX_PREMIUM if premium else REACTIONS_HELD_MAX
+        return [*mine, str(emoji)][-cap:]
     if emoji is None:
         return []
-    return [emoticon for emoticon, mine in held if mine and emoticon != emoji]
+    return mine
 
 
 def _reactions_from_updates(updates: Any, message_id: int) -> tuple[tuple[str, bool], ...] | None:
@@ -483,6 +499,9 @@ class Request:
     multiple: bool = False
     seconds: int = 5
     label: str = ""
+    # `react` only: a Premium account may hold three reactions on one message
+    # and an ordinary one exactly one, so the set sent depends on it.
+    premium: bool = False
     # `draft` only: take the draft back rather than write one. Its own field and
     # not an empty `text`, because an empty string is what a shell hands over
     # when a variable failed to expand, and that must never wipe a live draft.
@@ -632,9 +651,25 @@ async def perform(client, request: Request, *, sleep=asyncio.sleep, bookmark_row
         # The message's own reactions were read in the preflight, so the set to
         # keep is in hand and needs no second fetch to build.
         held = request.messages[0].reactions if request.messages else ()
-        reaction = [ReactionEmoji(emoticon=emoticon) for emoticon in _reaction_set(verb, request.emoji, held)]
-        updates = await client(SendReactionRequest(peer=peer, msg_id=ids[0], reaction=reaction))
+        wanted = _reaction_set(verb, request.emoji, held, premium=request.premium)
+
+        async def send_reactions(emoticons: Sequence[str]) -> Any:
+            reaction = [ReactionEmoji(emoticon=emoticon) for emoticon in emoticons]
+            return await client(SendReactionRequest(peer=peer, msg_id=ids[0], reaction=reaction))
+
         extra: dict[str, Any] = {"emoji": request.emoji}
+        try:
+            updates = await send_reactions(wanted)
+        except (ReactionsTooManyError, PremiumAccountRequiredError):
+            # This account may hold fewer reactions on one message than the
+            # documented cap the list was built to, so the ones it already
+            # holds cannot stay. The named reaction is what the run asked
+            # for: send that alone and name what came off.
+            if len(wanted) < 2:
+                raise
+            dropped = [emoticon for emoticon in wanted if emoticon != request.emoji]
+            updates = await send_reactions([str(request.emoji)])
+            extra["replaced"] = dropped
         carried = _reactions_from_updates(updates, ids[0])
         if carried is not None:
             extra["reactions"] = _reaction_rows(carried)
@@ -726,6 +761,9 @@ def format_done(request: Request, outcome: Outcome, *, where: str, destination: 
         # where the run landed without printing two hundred numbers.
         return f"{done} {len(ids)} messages to {destination}" + (f", the last as message {max(new)}." if new else ".")
     if verb == "react":
+        replaced = outcome.extra.get("replaced")
+        if replaced:
+            return f"Added {request.emoji} to message {first} in {where}; Telegram would not hold {', '.join(replaced)} as well, so they came off."
         return f"Added {request.emoji} to message {first} in {where}."
     if verb == "unreact":
         # A named emoji is sent as the rest of the set and a bare `unreact` as

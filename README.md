@@ -338,7 +338,7 @@ menu does, from a terminal. The verbs:
 | `delete` | deletes messages, dry-run by default | `--ids 1,2` or `--from-search QUERY`, `--limit`, `--i-know`, `--execute` |
 | `forward` | forwards, header and all | `--ids` / `--from-search`, `--to CHAT`, `--to-topic` |
 | `copy` | re-posts the text as you; an attachment becomes a link to the original, never the bytes | the same as `forward` |
-| `react` / `unreact` | puts your reaction on, takes it off | `--id MSG`, `--emoji 🔥` (`unreact` without `--emoji` removes every reaction of yours) |
+| `react` / `unreact` | puts your reaction on, takes it off | `--id MSG`, `--emoji 🔥` (`unreact` without `--emoji` removes every reaction of yours). Telegram replaces your whole set on a message, so `react` sends the reactions you already hold along with the new one, within the one your account is allowed (three with Premium, otherwise one) |
 | `pin` / `unpin` | needs the pin right | `--id MSG` |
 | `poll` | posts a poll | `--question`, `--option` (2 to 10), `--multiple`, `--topic` |
 | `typing` | shows *typing…* | `--seconds` |

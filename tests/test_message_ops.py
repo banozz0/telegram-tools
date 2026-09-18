@@ -16,6 +16,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from telethon.errors import ReactionsTooManyError
 
 from telegram_tools import archive as archive_store
 from telegram_tools import cli
@@ -1198,13 +1199,84 @@ def test_a_forward_into_a_topic_names_the_topic_it_landed_in(run_cli, capsys, ho
     assert after_the_gate(out)[0] == f"Forwarded message 300 to {DEPLOYS} as message 5001."
 
 
-def _twice_reacted_client():
+def _twice_reacted_client(client_class=FakeClient):
     """A message this account has reacted to twice, with a third reaction someone else left."""
-    fake = FakeClient()
+    fake = client_class()
     row = _message(13, own=True, topic=141, pinned=True, chosen=("👍", "🎉"))
     row.reactions.results.append(SimpleNamespace(reaction=SimpleNamespace(emoticon="😂"), count=1, chosen_order=None))
     fake.rows[FORUM_ID][13] = row
     return fake
+
+
+class RefusingReactions(FakeClient):
+    """Telegram refusing any reaction list longer than one, the way a lower
+    server-side cap than the documented one would."""
+
+    async def __call__(self, request):
+        if type(request).__name__ == "SendReactionRequest" and len(request.reaction or []) > 1:
+            raise ReactionsTooManyError(request=request)
+        return await super().__call__(request)
+
+
+def _premium_client(client_class=FakeClient):
+    """The same account with Telegram Premium, on the twice-reacted message."""
+    fake = _twice_reacted_client(client_class)
+    fake.me = SimpleNamespace(**vars(ACCOUNT), premium=True)
+    return fake
+
+
+def test_a_react_keeps_the_account_s_other_reactions_where_it_may_hold_them(run_cli, capsys, home):
+    # `SendReactionRequest` replaces the identity's whole set, so a Premium
+    # account holding 👍 and 🎉 loses both unless they are sent back with the
+    # new one; someone else's 😂 must not be sent as this account's.
+    fake = _premium_client()
+    code, out, _err, _f = run_cli(
+        ["message", "react", "--chat", FORUM, "--id", "13", "--emoji", "🔥"], client=fake, capsys=capsys, answers=("y",)
+    )
+
+    assert code == 0, out
+    assert fake.calls == [("react", FORUM_ID, 13, ["👍", "🎉", "🔥"])]
+
+
+def test_a_react_over_the_account_s_cap_drops_its_oldest_reaction(run_cli, capsys, home):
+    # core.telegram.org/api/reactions: reactions are sent in ascending order,
+    # oldest first, and older ones are removed to stay within the cap --
+    # reactions_user_max_premium, three.
+    fake = _premium_client()
+    fake.rows[FORUM_ID][13].reactions.results.append(
+        SimpleNamespace(reaction=SimpleNamespace(emoticon="👀"), count=1, chosen_order=2)
+    )
+    code, out, _err, _f = run_cli(
+        ["message", "react", "--chat", FORUM, "--id", "13", "--emoji", "🔥"], client=fake, capsys=capsys, answers=("y",)
+    )
+
+    assert code == 0, out
+    assert fake.calls == [("react", FORUM_ID, 13, ["🎉", "👀", "🔥"])]
+
+
+def test_a_react_on_an_ordinary_account_sends_the_one_reaction_it_may_hold(run_cli, capsys, home):
+    # reactions_user_max_default is one: appending would be REACTIONS_TOO_MANY.
+    fake = _twice_reacted_client()
+    code, out, _err, _f = run_cli(
+        ["message", "react", "--chat", FORUM, "--id", "13", "--emoji", "🔥"], client=fake, capsys=capsys, answers=("y",)
+    )
+
+    assert code == 0, out
+    assert fake.calls == [("react", FORUM_ID, 13, ["🔥"])]
+
+
+def test_a_react_telegram_refuses_as_too_many_falls_back_to_the_named_one(run_cli, capsys, home):
+    # Telegram's own cap can be lower than the documented default this built
+    # from, so the longer list is refused: keep the named reaction and say
+    # which ones came off.
+    fake = _premium_client(RefusingReactions)
+    code, out, _err, _f = run_cli(
+        ["message", "react", "--chat", FORUM, "--id", "13", "--emoji", "🔥"], client=fake, capsys=capsys, answers=("y",)
+    )
+
+    assert code == 0, out
+    assert fake.calls == [("react", FORUM_ID, 13, ["🔥"])]
+    assert after_the_gate(out)[0] == f"Added 🔥 to message 13 in {HERMES}; Telegram would not hold 👍, 🎉 as well, so they came off."
 
 
 def test_an_unreact_naming_an_emoji_leaves_the_account_s_other_reactions_on(run_cli, capsys, home):
