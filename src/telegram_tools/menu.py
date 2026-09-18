@@ -1208,8 +1208,8 @@ async def _flow_create(*, session, runner, read, write) -> bool:
         # Telegram keeps the line breaks in a chat description, so this is the
         # multi-line editor and a pasted two-line description arrives whole. A
         # blank first line cancels, which for an optional description is the
-        # same answer as "leave it empty".
-        about = ask_lines("Description (blank for none)", read=read, write=write)
+        # same answer as "leave it empty" -- which is what the header says, once.
+        about = ask_lines("Description", read=read, write=write, blank="means none")
         args = _namespace(
             command="create",
             create_kind=kind,
@@ -1877,7 +1877,7 @@ async def _flow_archive_sync(*, session, runner, read, write) -> bool:
 
 async def _flow_archive_status(*, session, runner, read, write) -> bool:
     """Status: one screen, straight back. Reads the file, opens no connection."""
-    identity = ask_text("Only this identity (tg:user:ID; blank for all)", read=read, write=write)
+    identity = ask_text("Only this identity (tg:user:ID)", read=read, write=write, blank="means every identity")
     args = _namespace(command="archive", archive_kind="status", identity=None if identity is BACK else identity)
     await _call(args, session=session, runner=runner, write=write, connect=False)
     return _leave_action(after_action(read=read, write=write))

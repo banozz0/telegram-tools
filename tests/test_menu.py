@@ -2279,6 +2279,23 @@ def test_archive_status_runs_without_the_menus_connection():
     assert client is None, "status reads the file; the menu's connection is not opened for it"
 
 
+def test_archive_status_says_one_thing_about_a_blank_identity():
+    """Blank means every identity, which is not cancelling, so the prompt says that
+    once instead of inviting a blank in the label and denying it in the suffix."""
+    asked = []
+    keys = iter([*ARCHIVE_STATUS, "", "", "0"])
+
+    def read(prompt):
+        asked.append(prompt)
+        return next(keys)
+
+    calls, runner = recorder()
+    asyncio.run(menu.run_menu(read=read, write=lambda _: None, session=FakeSession(), runner=runner))
+
+    assert "Only this identity (tg:user:ID) (blank means every identity): " in asked
+    assert not [prompt for prompt in asked if "blank means every identity" in prompt and "blank cancels" in prompt]
+
+
 def test_archive_search_stages_every_field_then_searches_and_exports():
     answers = [
         ARCHIVE_QUERY,
@@ -2859,8 +2876,8 @@ def test_main_menu_after_a_message_verb_lands_on_the_root():
 # counter-example above: single-line at Telegram, single-line here.
 
 
-def _multiline_header(label: str) -> str:
-    return f"{label} (blank cancels, {END_OF_MESSAGE} on its own line ends it):"
+def _multiline_header(label: str, *, blank: str = "cancels") -> str:
+    return f"{label} (blank {blank}, {END_OF_MESSAGE} on its own line ends it):"
 
 
 def test_a_pasted_description_reaches_create_whole():
@@ -2880,14 +2897,26 @@ def test_a_pasted_description_reaches_create_whole():
     # still menu answers: a one-line read would have staged "the agency" alone
     # and fed "and its bots" to the screen that asks next.
     assert calls[0].about == "the agency\nand its bots"
-    assert _multiline_header("Description (blank for none)") in screens(output)
-    assert "Description (blank for none) (blank cancels): " not in asked
+    assert _multiline_header("Description", blank="means none") in screens(output)
+    assert "Description (blank means none): " not in asked
 
 
 def test_a_blank_first_line_still_means_no_description_on_create():
     # The editor's own cancel is the same answer the one-line prompt gave: none.
     _code, calls, _output = run_menu([CREATE, "2", "Hermes", "", "", "0", "0"])
     assert (calls[0].forum, calls[0].about) == (True, None)
+
+
+def test_the_description_editor_says_one_thing_about_a_blank():
+    """A blank here leaves the description empty; it does not cancel the create.
+    The header carries that hint once, rather than a label offering a blank and a
+    suffix saying the same blank cancels."""
+    output = []
+    _code, _calls, _unused = run_menu([CREATE, "2", "Hermes", "", "", "0", "0"], output=output)
+
+    text = screens(output)
+    assert "Description (blank means none, . on its own line ends it):" in text
+    assert "Description (blank for none)" not in text
 
 
 def test_a_pasted_description_reaches_settings_set_whole():
