@@ -383,7 +383,10 @@ def test_review_list_shows_the_url_as_written_and_makes_no_request(run_cli, caps
 
     code, out, _err, _fake = run_cli(["review", "list"], capsys=capsys)
     assert "Review queue" in out and URL in out and "report.bin" in out
-    assert "2026-09-01T05:00:00Z\tAlerts\tsender=Harry" in out
+    # Two screens, two different times: the list shows when the message was
+    # sent and a gate's preview shows when the candidate was queued, so each
+    # says which it is (Telegram 7, 2026-09-17).
+    assert "sent=2026-09-01T05:00:00Z\tAlerts\tsender=Harry" in out
     assert "Nothing is fetched until you run review approve" in out
 
 

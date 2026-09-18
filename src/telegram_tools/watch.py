@@ -274,7 +274,10 @@ def format_status(status: Mapping[str, Any], *, rules: int) -> str:
     lock = status.get("lock")
     lines = ["Runner", RULE]
     if lock is None:
-        lines.append("Not running (no lock file). `watch run` starts one.")
+        # Not "no lock file": `Lock.release()` truncates the file and leaves it
+        # there, so a stopped runner's lock is an empty file, not an absent one.
+        # What is known either way is that nobody holds it.
+        lines.append("Not running (nothing holds the lock). `watch run` starts one.")
     elif not lock.get("alive"):
         lines.append(f"Not running (the lock names pid {lock['pid']}, which is gone).")
     else:
@@ -297,6 +300,27 @@ def format_status(status: Mapping[str, Any], *, rules: int) -> str:
         for line in log:
             fields = " ".join(f"{key}={value}" for key, value in line.items() if key not in ("at", "event"))
             lines.append(f"  {line.get('at', '')} {line.get('event', '')} {fields}".rstrip())
+    return "\n".join(lines)
+
+
+def format_run_counts(counts: Mapping[str, Any], *, dropped: int, rules: int) -> str:
+    """What `watch run` says on its way out: the run's own counts, once, in the terminal.
+
+    The envelope has carried these since the runner shipped; the person who
+    started it in the foreground and stopped it with Ctrl-C saw nothing at all
+    (Telegram 7, 2026-09-17), so a runner that fired forty alerts and one that
+    fired none looked the same.
+    """
+    lines = ["Runner stopped", RULE, f"Rules loaded  {rules}"]
+    lines.append(
+        f"Events        {counts.get('events', 0)} seen, "
+        f"{counts.get('refused', 0)} not this tool's, "
+        f"{counts.get('dropped', 0)} dropped before any rule ran"
+    )
+    lines.append(f"Fired         {counts.get('fired', 0)}")
+    lines.append(f"Replayed      {counts.get('replayed', 0)} from the cursors")
+    lines.append(f"Archive syncs {counts.get('syncs', 0)}, {counts.get('unfulfilled_syncs', 0)} unfulfilled")
+    lines.append(f"Queue drops   {dropped} (events that arrived faster than the runner read them)")
     return "\n".join(lines)
 
 
@@ -324,10 +348,16 @@ class ScheduledMessage:
         }
 
 
-def format_schedules(native: Sequence[Mapping[str, Any]], local: Sequence[Mapping[str, Any]]) -> str:
-    """`schedule list`: both kinds, each row carrying the guarantee it actually has."""
+def format_schedules(native: Sequence[Mapping[str, Any]], local: Sequence[Mapping[str, Any]], *, asked_telegram: bool = False) -> str:
+    """`schedule list`: both kinds, each row carrying the guarantee it actually has.
+
+    `asked_telegram` is true when a `--chat` was passed and the server answered.
+    An empty answer is then printed as one: a question asked and not answered
+    reads as a question nobody asked (Telegram 7, 2026-09-17). A preview of one
+    row leaves it false, because nothing was asked there.
+    """
     lines = ["Scheduled", RULE]
-    if not native and not local:
+    if not native and not local and not asked_telegram:
         lines.append("(nothing scheduled)")
         return "\n".join(lines)
     if native:
@@ -335,6 +365,10 @@ def format_schedules(native: Sequence[Mapping[str, Any]], local: Sequence[Mappin
         for row in native:
             lines.append(f"  {row['id']:>12}  {_when(row['at'])}  {row['rid']}")
             lines.append(f"                {_one_line(row.get('text'))}")
+    elif asked_telegram:
+        lines.append(f"Held by Telegram ({SERVER_HELD}): nothing for this chat.")
+    if not local and asked_telegram:
+        lines.append(f"Held by this runner ({RUNNER_HELD}): nothing.")
     if local:
         lines.append(f"Held by this runner ({RUNNER_HELD}):")
         for row in local:
@@ -438,6 +472,7 @@ __all__ = [
     "confirm",
     "filter_from",
     "format_rules",
+    "format_run_counts",
     "format_schedule_created",
     "format_schedules",
     "format_status",

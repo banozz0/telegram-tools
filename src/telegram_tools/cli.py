@@ -453,9 +453,9 @@ def build_parser() -> argparse.ArgumentParser:
     rules_add = rules_kinds.add_parser("add", help="Write a new rule file (the file is JSON and stays editable by hand)")
     rules_edit = rules_kinds.add_parser("edit", help="Change a rule: the flags you pass replace those fields, the rest stay")
     for rule_parser in (rules_add, rules_edit):
-        rule_parser.add_argument("--name", required=True, help="The rule's name, which is also its file name")
+        rule_parser.add_argument("--name", required=True, help="The rule's name, which is also its file name: letters, digits, dot, dash, underscore, no spaces")
         rule_parser.add_argument("--on", action="append", metavar="KIND", help="An event kind to trigger on; repeatable. One of: " + ", ".join(_rules.EVENT_KINDS))
-        rule_parser.add_argument("--scope", action="append", metavar="RID", help=f"Only events in this scope; repeatable, `none` clears. {rid_help}")
+        rule_parser.add_argument("--scope", action="append", metavar="RID", help=f"Only events in this scope, matched against the event's own rid; in a forum that is the topic, never the chat. Repeatable, `none` clears. {rid_help}")
         rule_parser.add_argument("--sender", action="append", metavar="RID", help="Only events from this sender (tg:user:ID); repeatable, `none` clears")
         rule_parser.add_argument("--identity", action="append", metavar="RID", help="Only while acting as this identity (tg:user:ID); repeatable, `none` clears")
         rule_parser.add_argument("--domain", action="append", metavar="HOST", help="Only messages linking to this domain; repeatable, `none` clears")
@@ -3534,6 +3534,8 @@ async def _run_watch_run(args, config, *, report: Reporter) -> int:
         source.close()
     finally:
         loop.stop()
+    if not report.machine:
+        print(watch_ops.format_run_counts(counts, dropped=source.dropped, rules=len(rules)))
     report.result({**counts, "dropped_events": source.dropped, "rules": len(rules), "status": status}, status="ok")
     return 0
 
@@ -3759,7 +3761,7 @@ async def _run_schedule_list(args, schedules, *, client, report: Reporter, refer
     for row in (*native, *local):
         report.record(row)
     if not report.machine:
-        print(watch_ops.format_schedules(native, local))
+        print(watch_ops.format_schedules(native, local, asked_telegram=reference is not None))
         if reference is None:
             print("Only this runner's own are listed: Telegram holds scheduled messages per chat, so pass --chat to see those.")
     report.result(

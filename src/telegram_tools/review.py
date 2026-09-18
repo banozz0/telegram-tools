@@ -152,7 +152,11 @@ def describe_rows(archive: Archive, rows: Sequence[QueueRow]) -> list[dict[str, 
 
 def format_queue(entries: Sequence[dict[str, Any]]) -> str:
     """One line per candidate: id, kind, state, the message's date, its location, sender,
-    the thing itself, what was claimed. `entries` are `describe_rows` dicts."""
+    the thing itself, what was claimed. `entries` are `describe_rows` dicts.
+
+    The date is labelled `sent=`, because a gate's preview shows `queued` -- the
+    moment the sync enqueued the candidate -- and the two are different times
+    for the same row (Telegram 7, 2026-09-17)."""
     if not entries:
         return "The review queue is empty."
     lines = ["Review queue", "--------------------------------------------"]
@@ -163,7 +167,7 @@ def format_queue(entries: Sequence[dict[str, Any]]) -> str:
             claimed += f" {human_bytes(entry['claimed_size'])}"
         lines.append(
             f"{entry['manifest_id']}\t{entry['kind']}\t{entry['state']}\t{entry['source_rid']}#{entry['source_message_id']}\t"
-            f"{entry['message_date'] or '-'}\t{' › '.join(entry['location'])}\tsender={entry['sender']}\t{what}\t{claimed}"
+            f"sent={entry['message_date'] or '-'}\t{' › '.join(entry['location'])}\tsender={entry['sender']}\t{what}\t{claimed}"
             + (f"\tverdict={entry['verdict']}" if entry["verdict"] else "")
         )
     lines.append(f"{len(entries)} candidate(s). Nothing is fetched until you run review approve.")

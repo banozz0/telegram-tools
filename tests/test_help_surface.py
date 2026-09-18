@@ -325,6 +325,17 @@ ALLOWED_ADDITIONS = {
     },
 }
 
+_RULE_FLAG_REWRITES = (
+    (
+        "The rule's name, which is also its file name: letters, digits, dot, dash, underscore, no spaces",
+        "The rule's name, which is also its file name",
+    ),
+    (
+        "Only events in this scope, matched against the event's own rid; in a forum that is the topic, never the chat. Repeatable, `none` clears.",
+        "Only events in this scope; repeatable, `none` clears.",
+    ),
+)
+
 ALLOWED_REWRITES = {
     # A choice list that grew. The help line is the same words; the braces name
     # more formats. Section 15: `--format` gains jsonl, markdown and html, and
@@ -368,6 +379,14 @@ ALLOWED_REWRITES = {
             "set Change a setting (y/N)",
         ),
     ),
+    # The watch-screen card (agent-bo-95422321). Two traps a live run walked
+    # into on 2026-09-17, each now on the flag that carries it: a rule name is
+    # a file name, so `campaign 7` was refused after the whole form had been
+    # filled in; and a scope is compared with the event's own rid, which in a
+    # forum is the topic, so the chat rid a person reaches for matches nothing
+    # there. `add` and `edit` share the flag definitions, so they share both.
+    "watch-rules-add": _RULE_FLAG_REWRITES,
+    "watch-rules-edit": _RULE_FLAG_REWRITES,
 }
 
 # The per-command `--json` gained an optional path, which argparse spells with

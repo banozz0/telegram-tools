@@ -2321,9 +2321,9 @@ REVIEW_ROWS = (
 # empties one on an edit. Every flag `watch rules add` and `edit` define has a
 # row here; the file the form writes is JSON and stays editable by hand.
 RULE_FIELDS = (
-    ("name", "Name (also the file name)", "text"),
+    ("name", "Name (also the file name: letters, digits, dot, dash, underscore)", "text"),
     ("on", f"Events ({', '.join(_rules.EVENT_KINDS)})", "text"),
-    ("scope", "Only these scopes (rids, comma-separated)", "text"),
+    ("scope", "Only these scopes (rids; in a forum that is the topic)", "text"),
     ("sender", "Only these senders (tg:user:ID)", "text"),
     ("identity", "Only while acting as (tg:user:ID)", "text"),
     ("domain", "Only links to these domains", "text"),
@@ -2391,13 +2391,19 @@ def _rule_values(staged: dict) -> dict:
     return values
 
 
-async def _run_form(fields, required, *, title, read, write, run_it, initial=None) -> Any:
-    """A staging screen over `fields`, then `run_it(values)`. Shared by the rule and schedule rows."""
+async def _run_form(fields, required, *, title, read, write, run_it, initial=None, run_label: str = "Do it (the CLI shows the plan, then asks)") -> Any:
+    """A staging screen over `fields`, then `run_it(values)`. Shared by the rule and schedule rows.
+
+    `run_label` is what the last row promises, and it is a promise: `schedule
+    post` asks a y/N, `watch rules add|edit` writes the file and reads it back
+    without asking anything. One label for both said a prompt was coming that
+    never came (Telegram 7, 2026-09-17).
+    """
     staged: dict[str, Any] = {key: (False if kind == "toggle" else None) for key, _label, kind in fields}
     staged.update(initial or {})
     while True:
         rows = [(key, f"{label:<46} [{_staged_label(kind, staged[key])}]") for key, label, kind in fields]
-        rows.append(("run", "Do it (the CLI shows the plan, then asks)"))
+        rows.append(("run", run_label))
         choice = choose([label for _key, label in rows], title=title, read=read, write=write, back_label="Back (discards)")
         if choice is BACK:
             return BACK
@@ -2445,6 +2451,7 @@ def _flow_rules_write(verb: str, title: str):
             write=write,
             run_it=run_it,
             initial=initial,
+            run_label="Do it (writes the rule file, then reads it back)",
         )
         return True if result is BACK else _leave(result)
 

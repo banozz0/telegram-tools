@@ -580,7 +580,7 @@ Two things live here: rules over what happens in your chats, and messages posted
 
 ### Rules and the runner
 
-A rule is a JSON file in `~/.telegram-tools/rules/`, `0600`, one per file, and the flags are a convenience — the file stays yours to edit by hand.
+A rule is a JSON file in `~/.telegram-tools/rules/`, `0600`, one per file, and the flags are a convenience — the file stays yours to edit by hand. `--name` is that file's name, so it takes letters, digits, dot, dash and underscore only: a name with a space is refused before anything is written.
 
 ```bash
 telegram-tools watch rules add --name deploys \
