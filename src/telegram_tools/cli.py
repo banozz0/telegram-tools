@@ -3315,7 +3315,9 @@ async def _run_manage(client, args, *, report: Reporter) -> int:
     if member is not None:
         async def person_now() -> str:
             nonlocal after
-            after = await port.participant(peer, user, input_user)
+            after = await port.participant_readback(
+                peer, user, input_user, before=member, expected=manage_ops.RESULTING_STATUS.get(op.verb)
+            )
             if op.verb == "kick" and after.status == "none":
                 line = f"{after.label} is no longer in {target.title} and may rejoin"
             else:
@@ -3340,7 +3342,7 @@ async def _run_manage(client, args, *, report: Reporter) -> int:
             if change.scope == "topic":
                 now = await port.topic_readback(peer, args.topic, asked=change.fields, told=edited)
             else:
-                now = await port.settings(resolved)
+                now = await port.settings_readback(resolved, asked=change.fields)
             extra["settings"] = now
             fields = manage_ops.TOPIC_FIELDS if change.scope == "topic" else manage_ops.CHAT_FIELDS
             return f"{plan_target.display}: " + manage_ops.settings_diff(before, now, fields)

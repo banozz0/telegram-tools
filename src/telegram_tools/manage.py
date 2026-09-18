@@ -385,6 +385,22 @@ def on_off(text: str) -> bool:
 
 # The fields of a chat and of a topic, each as the readback diff names it. The
 # same `--title` lands in both, which is why the scope decides the list.
+# The status a verb's readback must find before it believes the read: what
+# Telegram itself makes of the person. A verb whose result is not one status is
+# absent on purpose -- an unban leaves someone outside the chat they were
+# banned from, a decline leaves them exactly where they were -- and its
+# readback is one read, because there is nothing to wait for.
+RESULTING_STATUS = {
+    "promote": "admin",
+    "rights": "admin",
+    "demote": "member",
+    "ban": "banned",
+    "kick": "none",
+    "mute": "restricted",
+    "restrict": "restricted",
+    "unmute": "member",
+    "approve": "member",
+}
 CHAT_FIELDS = ("title", "about", "forum", "slow_mode_seconds")
 TOPIC_FIELDS = ("title", "icon_emoji_id", "closed", "hidden")
 # Which flag spells each field, for the usage error that names the wrong one.

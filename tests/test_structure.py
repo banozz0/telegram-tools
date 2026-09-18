@@ -46,6 +46,8 @@ CHANNEL_ID = -1001000000003
 BASIC_ID = -400000000005
 FORUM_RID = f"tg:chat:{FORUM_ID}"
 DOBBY_ICON = 5350554349074391003
+# A second custom emoji id, for an apply that changes a topic's icon.
+OTHER_ICON = 5350554349074391004
 MUTATING = (
     "CreateChannelRequest",
     "CreateForumTopicRequest",
@@ -296,6 +298,18 @@ def run_cli(home, monkeypatch):
     return go
 
 
+@pytest.fixture
+def slept(monkeypatch):
+    """Every wait a readback asks for, recorded rather than slept."""
+    waits: list[float] = []
+
+    async def sleep(seconds, *_args, **_kwargs):
+        waits.append(seconds)
+
+    monkeypatch.setattr(asyncio, "sleep", sleep)
+    return waits
+
+
 def envelope_of(out: str) -> dict:
     payload = json.loads(out)
     validate_envelope(payload)
@@ -306,6 +320,37 @@ def export_to(run_cli, capsys, path: Path, chat: str, *, client=None):
     code, out, _err, fake = run_cli(["--json", "structure", "export", "--chat", chat, "--output", str(path)], client=client, capsys=capsys)
     assert code == 0, out
     return envelope_of(out), fake
+
+
+class StaleTopicsClient(FakeClient):
+    """Telegram serving a forum's topics as they were straight after an edit that landed.
+
+    The same staleness card 299 met live on a `settings set --topic` rename,
+    on the read an apply makes: `stale` is how many topic reads after an
+    `editForumTopic` still get the topics as they were.
+    """
+
+    def __init__(self, world: World | None = None, *, stale: int = 1) -> None:
+        super().__init__(world)
+        self.stale, self.stale_left = stale, 0
+        self.old: list = []
+
+    async def __call__(self, request):
+        name = type(request).__name__
+        if name == "EditForumTopicRequest":
+            _marked, chat = self.world.by_peer(request.peer)
+            self.old = [SimpleNamespace(**vars(topic)) for topic in chat["topics"]]
+            result = await super().__call__(request)
+            self.stale_left = self.stale
+            return result
+        if name in ("GetForumTopicsRequest", "GetForumTopicsByIDRequest") and self.stale_left:
+            self.stale_left -= 1
+            topics = self.old
+            if name == "GetForumTopicsByIDRequest":
+                wanted = [int(topic_id) for topic_id in request.topics]
+                topics = [topic for topic in topics if topic.id in wanted]
+            return SimpleNamespace(topics=list(topics), count=len(topics))
+        return await super().__call__(request)
 
 
 # -- the port ---------------------------------------------------------------
@@ -361,7 +406,9 @@ def test_the_port_applies_topic_steps_and_container_settings_and_reports_each_ri
     assert fake.world.topics_of(PLAIN_ID) == [("Release", 42)]
 
     run(port.apply({"op": "update", "handle": "topic:release", "kind": "topic", "position": 4, "fields": {"icon_emoji_id": None, "name": "Releases"}, "target_rid": topic_rid(PLAIN_ID, 101), "container_rid": f"tg:chat:{PLAIN_ID}"}))
-    edit = fake.world.requests[-1]
+    # The edit, not the read that follows it: an edited topic is read back
+    # until Telegram serves it as edited.
+    edit = [request for request in fake.world.requests if type(request).__name__ == "EditForumTopicRequest"][-1]
     assert (edit.title, edit.icon_emoji_id) == ("Releases", 0), "no icon is sent as 0, because None would mean leave it"
     assert fake.world.topics_of(PLAIN_ID) == [("Releases", None)]
 
@@ -579,6 +626,32 @@ def test_apply_of_a_topic_the_title_order_places_elsewhere_is_ok(run_cli, capsys
     assert [step["handle"] for step in result["made"]] == ["topic:campaign-4-5"]
     assert result["readback"]["counts"] == {"add": 0, "change": 0, "remove": 0} and result["extras"] == []
     assert ("campaign 4.5", None) in fake.world.topics_of(FORUM_ID)
+
+
+def test_an_apply_that_edits_a_topic_reads_it_back_after_telegram_catches_up(run_cli, capsys, tmp_path, slept):
+    """The apply's readback is one export of the whole chat, made a moment after the last
+    `editForumTopic` -- and Telegram can serve a topic as it was straight after an edit
+    that landed (card 299), which reported an apply that did everything as still pending."""
+    _source, fake = export_to(run_cli, capsys, tmp_path / "hermes.json", "@teamhermes")
+    blueprint = json.loads((tmp_path / "hermes.json").read_text())
+    for item in blueprint["objects"]:
+        if item["handle"] == "topic:dobby":
+            item["fields"]["icon_emoji_id"] = OTHER_ICON
+    (tmp_path / "icon.json").write_text(json.dumps(blueprint))
+
+    stale = StaleTopicsClient(fake.world, stale=1)
+    code, out, _err, _fake = run_cli(
+        ["--json", "structure", "apply", "--blueprint", str(tmp_path / "icon.json"), "--chat", "@teamhermes", "--execute"],
+        client=stale, capsys=capsys, isatty=True, answer="Team Hermes",
+    )
+    assert code == 0, out
+    result = envelope_of(out)["result"]
+    assert [step["handle"] for step in result["made"]] == ["topic:dobby"]
+    assert result["readback"]["counts"] == {"add": 0, "change": 0, "remove": 0}
+    assert result["status"] == "ok"
+    # One stale read, one wait, and the export that follows sees the new icon.
+    assert len(slept) == 1
+    assert (dict(fake.world.topics_of(FORUM_ID))["Dobby"]) == OTHER_ICON
 
 
 def test_the_remap_of_an_apply_names_the_topic_it_made_from_a_hand_written_entry(run_cli, capsys, tmp_path):

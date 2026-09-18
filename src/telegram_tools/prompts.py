@@ -252,16 +252,20 @@ def ask_text(label: str, *, read, write, current: str | None = None, blank: str 
 END_OF_MESSAGE = "."
 
 
-def ask_lines(label: str, *, read, write, current: str | None = None) -> Any:
+def ask_lines(label: str, *, read, write, current: str | None = None, blank: str = "cancels") -> Any:
     """Free text over several lines, ended by a lone `.`. Blank first line cancels.
 
     One-line `input()` is not merely limited here, it is wrong: pasting a
     three-line message feeds lines two and three to whatever asks next, which in
     a menu means they are answered as menu choices. Reading to a sentinel
     consumes the whole paste as the body it is.
+
+    `blank` is `ask_text`'s hint in the multi-line header: a row whose blank means
+    something else -- an optional description: "means none" -- names it, so the
+    header never invites a blank and denies it in the same line.
     """
     suffix = f" [{current}]" if current else ""
-    write(f"{label}{suffix} (blank cancels, {END_OF_MESSAGE} on its own line ends it):")
+    write(f"{label}{suffix} (blank {blank}, {END_OF_MESSAGE} on its own line ends it):")
 
     lines: list[str] = []
     while True:

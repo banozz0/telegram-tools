@@ -1182,7 +1182,7 @@ CREATE_KINDS = (
 
 
 async def _flow_create(*, session, runner, read, write) -> bool:
-    trail = crumb(MAIN, "Create")
+    trail = crumb(MAIN, "Build", "Create")
     while True:
         choice = choose([label for _kind, _forum, label in CREATE_KINDS], title=trail, read=read, write=write)
         if choice is BACK:
@@ -1208,8 +1208,8 @@ async def _flow_create(*, session, runner, read, write) -> bool:
         # Telegram keeps the line breaks in a chat description, so this is the
         # multi-line editor and a pasted two-line description arrives whole. A
         # blank first line cancels, which for an optional description is the
-        # same answer as "leave it empty".
-        about = ask_lines("Description (blank for none)", read=read, write=write)
+        # same answer as "leave it empty" -- which is what the header says, once.
+        about = ask_lines("Description", read=read, write=write, blank="means none")
         args = _namespace(
             command="create",
             create_kind=kind,
@@ -1229,7 +1229,7 @@ DELETE_ANOTHER = (STAY, "Delete something else")
 
 
 async def _flow_delete(*, session, runner, read, write) -> bool:
-    trail = crumb(MAIN, "Delete")
+    trail = crumb(MAIN, "Build", "Delete")
     while True:
         scope = choose(
             ["A group or channel", "A topic in a forum group"], title=trail, read=read, write=write
@@ -1641,7 +1641,7 @@ def _pick_bot(bots, *, read, write, trail: str) -> Any:
 
 
 async def _flow_bots(*, session, runner, read, write) -> bool:
-    trail = crumb(MAIN, "My bots")
+    trail = crumb(MAIN, "Identity", "My bots")
     while True:
         chosen = _pick_bot(await session.bots(), read=read, write=write, trail=trail)
         if chosen is BACK:
@@ -1877,7 +1877,7 @@ async def _flow_archive_sync(*, session, runner, read, write) -> bool:
 
 async def _flow_archive_status(*, session, runner, read, write) -> bool:
     """Status: one screen, straight back. Reads the file, opens no connection."""
-    identity = ask_text("Only this identity (tg:user:ID; blank for all)", read=read, write=write)
+    identity = ask_text("Only this identity (tg:user:ID)", read=read, write=write, blank="means every identity")
     args = _namespace(command="archive", archive_kind="status", identity=None if identity is BACK else identity)
     await _call(args, session=session, runner=runner, write=write, connect=False)
     return _leave_action(after_action(read=read, write=write))
@@ -2157,7 +2157,7 @@ async def _flow_structure_remap(*, session, runner, read, write) -> bool:
 
 async def _flow_leave(*, session, runner, read, write) -> bool:
     """Row 7 of Build: this account out of a group or channel. Nothing is deleted."""
-    trail = crumb(MAIN, "Leave")
+    trail = crumb(MAIN, "Build", "Leave")
     while True:
         picked = await _pick_chat(session=session, read=read, write=write, trail=trail)
         if picked is BACK:

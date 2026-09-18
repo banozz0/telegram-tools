@@ -379,3 +379,14 @@ def test_after_run_reprints_after_a_bad_answer():
     result = prompts.after_run(read=reader("9", "1"), write=output.append, rows=(("again", "Run it again"),))
     assert result == "again"
     assert "Pick one of the numbers listed." in screens(output)
+
+
+def test_ask_lines_carries_one_hint_about_a_blank_when_it_is_given_one():
+    """A row where a blank means something other than cancelling names it, exactly
+    as `ask_text` does, so the header never says two things at once."""
+    output = []
+    ask_lines("Description", read=reader("body", "."), write=output.append, blank="means none")
+
+    header = "\n".join(output)
+    assert "(blank means none, . on its own line ends it):" in header
+    assert "blank cancels" not in header

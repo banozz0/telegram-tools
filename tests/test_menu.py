@@ -822,8 +822,8 @@ def test_bots_lists_and_prints_a_profile():
 def test_a_bot_with_many_commands_keeps_its_screen_title_on_the_terminal():
     """Live Telegram 8.6, 2026-09-17: @Harrylibbot's 60-odd commands, unpaged.
 
-    The whole list went straight into the scrollback above `Main › My bots ›
-    @Harrylibbot`, pushing the title and its rows off a 24-row terminal. This
+    The whole list went straight into the scrollback above `Main › Identity › My
+    bots › @Harrylibbot`, pushing the title and its rows off a 24-row terminal. This
     screen prints the profile itself rather than through `run()`, so the list
     it shows is capped and names where every command still is.
     """
@@ -834,7 +834,7 @@ def test_a_bot_with_many_commands_keeps_its_screen_title_on_the_terminal():
 
     lines = screens(output).splitlines()
     profile_at = lines.index("Harry")
-    title_at = lines.index("Main \u203a My bots \u203a @harrybot")
+    title_at = lines.index("Main \u203a Identity \u203a My bots \u203a @harrybot")
     assert code == 0
     assert title_at - profile_at <= 24, "the title has to share a normal terminal with the profile"
     assert any(line.startswith("/cmd0 ") and line.endswith("Command 0") for line in lines)
@@ -1487,13 +1487,23 @@ def test_every_screen_below_the_root_carries_its_trail():
     assert "Main › Read › Search › Hermes\n" in text
     assert "Main › Read › Search › Hermes › From\n" in text
 
+    # A group's rows name the group they were opened from: Create, Delete and
+    # Leave are Build's, and My bots is Identity's, exactly as their siblings are.
+    # 4 1 = build > create, 1 = a group, 0 out of the kind screen, 0, 0
+    _code, _calls, output = run_menu([CREATE, "0", "0", "0"])
+    assert "Main › Build › Create\n" in screens(output)
+    # 4 7 = build > leave, 0 out of the chat picker, 0, 0 -- its first screen is
+    # the picker, so the trail is what that screen is titled under.
+    _code, _calls, output = run_menu([LEAVE, "0", "0", "0"])
+    assert "Main › Build › Leave › Pick a chat\n" in screens(output)
+
     # 6 = my bots, 1 = harrybot, 1 = edit, 1 = name, then back out four times and exit
     _code, _calls, output = run_menu([BOTS_ROW, "1", "1", "1", "0", "0", "0", "0", "0", "0"])
     text = screens(output)
-    assert "Main › My bots\n" in text
-    assert "Main › My bots › @harrybot\n" in text
-    assert "Main › My bots › @harrybot › Edit\n" in text
-    assert "Main › My bots › @harrybot › Edit › Name\n" in text
+    assert "Main › Identity › My bots\n" in text
+    assert "Main › Identity › My bots › @harrybot\n" in text
+    assert "Main › Identity › My bots › @harrybot › Edit\n" in text
+    assert "Main › Identity › My bots › @harrybot › Edit › Name\n" in text
 
     # 5 = clear, 1 = Hermes, 1 = tick, 5 = continue, 1 = for real, Enter, 0
     _code, _calls, output = run_menu([CLEAR, "1", "1", "5", "1", "", "0"])
@@ -2305,6 +2315,23 @@ def test_archive_status_runs_without_the_menus_connection():
     assert client is None, "status reads the file; the menu's connection is not opened for it"
 
 
+def test_archive_status_says_one_thing_about_a_blank_identity():
+    """Blank means every identity, which is not cancelling, so the prompt says that
+    once instead of inviting a blank in the label and denying it in the suffix."""
+    asked = []
+    keys = iter([*ARCHIVE_STATUS, "", "", "0"])
+
+    def read(prompt):
+        asked.append(prompt)
+        return next(keys)
+
+    calls, runner = recorder()
+    asyncio.run(menu.run_menu(read=read, write=lambda _: None, session=FakeSession(), runner=runner))
+
+    assert "Only this identity (tg:user:ID) (blank means every identity): " in asked
+    assert not [prompt for prompt in asked if "blank means every identity" in prompt and "blank cancels" in prompt]
+
+
 def test_archive_search_stages_every_field_then_searches_and_exports():
     answers = [
         ARCHIVE_QUERY,
@@ -2885,8 +2912,8 @@ def test_main_menu_after_a_message_verb_lands_on_the_root():
 # counter-example above: single-line at Telegram, single-line here.
 
 
-def _multiline_header(label: str) -> str:
-    return f"{label} (blank cancels, {END_OF_MESSAGE} on its own line ends it):"
+def _multiline_header(label: str, *, blank: str = "cancels") -> str:
+    return f"{label} (blank {blank}, {END_OF_MESSAGE} on its own line ends it):"
 
 
 def test_a_pasted_description_reaches_create_whole():
@@ -2906,14 +2933,26 @@ def test_a_pasted_description_reaches_create_whole():
     # still menu answers: a one-line read would have staged "the agency" alone
     # and fed "and its bots" to the screen that asks next.
     assert calls[0].about == "the agency\nand its bots"
-    assert _multiline_header("Description (blank for none)") in screens(output)
-    assert "Description (blank for none) (blank cancels): " not in asked
+    assert _multiline_header("Description", blank="means none") in screens(output)
+    assert "Description (blank means none): " not in asked
 
 
 def test_a_blank_first_line_still_means_no_description_on_create():
     # The editor's own cancel is the same answer the one-line prompt gave: none.
     _code, calls, _output = run_menu([CREATE, "2", "Hermes", "", "", "0", "0"])
     assert (calls[0].forum, calls[0].about) == (True, None)
+
+
+def test_the_description_editor_says_one_thing_about_a_blank():
+    """A blank here leaves the description empty; it does not cancel the create.
+    The header carries that hint once, rather than a label offering a blank and a
+    suffix saying the same blank cancels."""
+    output = []
+    _code, _calls, _unused = run_menu([CREATE, "2", "Hermes", "", "", "0", "0"], output=output)
+
+    text = screens(output)
+    assert "Description (blank means none, . on its own line ends it):" in text
+    assert "Description (blank for none)" not in text
 
 
 def test_a_pasted_description_reaches_settings_set_whole():

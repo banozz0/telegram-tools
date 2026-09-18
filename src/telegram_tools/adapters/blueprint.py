@@ -29,6 +29,7 @@ which reports each drop by name.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any, Awaitable, Callable, Mapping
 
 from telethon import utils
@@ -55,7 +56,7 @@ from telegram_tools.create import _new_topic_id
 from telegram_tools.discovery import classify_entity
 from telegram_tools.envelope import PREFIX, CommandError
 from telegram_tools.resolver import ResolvedChat, resolve_chat
-from telegram_tools.topics import get_forum_topics
+from telegram_tools.topics import get_forum_topic, get_forum_topics
 
 # The chat kinds a blueprint names, from what `discover` calls the chat. A
 # basic group is absent on purpose (see the module docstring).
@@ -70,9 +71,23 @@ BANNED_RIGHT_NAMES = tuple(
 ADMIN_RIGHT_NAMES = tuple(sorted(name for name in ChatAdminRights.__init__.__annotations__ if name != "return"))
 # What an apply may change on the container, each to the call that changes it.
 CONTAINER_FIELDS = ("name", "about", "default_banned_rights", "slow_mode_seconds", "join_request")
+# The waits before something written is read again when the read still shows
+# what was there before: about three and a half seconds, then the read is
+# believed. Telegram can serve a topic, a chat or a person as they were
+# straight after a write that landed (card 299, live on 2026-09-17), and every
+# readback in this tool that re-reads its own write shares this bound.
+READBACK_WAITS = (0.5, 1.0, 2.0)
 
 Resolver = Callable[[Any, str | int], Awaitable[ResolvedChat]]
 StepHook = Callable[[Mapping[str, Any], str], None]
+
+
+def reads_as(name: str, now: Any, asked: Any) -> bool:
+    """Whether a field read back holds what a write asked for, in Telegram's spelling."""
+    if name == "icon_emoji_id":
+        # The flag says 0 for "no icon"; a topic without one reads None.
+        return int(now or 0) == int(asked or 0)
+    return now == asked
 
 
 def chat_kind(entity: Any) -> str:
@@ -234,7 +249,26 @@ class TelegramBlueprintPort:
             edits["icon_emoji_id"] = int(fields["icon_emoji_id"] or 0)
         if edits:
             await self.set_topic(resolved.input_entity, topic_id, **edits)
+            await self._settled_topic(resolved.input_entity, topic_id, edits)
         return str(step["target_rid"])
+
+    async def _settled_topic(self, peer: Any, topic_id: int, edits: Mapping[str, Any]) -> None:
+        """Read the topic until it shows the edit, bounded by `READBACK_WAITS`.
+
+        An apply's readback is one export of the whole chat after the last
+        step, so a topic edited last is read within a moment of its own
+        `messages.editForumTopic` -- and Telegram can serve it as it was
+        (card 299), which reported an apply that did everything as still
+        pending, forever. A topic that never catches up is left to the export
+        to report: an edit Telegram accepted and never applied is a pending
+        change, and saying so a few seconds later is the point.
+        """
+        topic = await get_forum_topic(self.client, peer, topic_id)
+        for wait in READBACK_WAITS:
+            if topic is None or all(reads_as(name, getattr(topic, name, None), value) for name, value in edits.items()):
+                return
+            await asyncio.sleep(wait)
+            topic = await get_forum_topic(self.client, peer, topic_id)
 
     async def _apply_container(self, resolved: ResolvedChat, step: Mapping[str, Any]) -> str:
         if step["op"] != "update":
