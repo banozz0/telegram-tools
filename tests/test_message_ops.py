@@ -697,7 +697,7 @@ def test_a_reply_preview_names_the_mentions_and_the_message_replied_to(run_cli, 
         ["--json", "message", "reply", "--chat", FORUM, "--to", "11", "--text", "cc @harry and @all"], capsys=capsys, answers=("n",)
     )
     assert "Mentions @all (everyone in the chat), @harry" in err
-    assert "11      2026-09-01 00:11 @harry: deploy 11" in err
+    assert "11      2026-09-01 00:11 UTC @harry: deploy 11" in err
 
 
 def test_plan_drift_refuses_when_the_chat_is_renamed_after_the_gate(run_cli, capsys, home):
@@ -765,8 +765,16 @@ def test_message_links_by_username_or_internal_id():
 
 def test_brief_line_is_one_row_cut_to_width():
     brief = ops.brief_of(_message(7, text="x" * 200, media=object()))
-    assert brief.line.startswith("7       2026-09-01 00:07 @harry: " + "x" * 59 + "…")
+    assert brief.line.startswith("7       2026-09-01 00:07 UTC @harry: " + "x" * 59 + "…")
     assert brief.line.endswith("[media]")
+
+
+def test_brief_line_says_which_zone_its_time_is_in():
+    # The row used to print the ISO string's first sixteen characters, which
+    # dropped the Z and read as the reader's own clock.
+    assert " 2026-09-01 00:07 UTC " in ops.brief_of(_message(7)).line
+    dateless = ops.Brief(id=7, date=None, sender="@harry", text="deploy")
+    assert dateless.line == "7       " + " " * 20 + " @harry: deploy"
 
 
 # -- what the seven quiet verbs read back ----------------------------------

@@ -128,6 +128,27 @@ OPS: dict[str, Op] = {
 # -- the messages a verb acts on ------------------------------------------
 
 
+TIME_WIDTH = 20  # `2026-09-05 10:00 UTC`
+
+
+def shown_time(value: str | None) -> str:
+    """A preview row's time, zone said rather than converted: `2026-09-05 10:00 UTC`.
+
+    The row used to print the ISO string's first sixteen characters, which drops
+    the `Z` every other screen keeps, so the time read as the reader's own clock.
+    Empty in, empty out; text that is not a time comes back as it was.
+    """
+    if not value:
+        return ""
+    try:
+        moment = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return value
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=UTC)
+    return moment.astimezone(UTC).strftime("%Y-%m-%d %H:%M UTC")
+
+
 @dataclass(frozen=True)
 class Brief:
     """One message as the preview shows it: enough to recognise, never the whole thing."""
@@ -144,14 +165,14 @@ class Brief:
 
     @property
     def line(self) -> str:
-        """`4812  2026-09-05 10:00  @harry: deploy is green [media]`, cut to fit one row."""
-        when = (self.date or "")[:16].replace("T", " ")
+        """`4812  2026-09-05 10:00 UTC  @harry: deploy is green [media]`, cut to fit one row."""
+        when = shown_time(self.date)
         body = " ".join(self.text.split())
         if len(body) > 60:
             body = body[:59] + "…"
         media = " [media]" if self.has_media else ""
         who = f"{self.sender}: " if self.sender else ""
-        return f"{self.id:<7} {when:<16} {who}{body or '(no text)'}{media}"
+        return f"{self.id:<7} {when:<{TIME_WIDTH}} {who}{body or '(no text)'}{media}"
 
     def to_dict(self) -> dict[str, Any]:
         return {
