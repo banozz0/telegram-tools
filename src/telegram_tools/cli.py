@@ -4323,10 +4323,19 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"hint: {error.hint}", file=sys.stderr)
         return exit_code("failed" if error.code in BROKE else "refused", error.code)
     except (ConfigError, EntityResolutionError, ValueError) as exc:
+        # A refusal the contract has a code for reads like every other one, in
+        # both modes: the message, the hint under it, and no usage block --
+        # usage text is for the mistakes `error_for` deliberately has no code
+        # for, which still go to argparse (card agent-bo-95422381).
         error = error_for(exc)
-        if report.machine and error is not None:
+        if error is None:
+            parser.error(str(exc))
+        if report.machine:
             return report.failed(error)
-        parser.error(str(exc))
+        print(f"error: {error.message}", file=sys.stderr)
+        if error.hint:
+            print(f"hint: {error.hint}", file=sys.stderr)
+        return exit_code("failed" if error.code in BROKE else "refused", error.code)
     except PermissionError as exc:
         if report.machine:
             return report.failed(error_for(exc))

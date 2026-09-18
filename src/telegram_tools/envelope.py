@@ -28,6 +28,9 @@ from telegram_tools._core.contract import (
     jsonl_line,
     utc_now,
 )
+from telegram_tools._core.archive import SearchError
+from telegram_tools._core.blueprint import BlueprintError
+from telegram_tools._core.export import ExportError
 from telegram_tools._core.identity import Identity, Target, banner
 from telegram_tools._core.plan import Evidence, Plan
 from telegram_tools._core.redaction import redact
@@ -105,11 +108,12 @@ def error_for(exc: BaseException) -> Error | None:
     """The envelope error for `exc`, or None when the contract has no code for it.
 
     None means the caller falls back to what this tool has always done with
-    that exception: argparse prints the message on stderr and exits 2. The one
-    class of failure with no code today is a usage mistake argparse cannot
-    express -- `send` naming neither text nor a file, `--output` missing for a
-    CSV export, `create` with no kind. Those keep their old handling rather
-    than borrow a code that means something else.
+    that exception: argparse prints the usage block on stderr and exits 2.
+    The one class of failure with no code today is a usage mistake argparse
+    cannot express -- `send` naming neither text nor a file, `--output`
+    missing for a CSV export, `create` with no kind. Those keep their old
+    handling rather than borrow a code that means something else; everything
+    with a code here is printed as a named refusal instead, in both modes.
     """
     if isinstance(exc, CommandError):
         return exc.as_error()
@@ -118,6 +122,14 @@ def error_for(exc: BaseException) -> Error | None:
     code = getattr(exc, "envelope_code", None)
     if code:
         return Error(code=code, message=str(exc), hint=getattr(exc, "envelope_hint", None))
+    if isinstance(exc, (SearchError, ExportError, BlueprintError)):
+        # The shared store refusing what a person typed: a query with no words,
+        # a regex that will not compile, a format it cannot write, a file that
+        # is not a blueprint. Those are plain `ValueError`s in `_core`, which
+        # carries no codes, so the code is named here -- the one the contract
+        # gives a bad input, and the one the other tool over the same store
+        # gives them too.
+        return Error(code="CONFIG_INVALID", message=str(exc))
     if isinstance(exc, KeyboardInterrupt):
         return Error(code="INTERRUPTED", message="Interrupted.")
     if isinstance(exc, EOFError):

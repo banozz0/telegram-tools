@@ -957,6 +957,26 @@ def test_a_query_fts5_cannot_parse_is_searched_as_the_words_it_is(run_cli, capsy
     assert code == 0 and envelope_of(out)["result"]["messages"], "deliberate syntax still means what it says"
 
 
+def test_a_query_the_store_refuses_is_a_coded_refusal_in_both_modes(run_cli, capsys, home):
+    """A blank query and a regex that will not compile are refusals the store named,
+    not usage mistakes: the human run prints `error:` alone, the machine run one
+    refused envelope on stdout. Both used to reach argparse, which dumped the whole
+    usage block and, under `--json`, left stdout empty (card agent-bo-95422381)."""
+    run_cli(["archive", "sync"], capsys=capsys)
+    for argv, message in (
+        (["archive", "search", "--query", "   "], "a search looks for at least one word"),
+        (["archive", "search", "--query", "deploy", "--regex", "("], "is not a regular expression"),
+    ):
+        code, _out, err, _fake = run_cli(list(argv), capsys=capsys)
+        assert code == 2 and message in err, err
+        assert "usage:" not in err, "a refusal the tool named is not a usage mistake"
+
+        code, out, _err, _fake = run_cli(["--json", *argv], capsys=capsys)
+        assert code == 2
+        payload = envelope_of(out)
+        assert payload["status"] == "refused" and payload["error"]["code"] == "CONFIG_INVALID", out
+
+
 def test_archive_writes_refuse_while_the_tools_files_are_loose(run_cli, capsys, home):
     root = home / ".telegram-tools"
     root.mkdir(mode=0o700, exist_ok=True)

@@ -7,6 +7,7 @@ import pytest
 from telegram_tools import menu
 from telegram_tools import messages as message_ops
 from telegram_tools import surface
+from telegram_tools._core.archive import SearchError
 from telegram_tools._core.columns import width
 from telegram_tools._core.contract import CodedError
 from telegram_tools._core.identity import Identity
@@ -2367,6 +2368,18 @@ def test_archive_search_refuses_to_run_without_a_query():
     code, calls, output = run_menu([ARCHIVE_QUERY, "10", "0", "0", "0"])
     assert code == 0 and calls == []
     assert "Type a query first." in screens(output)
+
+
+def test_a_query_the_store_refuses_lands_on_the_error_and_keeps_the_screen():
+    """The store's own refusal of a query is a ValueError, so the menu prints it and
+    the session stays open -- the CLI names it CONFIG_INVALID now, and neither half
+    may end the menu on it (card agent-bo-95422381)."""
+    calls, runner = recorder(error=SearchError("a search looks for at least one word; this query holds none"))
+    code, _unused, output = run_menu([ARCHIVE_QUERY, "1", "deploy AND", "10", "", "0", "0"], runner=runner)
+    assert code == 0 and len(calls) == 1
+    text = screens(output)
+    assert "error: a search looks for at least one word; this query holds none" in text
+    assert "usage:" not in text
 
 
 def test_archive_retention_dry_runs_first_then_asks_before_the_real_pass():
