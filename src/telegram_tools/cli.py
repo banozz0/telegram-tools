@@ -77,7 +77,7 @@ from telegram_tools.adapters.manage import TelegramManagePort
 from telegram_tools._core import blueprint as _blueprint
 from telegram_tools.adapters.blueprint import TelegramBlueprintPort, chat_kind
 from telegram_tools.resolver import EntityResolutionError, resolve_chat
-from telegram_tools.search import format_message_records, search_messages
+from telegram_tools.search import PINS_LIMIT, format_message_records, format_pins, pinned_messages, search_messages
 from telegram_tools.send import SendTarget, confirm_send, format_send_preview, format_sent, require_send_allowed, send_message
 from telegram_tools.topics import get_forum_topics, get_forum_topics_by_ids, in_id_order
 from telegram_tools.writes import build_plan, read_back, recheck_for, require_rights
@@ -128,7 +128,8 @@ SCHEDULE_WRITES = watch_ops.SCHEDULE_WRITES
 # hint. `doctor` and `profiles` act as nobody and are not on either list.
 # `message` runs the verbs a bot can perform (`messages.BOT_VERBS`): the four
 # that need a dialog of the account's own -- read, unread, bookmark, draft --
-# refuse here too.
+# refuse here too, and so does `pins`, which reads through a search Telegram
+# marks users-only.
 # The administration groups (section 13) run as a bot too, where the bot is an
 # admin holding the right: `_run_manage` refuses a bot that is not an admin.
 # `watch` is here because a bot receives updates for the chats it is in, which
@@ -583,6 +584,15 @@ def build_parser() -> argparse.ArgumentParser:
             # prompt, and no --yes, so it never runs unattended.
             continue
         verb_parser.add_argument("--yes", action="store_true", help="Skip the preview; the chat it lands in must be in TELEGRAM_SEND_ALLOWLIST")
+
+    # `pins` is the one verb here that only reads, so it is built after the
+    # loops above rather than inside them: nothing it does needs a gate, which
+    # is why it has no `--yes`, and no id, which is why it takes `--topic`
+    # where the writing verbs take `--id`.
+    pins_parser = verbs.add_parser("pins", help="List a chat's or topic's pinned messages (a read; account only)")
+    pins_parser.add_argument("--chat", required=True, help="Chat/channel username, link, or ID whose pins to list")
+    pins_parser.add_argument("--topic", type=positive_int, help="Topic ID whose pins to list; omit for the whole chat")
+    pins_parser.add_argument("--limit", type=positive_int, metavar="N", help=f"Stop after this many pinned messages (default {PINS_LIMIT})")
 
     create_parser = subparsers.add_parser("create", help="Create a group, channel, or forum topic")
     create_kinds = create_parser.add_subparsers(dest="create_kind")
@@ -1619,6 +1629,36 @@ def _selection_ids(args, archive_scope) -> list[int]:
     return ids
 
 
+async def _run_message_pins(client, args, *, report: Reporter) -> int:
+    """`message pins`: what a chat or one of its topics has pinned. A read.
+
+    Nothing changes, so there is no plan, no gate and no audit line -- the
+    rule `search` and `archive sync` already follow. What it does preflight is
+    what reading the history needs: the chat has to resolve as something this
+    account can open, and a named topic has to be a topic the chat actually
+    has, both refused by name before Telegram is asked for anything.
+    """
+    resolved, chat, _topic, target = await _resolve_destination(client, report, args.chat, args.topic)
+    report.set_target(target)
+    report.show_banner()
+    records = await pinned_messages(
+        client,
+        resolved.input_entity,
+        chat_id=resolved.id,
+        topic_id=args.topic,
+        limit=args.limit,
+        chat_title=chat.title,
+    )
+    for record in records:
+        report.record(record)
+    if not report.machine:
+        report.info(format_pins(records, where=_place(target)))
+    # Telegram records no pin time, so a row is a search row and nothing here
+    # claims to know when somebody pinned it.
+    report.result({"matched": len(records), "pins": records}, status="ok" if records else "empty")
+    return 0
+
+
 async def _run_message(client, args, config, *, report: Reporter | None = None) -> int:
     """One message verb, behind the four steps every write here takes.
 
@@ -1628,8 +1668,10 @@ async def _run_message(client, args, config, *, report: Reporter | None = None) 
     """
     report = report or Reporter()
     verb = getattr(args, "message_verb", None)
+    if verb in message_ops.READ_VERBS:
+        return await _run_message_pins(client, args, report=report)
     if verb not in message_ops.OPS:
-        raise ValueError("message needs one of: " + ", ".join(message_ops.VERBS) + ".")
+        raise ValueError("message needs one of: " + ", ".join(message_ops.VERBS + message_ops.READ_VERBS) + ".")
     op = message_ops.OPS[verb]
     identity = await _acting(client, report)
     me = report.me or await client.get_me()
@@ -3902,6 +3944,8 @@ def require_bot_mode_supports(args, report: Reporter) -> None:
         why = "Telegram lets only an account hand it a message to post later"
     elif command == "schedule":
         why = "Telegram's scheduled messages are user-only, and a repeat is held by the runner the account started"
+    elif command == "message" and verb in message_ops.READ_VERBS:
+        why = "Telegram marks `messages.search` users-only, and a chat's pins are read through it"
     elif command == "message":
         why = "a bot has no dialog of its own to mark, no Saved Messages and no drafts"
     elif command == "review":

@@ -936,6 +936,10 @@ MESSAGE_FORMS = {
     # editor means cancel on every row that shares it, and one keystroke cannot
     # mean both "never mind" and "take the draft back".
     "draft": (("topic", "Topic", "topic"), ("text", "Draft", "lines"), ("clear", "Clear it", "toggle")),
+    # The one read among them: a chat, optionally one of its topics, and how
+    # many rows to stop after. Nothing is required, so the run row works on a
+    # bare chat.
+    "pins": (("topic", "Topic", "topic"), ("limit", "Limit", "int")),
 }
 # What has to be staged before the run row does anything.
 MESSAGE_REQUIRED = {
@@ -954,9 +958,12 @@ MESSAGE_REQUIRED = {
     "unread": (),
     "bookmark": ("message_id",),
     "draft": ("text",),
+    "pins": (),
 }
 MESSAGE_RUN_ROW = {
     "delete": f"Run it (dry-run unless '{DELETE_FOR_REAL_ROW}' is on)",
+    # A read has no preview and no prompt, so the row says what it does.
+    "pins": "List them",
 }
 MESSAGE_TITLES = {
     "reply": "Reply",
@@ -974,6 +981,7 @@ MESSAGE_TITLES = {
     "unread": "Mark unread",
     "bookmark": "Bookmark",
     "draft": "Draft",
+    "pins": "Pinned messages",
 }
 
 
@@ -1154,6 +1162,9 @@ WRITE_ROWS = (
     ("Mark a chat unread", _flow_message("unread")),
     ("Bookmark a message (Saved Messages)", _flow_message("bookmark")),
     ("Save a draft", _flow_message("draft")),
+    # Last, and last on purpose: the root rows are a promise and the live
+    # checklist numbers every row above this one, so a new row goes on the end.
+    ("List pinned messages", _flow_message("pins")),
 )
 
 

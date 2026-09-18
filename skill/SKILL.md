@@ -56,7 +56,8 @@ the archive is the cheap way to answer it; the live `search` is for what happene
 since the last sync, or a chat the archive does not hold yet.
 
 It can also **send** a message, act on one that exists (**`message`**: reply, react,
-pin, forward, copy, bookmark and more), and **create** — or **delete** — a group,
+pin, forward, copy, bookmark and more, plus **`message pins`**, which only reads: what
+a chat or one of its topics has pinned), and **create** — or **delete** — a group,
 channel or topic. Those write to Telegram as the user, so rules 2, 3 and 10 below
 govern them — read those before running any. It still does not run bots.
 
@@ -152,6 +153,11 @@ initiative if the user asked for the bot. The allowlist (rule 2) binds a bot sen
 exactly as it binds an account send.
 
 **10. The message verbs are `send`'s rule, and the bulk ones are `delete`'s.**
+`message pins` is the exception and reads only — run it freely, as you would `search`.
+It lists what is pinned newest *message* first, not in the order somebody pinned it,
+because Telegram serves pins as a search over the chat's history and records no pin
+time; do not report one. Each row is a `search` row. `--topic` narrows it to one
+forum topic, `--limit` caps it (100 by default). It refuses under `--as-bot`.
 `message reply`, `react`, `unreact`, `pin`, `unpin`, `poll`, `typing`, `read`,
 `unread`, `bookmark` and `draft` post or change something visible as the user; run
 one only for a message the user named in this conversation, and only with `--yes`
@@ -335,6 +341,7 @@ names the files).
 | a long or multi-line message | pipe it: `... \| telegram-tools send --chat <id> --text - --yes` |
 | "send them that file" (allowlisted) | `telegram-tools send --chat <id> --file /path/to/file --text "caption" --yes` |
 | "reply to that message" (they named it, allowlisted) | `telegram-tools --json message reply --chat <id> --to <msg-id> --text "..." --yes` |
+| "what's pinned in that chat?" / "what did they pin in that topic?" | `telegram-tools --json message pins --chat <id>` (`--topic <topic-id>` for one topic) — reads only, nothing to confirm; no pin time exists, so do not claim one |
 | "react to it with 🔥" / "pin it" (they named it, allowlisted) | `telegram-tools --json message react --chat <id> --id <msg-id> --emoji 🔥 --yes`, `message pin --chat <id> --id <msg-id> --yes` |
 | "forward that to the releases channel" (both named, allowlisted) | `telegram-tools --json message forward --chat <id> --ids <msg-id> --to <chat> --yes` (`copy` re-posts the text; an attachment becomes a link) |
 | "save that message" / "bookmark it" | `telegram-tools --json message bookmark --chat <id> --id <msg-id> --label "..." --yes` — Saved Messages plus an archive row |
