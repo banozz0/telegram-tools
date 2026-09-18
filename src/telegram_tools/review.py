@@ -137,13 +137,10 @@ def describe_rows(archive: Archive, rows: Sequence[QueueRow]) -> list[dict[str, 
     is when the candidate was queued, which is not when the message was sent."""
     entries = []
     for row in rows:
-        found = archive.connection.execute(
-            "SELECT date FROM messages WHERE rid = ? AND message_id = ?", (row.source_rid, row.source_message_id)
-        ).fetchone()
         entries.append(
             {
                 **row.to_dict(),
-                "message_date": found["date"] if found else None,
+                "message_date": archive.message_date(row.source_rid, row.source_message_id),
                 "location": list(_target_for(archive, row.source_rid).path),
             }
         )

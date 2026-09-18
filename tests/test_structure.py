@@ -612,6 +612,28 @@ def test_the_remap_of_an_apply_names_the_topic_it_made_from_a_hand_written_entry
     assert f"topic:campaign-4-5-rerun  ->  {minted}" in out
 
 
+def test_the_applies_picker_lists_every_apply_the_archive_holds_newest_first(run_cli, capsys, tmp_path, home):
+    """The menu's remap picker reads the archive, never a query of its own: one row per
+    apply, newest first, carrying the id, when it ran and the blueprint it ran from."""
+    _source, fake = export_to(run_cli, capsys, tmp_path / "hermes.json", "@teamhermes")
+    blueprint = json.loads((tmp_path / "hermes.json").read_text())
+    blueprint["objects"].append(
+        {"handle": "topic:picker", "kind": "topic", "source_rid": None, "position": 5, "fields": {"name": "picker"}}
+    )
+    (tmp_path / "picker.json").write_text(json.dumps(blueprint))
+    code, out, _err, _fake = run_cli(
+        ["--json", "structure", "apply", "--blueprint", str(tmp_path / "picker.json"), "--chat", "@teamhermes", "--execute"],
+        client=fake, capsys=capsys, isatty=True, answer="Team Hermes",
+    )
+    assert code == 0, out
+    result = envelope_of(out)["result"]
+
+    with archive_store.open_archive() as archive:
+        rows = structure_ops.latest_apply_ids(archive)
+    assert [row[0] for row in rows] == [result["apply_id"]]
+    assert rows[0][2] == result["blueprint_hash"] and rows[0][1]
+
+
 # -- the gate -----------------------------------------------------------------
 
 

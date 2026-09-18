@@ -686,10 +686,30 @@ def test_bookmark_writes_the_archive_row_beside_the_saved_copy(run_cli, capsys, 
 
     assert code == 0
     assert "Saved Messages" in envelope_of(out)["evidence"]["readback"]
-    connection = archive_store.read_only()
-    row = connection.execute("SELECT rid, message_id, identity_id, label, source FROM bookmarks").fetchone()
-    connection.close()
-    assert tuple(row) == (scope_rid_for(FORUM, 141), "11", IDENTITY.id, "keep", "manual")
+    reader = archive_store.read_only()
+    rows = reader.bookmarks()
+    reader.close()
+    assert [(row["rid"], row["message_id"], row["identity_id"], row["label"], row["source"]) for row in rows] == [
+        (scope_rid_for(FORUM, 141), "11", IDENTITY.id, "keep", "manual")
+    ]
+
+
+def test_bookmarking_a_message_twice_relabels_it_and_keeps_when_it_was_first_marked(run_cli, capsys, home):
+    """A relabel is not a new bookmark: when the message was first marked is the fact worth
+    holding, so the second write changes the label and leaves `created` where it was."""
+    code, _out, _err, _fake = run_cli(["--json", "message", "bookmark", "--chat", FORUM, "--id", "11", "--label", "keep"], capsys=capsys, answers=("y",))
+    assert code == 0
+    reader = archive_store.read_only()
+    first = reader.bookmark(scope_rid_for(FORUM, 141), "11")
+    reader.close()
+
+    code, _out, _err, _fake = run_cli(["--json", "message", "bookmark", "--chat", FORUM, "--id", "11", "--label", "keep for the retro"], capsys=capsys, answers=("y",))
+    assert code == 0
+    reader = archive_store.read_only()
+    again = reader.bookmark(scope_rid_for(FORUM, 141), "11")
+    reader.close()
+    assert again["label"] == "keep for the retro"
+    assert again["created"] == first["created"], "a relabel reset when the message was marked"
 
 
 def test_a_reply_preview_names_the_mentions_and_the_message_replied_to(run_cli, capsys, home):

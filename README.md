@@ -343,7 +343,7 @@ menu does, from a terminal. The verbs:
 | `poll` | posts a poll | `--question`, `--option` (2 to 10), `--multiple`, `--topic` |
 | `typing` | shows *typing…* | `--seconds` |
 | `read` / `unread` | marks the chat read, or unread | — |
-| `bookmark` | forwards to Saved Messages and writes a `bookmarks` row in the archive | `--id MSG`, `--label` |
+| `bookmark` | forwards to Saved Messages and writes a `bookmarks` row in the archive; bookmarking the same message again relabels it and keeps when it was first marked | `--id MSG`, `--label` |
 | `draft` | saves a draft in the chat, or a topic in it | `--text`, `--topic` |
 
 Every verb resolves the chat, fetches the message it is about to act on, and shows both

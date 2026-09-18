@@ -21,7 +21,6 @@ from typing import Any, Callable, Sequence
 from telegram_tools import __version__
 from telegram_tools._core.archive import Archive, SearchHit, SyncReport
 from telegram_tools._core.config import Budgets, human_bytes
-from telegram_tools._core.contract import utc_now
 from telegram_tools._core.config import load as load_budget_config
 from telegram_tools._core.export import FORMATS as EXPORT_FORMATS
 from telegram_tools._core.paths import ToolPaths, make_private_dir, open_private
@@ -87,44 +86,44 @@ def archive_exists(home: Path | None = None) -> bool:
     return path.exists() and path.stat().st_size > 0
 
 
-def read_only(home: Path | None = None) -> sqlite3.Connection | None:
-    """The archive opened read-only, or None when there is none yet. For `doctor` and pickers."""
+def read_only(home: Path | None = None) -> Archive | None:
+    """The archive opened read-only and unmigrated, or None when there is none yet.
+
+    For `doctor` and the menu's pickers: the tables are the shared copy's, so
+    the questions go through its methods rather than SQL spelled here.
+    """
     if not archive_exists(home):
         return None
-    connection = sqlite3.connect(f"file:{paths_for(home).archive}?mode=ro", uri=True)
-    connection.row_factory = sqlite3.Row
-    return connection
+    return Archive.open_read_only(paths_for(home).archive)
 
 
 def list_scopes(home: Path | None = None) -> list[tuple[str, str]]:
     """Every scope the archive holds as `(rid, title)`, for the menu's picker. Opens nothing to write."""
-    connection = read_only(home)
-    if connection is None:
+    reader = read_only(home)
+    if reader is None:
         return []
     try:
-        rows = connection.execute("SELECT rid, title FROM scopes ORDER BY title, rid").fetchall()
+        rows = reader.scope_rows()
     except sqlite3.Error:
         return []
     finally:
-        connection.close()
+        reader.close()
     return [(row["rid"], row["title"] or "") for row in rows]
 
 
 def budget_usage(home: Path | None = None) -> dict[str, Any] | None:
     """Rows, bytes and the budget row, read without migrating; None when there is no archive."""
-    connection = read_only(home)
-    if connection is None:
+    reader = read_only(home)
+    if reader is None:
         return None
     try:
-        messages = connection.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
-        scopes = connection.execute("SELECT COUNT(*) FROM scopes").fetchone()[0]
-        page_count = connection.execute("PRAGMA page_count").fetchone()[0]
-        page_size = connection.execute("PRAGMA page_size").fetchone()[0]
+        messages = reader.message_count()
+        scopes = reader.scope_count()
+        used = reader.bytes_used()
     except sqlite3.Error as exc:
         return {"error": str(exc)}
     finally:
-        connection.close()
-    used = int(page_count) * int(page_size)
+        reader.close()
     budgets = Budgets.from_config(load_budget_config(config_path(home)))
     paths = paths_for(home)
     return {
@@ -159,24 +158,9 @@ def mark_missing_deleted(archive: Archive, rid: str, seen: set[int]) -> int:
     scope again and compare. The row and its text stay, per section 8.3: an
     archive that forgets what was deleted cannot report it.
     """
-    rows = archive.connection.execute(
-        "SELECT message_id FROM messages WHERE rid = ? AND deleted_at IS NULL", (rid,)
-    ).fetchall()
-    gone = [row["message_id"] for row in rows if not str(row["message_id"]).isdigit() or int(row["message_id"]) not in seen]
-    if not gone:
-        return 0
-    now = utc_now()
-    archive._begin()
-    try:
-        for message_id in gone:
-            archive.connection.execute(
-                "UPDATE messages SET deleted_at = ? WHERE rid = ? AND message_id = ?", (now, rid, message_id)
-            )
-        archive._commit()
-    except Exception:
-        archive._rollback()
-        raise
-    return len(gone)
+    live = archive.live_message_ids(rid)
+    gone = [message_id for message_id in live if not str(message_id).isdigit() or int(message_id) not in seen]
+    return archive.mark_deleted(rid, gone)
 
 
 def is_rate_limited(error: str | None) -> bool:
