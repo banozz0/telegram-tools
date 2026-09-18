@@ -688,6 +688,34 @@ def test_a_bot_replays_nothing_because_a_bot_has_no_history(loop_for):
     assert client.pages == []
 
 
+def test_a_forums_chat_level_cursor_is_disowned_and_everything_else_is_carried(loop_for):
+    """Since every event in a forum carries its topic's rid, a chat-level cursor on a forum
+    names a scope nothing can reach again: it never advances, and every start replayed the
+    whole forum. Nothing else is disowned -- a wrongly retired cursor loses events."""
+    client = SendingClient()
+    source = watch_events.TelegramEventSource(client, loop_for(client))
+    assert source.carries(CHAT_RID) is False, "the forum's chat rid can never carry an event again"
+    assert source.carries(f"tg:topic:{FORUM_ID}:141") is True
+    assert source.carries(ALERTS_RID) is True, "a chat without topics still carries its own rid"
+    assert source.carries("not-a-rid") is True
+    assert source.carries("tg:folder:7") is True
+
+
+def test_a_chat_that_will_not_resolve_keeps_its_cursor_rather_than_losing_it(loop_for):
+    """A lookup that fails is not a disavowal: the cursor stays and costs a replay, because
+    the other way round costs the events that arrived while the runner was down."""
+    client = SendingClient()
+    source = watch_events.TelegramEventSource(client, loop_for(client))
+    assert source.carries("tg:chat:-1009999999999") is True
+    assert -1009999999999 not in source.forums, "a failed lookup is not an answer to remember"
+
+
+def test_a_bot_disowns_no_cursor_because_it_replays_nothing_either(loop_for):
+    client = SendingClient()
+    source = watch_events.TelegramEventSource(client, loop_for(client), mode="bot")
+    assert source.carries(CHAT_RID) is True
+
+
 def test_a_cursor_this_source_did_not_write_replays_nothing(loop_for):
     client = SendingClient()
     source = watch_events.TelegramEventSource(client, loop_for(client))

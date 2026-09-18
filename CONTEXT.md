@@ -557,7 +557,12 @@ The terms this codebase uses, and the boundaries they imply.
   `fcntl` lock at `runner.lock` (a second is `RUNNER_LOCKED`), a cursor per
   scope replayed on start with dedup on, a monotonic-plus-wall schedule
   planner that survives a clock jump, and one JSON line per thing it did in
-  `runner.log`. It runs in the foreground and installs no service. It never
+  `runner.log`. A cursor the source disowns is retired before the replay
+  instead: the source is asked `carries(rid)`, and this one answers False for
+  a forum's chat-level cursor alone -- every event in a forum carries its
+  topic's rid, so that scope can never advance again. Nothing else is
+  disowned, a lookup that fails least of all: a cursor wrongly retired loses
+  the events that arrived while the runner was down. It runs in the foreground and installs no service. It never
   holds the profile's session file: it copies the authorization into an
   in-memory `StringSession` at start, so one-shot commands keep working while
   it is up.
