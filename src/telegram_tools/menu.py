@@ -1182,7 +1182,7 @@ CREATE_KINDS = (
 
 
 async def _flow_create(*, session, runner, read, write) -> bool:
-    trail = crumb(MAIN, "Create")
+    trail = crumb(MAIN, "Build", "Create")
     while True:
         choice = choose([label for _kind, _forum, label in CREATE_KINDS], title=trail, read=read, write=write)
         if choice is BACK:
@@ -1229,7 +1229,7 @@ DELETE_ANOTHER = (STAY, "Delete something else")
 
 
 async def _flow_delete(*, session, runner, read, write) -> bool:
-    trail = crumb(MAIN, "Delete")
+    trail = crumb(MAIN, "Build", "Delete")
     while True:
         scope = choose(
             ["A group or channel", "A topic in a forum group"], title=trail, read=read, write=write
@@ -1641,7 +1641,7 @@ def _pick_bot(bots, *, read, write, trail: str) -> Any:
 
 
 async def _flow_bots(*, session, runner, read, write) -> bool:
-    trail = crumb(MAIN, "My bots")
+    trail = crumb(MAIN, "Identity", "My bots")
     while True:
         chosen = _pick_bot(await session.bots(), read=read, write=write, trail=trail)
         if chosen is BACK:
@@ -2157,7 +2157,7 @@ async def _flow_structure_remap(*, session, runner, read, write) -> bool:
 
 async def _flow_leave(*, session, runner, read, write) -> bool:
     """Row 7 of Build: this account out of a group or channel. Nothing is deleted."""
-    trail = crumb(MAIN, "Leave")
+    trail = crumb(MAIN, "Build", "Leave")
     while True:
         picked = await _pick_chat(session=session, read=read, write=write, trail=trail)
         if picked is BACK:
