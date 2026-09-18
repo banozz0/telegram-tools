@@ -4006,6 +4006,24 @@ async def run_as_bot(args, config, *, report: Reporter) -> int:
 
 
 async def run(args, *, client=None, config=None, report: Reporter | None = None, acting: Identity | None = None) -> int:
+    """Run one command, and record it when the platform refuses it.
+
+    Every write that reaches Telegram passes through here -- the flag path and
+    the menu both call this, and this is where the audit log is opened -- so it
+    is the one place a call that went out and came back refused can be written
+    down without a wrapper at each of two dozen call sites. `audit_failure`
+    decides what counts: a platform answer, never a refusal this tool made on
+    its own before any call (card agent-bo-95422312).
+    """
+    report = report or Reporter()
+    try:
+        return await _dispatch(args, client=client, config=config, report=report, acting=acting)
+    except BaseException as exc:
+        report.audit_failure(error_for(exc) or platform_error(exc))
+        raise
+
+
+async def _dispatch(args, *, client=None, config=None, report: Reporter | None = None, acting: Identity | None = None) -> int:
     """Run one command.
 
     The menu passes its own already-started client so a whole menu session is one

@@ -619,7 +619,15 @@ The terms this codebase uses, and the boundaries they imply.
   run could confirm, not that it failed.
 - **Audit line** — one redacted JSON line per *executed* write in
   `~/.telegram-tools/audit.jsonl`, from the menu exactly as from a flag. Dry
-  runs and cancellations leave nothing.
+  runs and cancellations leave nothing. A call that went out and came back
+  refused is executed: the line is written with `status: failed` and an
+  `unverified:` readback naming the platform error, because a log that records
+  only the writes that worked cannot answer what this account attempted. A
+  refusal this tool made itself — a missing right, a declined gate, a drifted
+  plan — never reached Telegram and leaves nothing, exactly as a dry run does.
+  `Reporter.audit_failure`, called from `cli.run`, is the one place that
+  decides; `envelope.ANSWERED_BY_PLATFORM` is the rule (an interrupt is the
+  person stopping the run, not the platform, so it is not one).
 - **Redaction** — the single pass every envelope, audit line and error message
   goes through before it is written. Shapes, not vendors: bot tokens, the API
   hash, phone numbers, session paths.

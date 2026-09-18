@@ -855,7 +855,10 @@ write in plain output and rides as `evidence` under `--json`, so the doubt
 reaches whoever is reading. `unverified` is not a failure and does not change
 the exit code or the status; it says how much of the result was confirmed. One
 redacted line per executed write is appended to
-`~/.telegram-tools/audit.jsonl` (from the menu exactly as from a flag). No
+`~/.telegram-tools/audit.jsonl` (from the menu exactly as from a flag) — a call
+Telegram refused counts as one, and its line says `failed` with the readback it
+could not confirm, while a write this tool refused before any call (a missing
+right, a declined question) leaves nothing, exactly as a dry run does. No
 token, phone number, API hash or session path can reach that file — the same
 redaction pass covers it, every envelope and every error message.
 

@@ -501,7 +501,8 @@ names the files).
   the login session" means the user has the menu open somewhere. Say so; a retry
   loop will not free it.
 - **A write leaves a local record.** Every executed send, message verb, create, clear, delete,
-  blueprint step, admin or member change or bot edit appends one line to `~/.telegram-tools/audit.jsonl`. It is the
+  blueprint step, admin or member change or bot edit appends one line to `~/.telegram-tools/audit.jsonl`,
+  a call Telegram refused included (that one says `failed`; a write refused before the call leaves nothing). It is the
   user's log, it holds no secrets, and you never need to read it — but do not
   suggest deleting it either.
 - **Check the tool's own help before using a flag** that is not in this table. The

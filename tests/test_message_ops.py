@@ -16,6 +16,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from telethon.errors import ChatWriteForbiddenError
 
 from telegram_tools import archive as archive_store
 from telegram_tools import cli
@@ -576,6 +577,25 @@ def test_edit_of_another_persons_message_needs_the_edit_right(run_cli, capsys, h
 
     assert code == 2 and envelope_of(out)["error"]["code"] == "PERMISSION_DENIED"
     assert fake.calls == []
+
+
+def test_a_verb_the_platform_refuses_leaves_one_failed_audit_line(run_cli, capsys, home):
+    """The same rule as `send`, from a different handler: one line, status failed."""
+
+    class RefusingClient(FakeClient):
+        async def pin_message(self, peer, message_id, **_):
+            raise ChatWriteForbiddenError(None)
+
+    code, out, _err, _fake = run_cli(
+        ["--json", "message", "pin", "--chat", FORUM, "--id", "11"], client=RefusingClient(), capsys=capsys, answers=("y",)
+    )
+
+    envelope = envelope_of(out)
+    assert (code, envelope["status"]) == (2, "failed")
+    lines = audit_lines(home)
+    assert len(lines) == 1
+    assert (lines[0]["command"], lines[0]["status"]) == ("message pin", "failed")
+    assert lines[0]["evidence"]["readback"].startswith("unverified:")
 
 
 def test_pin_without_the_right_is_refused_by_name(run_cli, capsys, home):
