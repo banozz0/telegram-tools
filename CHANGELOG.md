@@ -4,7 +4,7 @@ All notable changes to this project will be documented here.
 
 This project follows a practical changelog style: user-visible changes, safety changes, and release notes belong here; active task tracking belongs outside the repo.
 
-## Unreleased
+## 3.35.0 - 2026-09-18
 
 The final wave of this cycle: the shared core at v0.14, one new read verb, and the small faults the live menu campaign left on the board.
 
