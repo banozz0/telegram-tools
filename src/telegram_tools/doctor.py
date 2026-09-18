@@ -9,7 +9,7 @@ from typing import Mapping
 from dotenv import dotenv_values
 
 from telegram_tools import archive as archive_store
-from telegram_tools import profiles, proxy
+from telegram_tools import extras, profiles, proxy
 from telegram_tools._core.archive import fts5_report
 from telegram_tools._core.config import human_bytes
 from telegram_tools._core.review import directory_bytes
@@ -300,7 +300,8 @@ def check_proxy(root: Path, env: Mapping[str, str], home: Path | None = None) ->
         return DoctorCheck(
             "FAIL",
             f"TELEGRAM_PROXY is set to {parsed.label} and python-socks is not installed, "
-            f"so every command refuses rather than connecting directly. Install it with: {proxy.EXTRA_HINT}",
+            f"so every command refuses rather than connecting directly. "
+            f"Install it with: {extras.install_hint('proxy')}",
         )
     return DoctorCheck("OK", f"Proxy {parsed.label} is configured and usable")
 

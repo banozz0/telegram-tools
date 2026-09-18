@@ -98,7 +98,8 @@ telegram-tools auth --qr     # or scan a code from a phone that is already signe
 `auth` asks at the terminal and cannot be run unattended — it has no `--yes`, and there
 is nothing here for a script to drive. If the account has two-step verification, the
 password is asked for at the prompt and stored nowhere. `auth --qr` needs
-`pip install 'telegram-tools[qr]'` to draw the block; open Telegram on the signed-in
+the `qr` extra to draw the block (`pipx inject telegram-tools segno` adds it to an
+install that already exists); open Telegram on the signed-in
 phone, *Settings → Devices → Link Desktop Device*, and scan it.
 
 You can also just run a command: without a session, Telethon's own login prompt still
@@ -190,7 +191,7 @@ TELEGRAM_PROXY=socks5://127.0.0.1:1080
 ```
 
 `socks5://`, `socks4://` and `http://` are understood, with optional `user:password@`.
-This needs `pip install 'telegram-tools[proxy]'`. Without that library the command
+This needs the `proxy` extra (`pipx inject telegram-tools 'python-socks[asyncio]'`). Without that library the command
 **refuses** — Telethon's own behaviour there is a warning and a direct connection from
 your own address, which is exactly the outcome someone asking for a proxy must not get.
 `doctor` tells you before you run anything.

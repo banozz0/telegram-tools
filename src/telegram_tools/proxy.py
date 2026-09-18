@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping
 from urllib.parse import unquote, urlparse
 
+from telegram_tools import extras
 from telegram_tools.config import ConfigError
 
 # What Telethon's `Connection._parse_proxy` accepts as a scheme, by the name a
@@ -30,8 +31,6 @@ SCHEMES = {
     "http": "http",
     "https": "http",
 }
-
-EXTRA_HINT = "pip install 'telegram-tools[proxy]'"
 
 
 class ProxyUnavailable(ConfigError):
@@ -123,7 +122,7 @@ def require_backend(proxy: Proxy) -> Proxy:
     raise ProxyUnavailable(
         f"TELEGRAM_PROXY asks for {proxy.label}, and python-socks is not installed, "
         "so the connection would be made directly instead. Refusing rather than "
-        f"connecting without the proxy. Install it with: {EXTRA_HINT}"
+        f"connecting without the proxy. Install it with: {extras.install_hint('proxy')}"
     )
 
 

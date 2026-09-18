@@ -63,7 +63,10 @@ The terms this codebase uses, and the boundaries they imply.
   connects directly when `python-socks` is missing, so `proxy.py` checks the
   import itself and refuses: someone who asked to go through a proxy must never
   silently connect from their own address. The same shape governs `auth --qr`
-  without the `qr` extra.
+  without the `qr` extra. Each refusal names the command that installs the
+  extra, and `extras.install_hint` derives it from where this interpreter lives
+  rather than freezing one: the shipped install is pipx, whose venv has no
+  `pip` on `PATH`, so there the line is `pipx inject`.
 - **Local write** — a write whose target is this machine, not Telegram: a rule
   file, a runner-held schedule row. It carries a plan, a readback and an audit
   line like any other write; its preflight is empty because no Telegram right

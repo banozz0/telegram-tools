@@ -22,6 +22,7 @@ from telegram_tools._core.redaction import redact_text
 from telethon.tl.functions.messages import DeleteScheduledMessagesRequest, GetScheduledHistoryRequest
 from telethon.tl.types import InputUserSelf
 from telegram_tools import archive as archive_store
+from telegram_tools import extras
 from telegram_tools import login
 from telegram_tools import profiles as profile_store
 from telegram_tools.adapters import AccountIdentity, ChatPermissions, ChatTargets, Rights
@@ -2710,13 +2711,15 @@ async def _run_auth(args, config, *, report: Reporter, home: Path | None = None)
         return await _run_logout(profile, config, report=report, read=read, write=write)
 
     if args.qr and not login.qr_available():
+        # The install command is in the message as well as the hint: human mode
+        # prints only the message, and a refusal with no way out is worse than
+        # no refusal at all. It is derived, never frozen: the shipped install is
+        # pipx, where a pip line is `command not found` (card agent-bo-95422362).
+        how = extras.install_hint("qr")
         raise CommandError(
-            # The install command is in the message as well as the hint: human
-            # mode prints only the message, and a refusal with no way out is
-            # worse than no refusal at all.
-            f"Logging in by QR needs the qr extra, which is not installed. Install it with: {login.QR_EXTRA_HINT}",
+            f"Logging in by QR needs the qr extra, which is not installed. Install it with: {how}",
             code="CONFIG_MISSING",
-            hint=login.QR_EXTRA_HINT,
+            hint=how,
         )
 
     write(f"Logging in to profile {name!r}.")
