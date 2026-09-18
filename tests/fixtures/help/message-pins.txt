@@ -1,0 +1,8 @@
+usage: telegram-tools message pins [-h] --chat CHAT [--topic TOPIC]
+                                   [--limit N]
+
+options:
+  -h, --help     show this help message and exit
+  --chat CHAT    Chat/channel username, link, or ID whose pins to list
+  --topic TOPIC  Topic ID whose pins to list; omit for the whole chat
+  --limit N      Stop after this many pinned messages (default 100)

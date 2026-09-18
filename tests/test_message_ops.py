@@ -17,6 +17,7 @@ from types import SimpleNamespace
 
 import pytest
 from telethon.errors import ChatWriteForbiddenError, ReactionsTooManyError
+from telethon.tl.types import InputMessagesFilterPinned
 
 from telegram_tools import archive as archive_store
 from telegram_tools import cli
@@ -89,6 +90,9 @@ class FakeClient:
         # An admin who may post in the channel as well as moderate the forum.
         self.rights = rights if rights is not None else admin("delete_messages", "edit_messages", "pin_messages", "post_messages")
         self.calls: list[tuple] = []
+        # What each history walk asked Telegram for, so a test can say the pins
+        # walk is a filtered search and not a plain read of the chat.
+        self.iter_calls: list[dict] = []
         self.next_id = 5000
         # Telegram keeps a draft per scope: one on the chat's dialog, one on
         # each forum topic. The fake keeps them apart for the same reason the
@@ -140,10 +144,17 @@ class FakeClient:
             return [store.get(int(number)) for number in ids]
         return store.get(int(ids))
 
-    async def iter_messages(self, peer, *, offset_id=None, min_id=0, reply_to=None, wait_time=None, **_):
+    async def iter_messages(self, peer, *, offset_id=None, min_id=0, reply_to=None, wait_time=None, filter=None, limit=None, **_):
         chat = self._chat(peer)
         rows = sorted(self.rows.get(chat, {}).values(), key=lambda row: -row.id)
+        self.iter_calls.append({"chat": chat, "reply_to": reply_to, "filter": filter, "limit": limit})
+        sent = 0
         for row in rows:
+            # Telegram's pinned filter is a `messages.search` over the chat's
+            # own history, so the fake answers it the way the server does:
+            # every pinned message in the chat, topics included, and nothing else.
+            if isinstance(filter, InputMessagesFilterPinned) and not row.pinned:
+                continue
             if reply_to is not None and getattr(getattr(row, "reply_to", None), "reply_to_msg_id", None) != reply_to:
                 continue
             if offset_id is not None and row.id >= offset_id:
@@ -151,6 +162,9 @@ class FakeClient:
             if min_id and row.id <= min_id:
                 continue
             yield row
+            sent += 1
+            if limit is not None and sent >= limit:
+                return
 
     # -- writes ---------------------------------------------------------
     def _new(self, chat, text, **extra):
@@ -1509,3 +1523,117 @@ def test_a_confirmed_send_from_the_menu_lands_one_sentence_and_its_read_back_abo
         "Read back: message 5001 is in Team Hermes",
     ]
     assert not any(line.lstrip().startswith(("{", "}", '"message_id"')) for line in lines)
+
+
+# -- pins: the one verb under `message` that only reads ---------------------
+
+
+def _pinned_rows():
+    """A forum whose pins are spread over a topic and General, plus an unpinned row."""
+    return {
+        FORUM_ID: {
+            10: _message(10, own=True, topic=141),
+            11: _message(11, topic=141, pinned=True),
+            12: _message(12, pinned=True),  # no reply header: General's
+            13: _message(13, own=True, topic=141, pinned=True),
+        },
+        CHANNEL_ID: {300: _message(300, own=True)},
+    }
+
+
+def test_pins_lists_the_chat_s_pinned_messages_newest_first_through_a_filtered_search(run_cli, capsys, home):
+    code, out, _err, fake = run_cli(["message", "pins", "--chat", FORUM], client=FakeClient(rows=_pinned_rows()), capsys=capsys)
+
+    assert code == 0, out
+    assert "3 pinned message(s) in Team Hermes (-1001000000001), newest message first" in out
+    body = out[out.index("newest message first"):]
+    assert [line.split("\t")[0] for line in body.splitlines()[2:] if line.strip()] == ["13", "12", "11"]
+    # The walk is Telegram's pinned search over the chat, not a read of its history.
+    walk = fake.iter_calls[-1]
+    assert isinstance(walk["filter"], InputMessagesFilterPinned) and walk["reply_to"] is None
+
+
+def test_pins_of_one_topic_are_taken_out_of_the_chat_s_pinned_search(run_cli, capsys, home):
+    code, out, _err, fake = run_cli(["message", "pins", "--chat", FORUM, "--topic", "141"], client=FakeClient(rows=_pinned_rows()), capsys=capsys)
+
+    assert code == 0, out
+    assert "2 pinned message(s) in Team Hermes \u203a Deploys (-1001000000001:141), newest message first" in out
+    # `reply_to` would be getReplies, which drops the filter: the topic is
+    # matched on the message's own header instead.
+    assert fake.iter_calls[-1]["reply_to"] is None
+    assert "12" not in out.split("newest message first")[1]
+
+
+def test_pins_of_general_are_the_pinned_messages_no_topic_header_names(run_cli, capsys, home):
+    client = FakeClient(rows=_pinned_rows())
+    # General is a topic Telegram lists like any other; what it never does is
+    # put its id in the header of a message posted there.
+    client.topics[FORUM_ID].append(SimpleNamespace(id=1, title="General", top_message=1))
+    code, out, _err, _fake = run_cli(["message", "pins", "--chat", FORUM, "--topic", "1"], client=client, capsys=capsys)
+
+    assert code == 0, out
+    assert "1 pinned message(s) in" in out and "12" in out.split("newest message first")[1]
+
+
+def test_pins_stops_at_the_limit_and_asks_telegram_for_no_more_than_that(run_cli, capsys, home):
+    code, out, _err, fake = run_cli(["message", "pins", "--chat", FORUM, "--limit", "1"], client=FakeClient(rows=_pinned_rows()), capsys=capsys)
+
+    assert code == 0, out
+    assert "1 pinned message(s) in" in out
+    assert fake.iter_calls[-1]["limit"] == 1
+
+
+def test_pins_says_so_when_nothing_is_pinned(run_cli, capsys, home):
+    code, out, _err, _fake = run_cli(["message", "pins", "--chat", CHANNEL], client=FakeClient(rows=_pinned_rows()), capsys=capsys)
+
+    assert code == 0
+    assert "No pinned messages in Alerts (-1001000000003)." in out
+
+
+def test_the_pins_envelope_carries_search_rows_and_no_pin_time_because_telegram_keeps_none(run_cli, capsys, home):
+    code, out, _err, _fake = run_cli(["--json", "message", "pins", "--chat", FORUM], client=FakeClient(rows=_pinned_rows()), capsys=capsys)
+
+    assert code == 0, out
+    envelope = envelope_of(out)
+    assert envelope["status"] == "ok" and envelope["result"]["matched"] == 3
+    assert [row["id"] for row in envelope["result"]["pins"]] == [13, 12, 11]
+    assert all("pinned_at" not in row for row in envelope["result"]["pins"])
+    # A read: no plan rides on it and nothing is audited.
+    assert envelope.get("plan") is None
+    assert audit_lines(home) == []
+
+
+def test_an_empty_pins_run_is_status_empty(run_cli, capsys, home):
+    code, out, _err, _fake = run_cli(["--json", "message", "pins", "--chat", CHANNEL], client=FakeClient(rows=_pinned_rows()), capsys=capsys)
+
+    assert code == 0
+    assert envelope_of(out)["status"] == "empty" and envelope_of(out)["result"]["pins"] == []
+
+
+def test_pins_refuses_a_topic_the_chat_does_not_have(run_cli, capsys, home):
+    code, out, _err, _fake = run_cli(["--json", "message", "pins", "--chat", FORUM, "--topic", "999"], client=FakeClient(rows=_pinned_rows()), capsys=capsys)
+
+    assert code == 2
+    assert envelope_of(out)["error"]["code"] == "TARGET_NOT_FOUND"
+
+
+def test_pins_refuses_under_as_bot_before_anything_connects(capsys, home, monkeypatch):
+    """`messages.search` is a method Telegram marks users-only, so a bot never gets there."""
+    monkeypatch.setattr(cli, "create_client", lambda _config: (_ for _ in ()).throw(AssertionError("must not connect")))
+    code = cli.main(["--json", "--as-bot", "alerts", "message", "pins", "--chat", FORUM])
+    out = capsys.readouterr().out
+
+    assert code == 2
+    error = envelope_of(out)["error"]
+    assert error["code"] == "IDENTITY_MODE_UNSUPPORTED"
+    assert "messages.search" in error["message"] + error.get("hint", "")
+    assert error["hint"] == f"telegram-tools --json message pins --chat {FORUM}"
+
+
+def test_pins_under_jsonl_streams_one_row_per_pin_then_the_envelope(run_cli, capsys, home):
+    code, out, _err, _fake = run_cli(["--jsonl", "message", "pins", "--chat", FORUM], client=FakeClient(rows=_pinned_rows()), capsys=capsys)
+
+    lines = [json.loads(line) for line in out.splitlines()]
+    assert code == 0
+    assert [line["id"] for line in lines[:-1]] == [13, 12, 11]
+    assert lines[-1]["kind"] == "envelope" and lines[-1]["result"]["matched"] == 3

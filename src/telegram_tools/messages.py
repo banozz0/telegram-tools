@@ -89,6 +89,13 @@ ACCOUNT_ONLY_VERBS = ("read", "unread", "bookmark", "draft")
 # What `--as-bot` may run: every verb the platform lets a bot perform, where
 # the bot is a member and holds the right the verb needs.
 BOT_VERBS = tuple(verb for verb in VERBS if verb not in ACCOUNT_ONLY_VERBS)
+# The verbs under `message` that only read. They are not in `VERBS`: there is
+# no `Op` for them, because an op is a plan, a gate, a mutation and an audit
+# line, and a read has none of the four. They are account-only for a reason of
+# Telegram's own -- `messages.search`, which is how pins are read, is a method
+# it marks "only users can use" -- so they are absent from `BOT_VERBS` too and
+# `--as-bot` refuses them before anything connects.
+READ_VERBS = ("pins",)
 
 @dataclass(frozen=True)
 class Op:
@@ -901,6 +908,7 @@ __all__ = [
     "BULK_VERBS",
     "DESTINATION_VERBS",
     "OPS",
+    "READ_VERBS",
     "SINGLE_VERBS",
     "VERBS",
     "Brief",

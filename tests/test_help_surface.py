@@ -98,6 +98,7 @@ COMMANDS = {
     "message-unread": ("message", "unread"),
     "message-bookmark": ("message", "bookmark"),
     "message-draft": ("message", "draft"),
+    "message-pins": ("message", "pins"),
     "review": ("review",),
     "review-list": ("review", "list"),
     "review-approve": ("review", "approve"),
@@ -258,6 +259,14 @@ ALLOWED_ADDITIONS = {
     # required group, which is the rewrite below.
     "message-draft": (
         "--clear Remove the draft this chat or topic holds instead of writing one",
+    ),
+    # The Telegram pins card (agent-bo-95422317): one new verb under `message`,
+    # the only one there that reads. It is last in the list, so the addition is
+    # the comma and the word in both the usage line and the positional heading,
+    # plus its own row.
+    "message": (
+        ",pins",
+        "pins List a chat's or topic's pinned messages (a read; account only)",
     ),
     # The manage-polish card (agent-bo-95422301): `invite revoke`'s y/N is about
     # one link, so its human preview shows the link the person typed; the plan,

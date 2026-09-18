@@ -16,7 +16,7 @@ Built on [Telethon](https://github.com/LonamiWebs/Telethon). Everything runs on 
 - **`review`** — the links and files the archive has seen, in one queue, and the only way anything is ever downloaded: `review list` shows them (asking nothing of any host), `review approve` fetches the ones you pick into quarantine after a `y/N`, the built-in checks and an optional local ClamAV give each a verdict, and `review accept` moves a file into `~/.telegram-tools/media/` after showing that verdict, behind a second `y/N`. Neither gate has a `--yes`. See [The review queue](#the-review-queue).
 - **`clear-messages`** — deletes all messages inside selected forum topic(s) while preserving the topics and their IDs. Dry-run by default; deleting requires both `--execute` *and* typing `DELETE` at a prompt.
 - **`send`** — posts a message, a file, or both to a chat or into one forum topic, optionally as a reply (`--reply-to`). Shows you the whole message, its destination and every `@mention` in it, then asks `y/N`.
-- **`message`** — what you do to a message once it exists: `reply`, `edit`, `delete`, `forward`, `copy`, `react`, `unreact`, `pin`, `unpin`, `poll`, `typing`, `read`, `unread`, `bookmark`, `draft`. Each shows the chat and the message it is about to act on, then asks. Deleting is dry-run by default, bounded, and needs `--execute` plus a typed `DELETE`. See [Message tools](#message-tools).
+- **`message`** — what you do to a message once it exists: `reply`, `edit`, `delete`, `forward`, `copy`, `react`, `unreact`, `pin`, `unpin`, `poll`, `typing`, `read`, `unread`, `bookmark`, `draft`, and `pins`, which only reads: what a chat or one of its topics has pinned. Each shows the chat and the message it is about to act on, then asks. Deleting is dry-run by default, bounded, and needs `--execute` plus a typed `DELETE`. See [Message tools](#message-tools).
 - **`create`** — makes a supergroup (optionally with topics already on), a broadcast channel, or a topic inside a forum group, and prints the new ID.
 - **`delete`** — removes a supergroup, a broadcast channel, or a forum topic: the thing itself, not just its messages. Dry-run by default; deleting requires `--execute` *and* typing the target's exact title at a prompt. It deletes exactly what `create` can make, so nothing this tool removes is beyond making again.
 - **`leave`** — takes this account out of a group or channel. Nothing in it is deleted and everyone else stays; what goes is your seat. Dry-run by default, and leaving requires `--execute` *and* typing the chat's exact title at a terminal. A chat you **created** is refused in both modes: Telegram does not let a creator leave its own chat, so `leave` says so and points you at transferring ownership in Telegram or at `delete`. And a leave Telegram will not confirm afterwards is reported `partial` (exit 1) with `left: "unverified"`, never as done.
@@ -267,6 +267,10 @@ telegram-tools message reply --chat -1001234567890 --to 4812 --text "on it"
 telegram-tools message react --chat -1001234567890 --id 4812 --emoji 🔥
 telegram-tools message pin --chat -1001234567890 --id 4812
 
+# What a chat, or one topic in it, has pinned (a read: nothing to confirm)
+telegram-tools message pins --chat -1001234567890
+telegram-tools message pins --chat -1001234567890 --topic 141
+
 # Delete messages: dry-run first, then --execute and type DELETE
 telegram-tools message delete --chat -1001234567890 --ids 4812,4813
 telegram-tools message delete --chat -1001234567890 --from-search "deploy AND red" --execute
@@ -346,8 +350,18 @@ menu does, from a terminal. The verbs:
 | `read` / `unread` | marks the chat read, or unread | — |
 | `bookmark` | forwards to Saved Messages and writes a `bookmarks` row in the archive | `--id MSG`, `--label` |
 | `draft` | saves a draft in the chat, or a topic in it | `--text`, `--topic` |
+| `pins` | lists what is pinned, newest message first; a read, so no preview and no gate | `--topic`, `--limit` (100 by default) |
 
-Every verb resolves the chat, fetches the message it is about to act on, and shows both
+`pins` is the one verb here that only reads. Telegram serves pins as a search over the
+chat's own history, so they come back newest *message* first and not in the order
+somebody pinned them, and each row is the row `search` prints — Telegram records no pin
+time any client can read, so nothing here claims to know when a message was pinned. A
+forum topic's pins are that topic's alone. It builds no plan, asks nothing and writes no
+audit line; what it does check first is that the chat opens and that a named topic is one
+the chat has. `messages.search` is a method Telegram marks users-only, so `--as-bot`
+refuses it with `IDENTITY_MODE_UNSUPPORTED` before anything connects.
+
+Every writing verb resolves the chat, fetches the message it is about to act on, and shows both
 — the chat, and the message's id, date, sender and first line — before asking. A
 message id that is not there refuses with `TARGET_NOT_FOUND` before any prompt.
 Once it is done, a verb says so in one sentence, as `send` does —
@@ -374,7 +388,7 @@ Someone else's message needs the delete-messages right; your own needs none.
 
 **Everything else is `send`'s gate.** A preview and a `y/N`; `--yes` skips it only when
 the chat the write lands in — `--to` for `forward` and `copy`, `--chat` otherwise — is
-in `TELEGRAM_SEND_ALLOWLIST`. `read`, `unread`, `bookmark` and `draft` are the
+in `TELEGRAM_SEND_ALLOWLIST`. `read`, `unread`, `bookmark`, `draft` and `pins` are the
 account's own and refuse under `--as-bot`; the rest run as the bot where it is a member
 and holds the right.
 
@@ -829,6 +843,7 @@ for a code or a password. Relay the refusal and let the person run it.
 | `create` | No — makes new things, changes nothing existing, after a `y/N` unless you pass `--yes` |
 | `send` | Outward-facing — posts publicly as you (text, files, or both), after showing the whole message and asking `y/N`. `--yes` skips the prompt only for destinations in `TELEGRAM_SEND_ALLOWLIST`. Under `--as-bot` it posts as that bot, only into chats the bot is in, behind the same preview and the same allowlist |
 | `message reply/edit/forward/copy/react/unreact/pin/unpin/poll/typing/read/unread/bookmark/draft` | Outward-facing where it posts, visible to the chat where it reacts or pins — each shows the chat and the message it acts on, then asks `y/N`; `--yes` only for a landing chat in `TELEGRAM_SEND_ALLOWLIST`. `edit` of someone else's message needs the edit right, `pin` the pin right |
+| `message pins` | No — a read. Lists what a chat or one of its topics has pinned; no preview, no prompt, no audit line. Account only: `messages.search`, which is how Telegram serves pins, is a method it marks users-only |
 | `message delete` | Yes — messages, for everyone. Dry-run by default and lists every id; only with `--execute` **and** a typed `DELETE`, never more than `--limit` (200) without raising it, never more than 1000 without `--i-know` and the count typed too; there is no `--yes`. Someone else's message needs the delete-messages right |
 | `bots` | No — changes settings on bots you own, after a diff and a `y/N` unless you pass `--yes`; reversible if you still have the old values, but `--remove-photo` and `--clear-commands` discard data Telegram will not hand back |
 | `clear-messages` | Yes — but only with `--execute` **and** a typed `DELETE`, only messages, never topics |

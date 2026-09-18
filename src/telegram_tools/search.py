@@ -3,13 +3,16 @@ from __future__ import annotations
 from typing import Any
 
 from telethon.errors.rpcbaseerrors import BadRequestError
+from telethon.tl.types import InputMessagesFilterPinned
 
 from telegram_tools.envelope import CommandError
+from telegram_tools.manage import GENERAL_TOPIC_ID
 from telegram_tools.records import (
     message_matches_filters,
     message_to_record,
     parse_date_bound,
     record_marks,
+    topic_id_for_message,
 )
 from telegram_tools.topics import get_forum_topics, in_id_order
 
@@ -34,11 +37,14 @@ def _truncate(value: str, max_length: int = 80) -> str:
     return value[: max_length - 1] + "..."
 
 
-def format_message_records(records: list[dict[str, Any]]) -> str:
+def format_message_records(records: list[dict[str, Any]], *, heading: str = "Messages", empty: str = "No messages found.") -> str:
+    # `heading` and `empty` are what a caller with its own two sentences about
+    # the same rows says instead -- `pins` counts them and names the order,
+    # because pins arrive in one a search's rows never promised.
     if not records:
-        return "No messages found."
+        return empty
 
-    lines = ["Messages", "--------------------------------------------"]
+    lines = [heading, "--------------------------------------------"]
     for record in records:
         sender = record.get("sender_username") or record.get("sender_id") or ""
         topic = record.get("topic_id") or ""
@@ -159,3 +165,70 @@ async def search_messages(
 
     # Newest first, the order one pass returned, and never more rows than asked.
     return sorted(found.values(), key=lambda record: record["id"], reverse=True)[:limit]
+
+
+# -- pinned messages -------------------------------------------------------
+
+
+# How many pinned messages a walk reads before it stops, when `--limit` says
+# nothing. Telegram sets no ceiling on how many messages a chat may hold
+# pinned, and this is a read nobody gates, so it is bounded by default rather
+# than left to walk a channel with a thousand of them.
+PINS_LIMIT = 100
+
+
+async def pinned_messages(
+    client,
+    chat: Any,
+    *,
+    chat_id: int | None = None,
+    topic_id: int | None = None,
+    limit: int | None = None,
+    chat_title: str | None = None,
+) -> list[dict[str, Any]]:
+    """A chat's pinned messages, or one forum topic's, newest message first.
+
+    Telegram serves pins as a search over the chat's own history
+    (`InputMessagesFilterPinned`), so they come back in history order -- newest
+    message first -- and not in the order somebody pinned them: Telegram
+    records no pin time any client can read, which is why a row here is a
+    search row exactly as `search` prints it and carries no pinned-at field.
+
+    A topic's pins are taken out of that chat-wide answer rather than asked
+    for on their own, because Telethon's `reply_to` is `messages.getReplies`
+    and replaces the filter: passing both would walk the topic's whole history
+    with nothing filtered. The chat's pinned search already covers every topic
+    in it, so the topic is matched here, on the message's own header --
+    General names none, and every message in a forum is in a topic, so a
+    pinned message with no header is General's.
+    """
+    wanted = PINS_LIMIT if limit is None else limit
+    kwargs: dict[str, Any] = {
+        "filter": InputMessagesFilterPinned(),
+        # A topic drops rows after Telegram counted them, so the walk cannot
+        # ask Telegram for the number it means to keep.
+        "limit": None if topic_id is not None else wanted,
+        "wait_time": 1,
+    }
+    records: list[dict[str, Any]] = []
+    try:
+        async for message in client.iter_messages(chat, **kwargs):
+            if topic_id is not None and (topic_id_for_message(message) or GENERAL_TOPIC_ID) != topic_id:
+                continue
+            records.append(message_to_record(message, chat_id=chat_id, topic_id=topic_id))
+            if len(records) >= wanted:
+                break
+    except BadRequestError as exc:
+        if getattr(exc, "message", "") != "TOPIC_ID_INVALID" or topic_id is None:
+            raise
+        raise await _topic_not_found(client, chat, topic_id, chat_title) from None
+    return records
+
+
+def format_pins(records: list[dict[str, Any]], *, where: str) -> str:
+    """The pins as the table `search` prints, under a heading that says the order."""
+    return format_message_records(
+        records,
+        heading=f"{len(records)} pinned message(s) in {where}, newest message first",
+        empty=f"No pinned messages in {where}.",
+    )

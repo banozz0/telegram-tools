@@ -2555,6 +2555,7 @@ COPY = ("3", "6")
 REACT = ("3", "7")
 POLL = ("3", "11")
 MARK_READ = ("3", "13")
+PINS = ("3", "17")
 
 
 def test_write_lists_send_and_every_message_verb():
@@ -2578,8 +2579,32 @@ def test_write_lists_send_and_every_message_verb():
         "14. Mark a chat unread",
         "15. Bookmark a message (Saved Messages)",
         "16. Save a draft",
+        "17. List pinned messages",
     ):
         assert row in text, row
+
+
+def test_pins_lists_a_chat_s_pins_from_the_last_row_under_write():
+    """A read, so the run row says what it does and no gate is anywhere near it."""
+    # 3 17 = write > pins, 1 = forum groups, 1 = Hermes, 3 = List them, Enter = menu, 0 = exit
+    code, calls, output = run_menu([PINS, "1", "1", "3", "", "0"])
+
+    assert code == 0
+    args = calls[0]
+    assert (args.command, args.message_verb, args.chat, args.topic, args.limit) == ("message", "pins", "-100111", None, None)
+    text = screens(output)
+    assert "Main › Write › Pinned messages › Hermes\n" in text
+    assert "3. List them" in text
+
+
+def test_pins_stages_a_topic_and_a_limit():
+    # 1 = Topic, 1 = Deploys, 2 = Limit, 5, 3 = List them
+    code, calls, output = run_menu([PINS, "1", "1", "1", "1", "2", "5", "3", "", "0"])
+
+    assert code == 0
+    args = calls[0]
+    assert (args.topic, args.limit) == (141, 5)
+    assert "Topic        [141 Deploys]" in screens(output)
 
 
 def test_reply_stages_the_message_and_the_text_then_runs_without_yes():
