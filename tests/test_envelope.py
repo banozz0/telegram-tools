@@ -16,7 +16,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from telethon.errors import UserNotParticipantError
+from telethon.errors import ChatWriteForbiddenError, FloodWaitError, UserNotParticipantError
 from telethon.tl.types import ChatBannedRights, InputPeerUser, PeerChannel, User
 
 from telegram_tools import cli
@@ -361,6 +361,44 @@ def test_a_send_the_chats_defaults_forbid_is_refused_by_name(run_cli, monkeypatc
     assert (code, envelope["error"]["code"]) == (2, "PERMISSION_DENIED")
     assert "send_messages" in envelope["error"]["message"]
     assert fake.sent == []
+
+
+def test_a_send_that_carries_a_file_asks_for_send_media(run_cli, monkeypatch, capsys, tmp_path):
+    """A chat can ban media and allow text, and the probe answers for both.
+
+    Asking only for send_messages let the upload go out to Telegram's own
+    refusal, after the gate (card agent-bo-95422318).
+    """
+    monkeypatch.setenv("TELEGRAM_SEND_ALLOWLIST", str(CHAT_ID))
+    picture = tmp_path / "shot.png"
+    picture.write_bytes(b"not really a png")
+    fake = FakeClient(rights=member())
+    fake.dialogs[0].entity.default_banned_rights = ChatBannedRights(until_date=None, send_media=True)
+
+    code, out, _err, _fake = run_cli(
+        ["--json", "send", "--chat", str(CHAT_ID), "--file", str(picture), "--yes"], client=fake, capsys=capsys
+    )
+
+    envelope = envelope_of(out)
+    assert (code, envelope["error"]["code"]) == (2, "PERMISSION_DENIED")
+    assert "send_media" in envelope["error"]["message"]
+    assert fake.sent == []
+
+
+def test_a_send_with_no_file_asks_for_nothing_extra(run_cli, monkeypatch, capsys):
+    """The same chat, the same member: text alone is what the chat still allows."""
+    monkeypatch.setenv("TELEGRAM_SEND_ALLOWLIST", str(CHAT_ID))
+    fake = FakeClient(rights=member())
+    fake.dialogs[0].entity.default_banned_rights = ChatBannedRights(until_date=None, send_media=True)
+
+    code, out, _err, _fake = run_cli(
+        ["--json", "send", "--chat", str(CHAT_ID), "--text", "ship it", "--yes"], client=fake, capsys=capsys
+    )
+
+    envelope = envelope_of(out)
+    assert (code, envelope["status"]) == (0, "ok")
+    assert envelope["plan"]["preflight"]["required"] == ["send_messages"]
+    assert fake.sent
 
 
 def test_a_direct_chat_send_asks_for_no_rights_and_warns_nothing(run_cli, monkeypatch, capsys):
@@ -732,6 +770,64 @@ def test_a_cancelled_gate_leaves_no_audit_line(run_cli, home, capsys):
     # Not done is exit 1, and nothing happened, so nothing is recorded.
     assert (code, envelope["status"]) == (1, "cancelled")
     assert len(fake.messages) == 2
+    assert not (home / ".telegram-tools" / "audit.jsonl").exists()
+
+
+# -- a write Telegram refused -------------------------------------------------
+#
+# Every executed write leaves one audit line, and a call the platform answered
+# with a refusal is an executed write: it went out after the gate. Only `review
+# approve` and `review retry` recorded one, so every other refused call left
+# nothing at all behind (card agent-bo-95422312).
+
+
+class RefusingClient(FakeClient):
+    """Everything a send needs, and a platform that says no when the call goes out."""
+
+    def __init__(self, error):
+        super().__init__()
+        self.error = error
+
+    async def send_message(self, peer, text, reply_to=None):
+        raise self.error
+
+
+@pytest.mark.parametrize(
+    "error, code, platform",
+    [
+        (ChatWriteForbiddenError(None), "PLATFORM_ERROR", "ChatWriteForbiddenError"),
+        (FloodWaitError(SimpleNamespace(seconds=30)), "RATE_LIMITED", "FloodWaitError"),
+    ],
+    ids=["forbidden", "flood-wait"],
+)
+def test_a_write_the_platform_refuses_leaves_one_failed_audit_line(run_cli, monkeypatch, capsys, home, error, code, platform):
+    monkeypatch.setenv("TELEGRAM_SEND_ALLOWLIST", str(CHAT_ID))
+    fake = RefusingClient(error)
+
+    exit_code, out, _err, _fake = run_cli(
+        ["--json", "send", "--chat", str(CHAT_ID), "--text", "ship it", "--yes"], client=fake, capsys=capsys
+    )
+
+    envelope = envelope_of(out)
+    assert (exit_code, envelope["status"]) == (2, "failed")
+    assert (envelope["error"]["code"], envelope["error"]["platform"]) == (code, platform)
+    lines = [json.loads(line) for line in (home / ".telegram-tools" / "audit.jsonl").read_text().splitlines()]
+    assert len(lines) == 1
+    assert lines[0]["command"] == "send" and lines[0]["status"] == "failed"
+    assert lines[0]["plan_id"] == envelope["plan"]["plan_id"]
+    assert lines[0]["evidence"]["readback"].startswith("unverified:")
+    assert platform in lines[0]["evidence"]["readback"]
+
+
+def test_a_write_this_tool_refuses_before_the_call_leaves_nothing(run_cli, capsys, home):
+    """A preflight refusal is not an executed write, and the log says what happened."""
+    fake = FakeClient(rights=member("send_messages"))
+
+    code, out, _err, _fake = run_cli(
+        ["--json", "send", "--chat", str(CHAT_ID), "--text", "ship it", "--yes"], client=fake, capsys=capsys
+    )
+
+    assert (code, envelope_of(out)["status"]) == (2, "refused")
     assert not (home / ".telegram-tools" / "audit.jsonl").exists()
 
 

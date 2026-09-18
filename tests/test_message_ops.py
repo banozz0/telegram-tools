@@ -16,7 +16,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from telethon.errors import ReactionsTooManyError
+from telethon.errors import ChatWriteForbiddenError, ReactionsTooManyError
 
 from telegram_tools import archive as archive_store
 from telegram_tools import cli
@@ -564,6 +564,10 @@ def test_a_subscriber_cannot_post_into_a_broadcast_channel(run_cli, capsys, home
     assert code == 2
     error = envelope_of(out)["error"]
     assert error["code"] == "PERMISSION_DENIED" and "send_messages" in error["message"]
+    # The chat that said no is the one it lands in, not the one it reads from
+    # (card agent-bo-95422318).
+    assert "Alerts" in error["message"] and "Team Hermes" not in error["message"]
+    assert "Alerts" in error["hint"]
     assert fake.calls == []
 
 
@@ -575,8 +579,29 @@ def test_edit_of_another_persons_message_needs_the_edit_right(run_cli, capsys, h
     assert fake.calls == []
 
 
+def test_a_verb_the_platform_refuses_leaves_one_failed_audit_line(run_cli, capsys, home):
+    """The same rule as `send`, from a different handler: one line, status failed."""
+
+    class RefusingClient(FakeClient):
+        async def pin_message(self, peer, message_id, **_):
+            raise ChatWriteForbiddenError(None)
+
+    code, out, _err, _fake = run_cli(
+        ["--json", "message", "pin", "--chat", FORUM, "--id", "11"], client=RefusingClient(), capsys=capsys, answers=("y",)
+    )
+
+    envelope = envelope_of(out)
+    assert (code, envelope["status"]) == (2, "failed")
+    lines = audit_lines(home)
+    assert len(lines) == 1
+    assert (lines[0]["command"], lines[0]["status"]) == ("message pin", "failed")
+    assert lines[0]["evidence"]["readback"].startswith("unverified:")
+
+
 def test_pin_without_the_right_is_refused_by_name(run_cli, capsys, home):
-    client = FakeClient(rights=member())
+    # A member restricted from pinning: a chat that bans nobody lets its members
+    # pin, which is what Telegram's default rights say (card agent-bo-95422318).
+    client = FakeClient(rights=member("pin_messages"))
     code, out, _err, fake = run_cli(["--json", "message", "pin", "--chat", FORUM, "--id", "11"], client=client, capsys=capsys, answers=("y",))
 
     assert code == 2

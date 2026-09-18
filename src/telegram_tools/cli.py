@@ -8,7 +8,7 @@ import sys
 from functools import partial
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Sequence
+from typing import Any, Sequence
 
 from telegram_tools._core import export as _export
 from telegram_tools._core import rid as _rid
@@ -22,6 +22,7 @@ from telegram_tools._core.redaction import redact_text
 from telethon.tl.functions.messages import DeleteScheduledMessagesRequest, GetScheduledHistoryRequest
 from telethon.tl.types import InputUserSelf
 from telegram_tools import archive as archive_store
+from telegram_tools import extras
 from telegram_tools import login
 from telegram_tools import profiles as profile_store
 from telegram_tools.adapters import AccountIdentity, ChatPermissions, ChatTargets, Rights
@@ -62,7 +63,7 @@ from telegram_tools.delete import (
 )
 from telegram_tools.discovery import classify_entity, discover_chats, filter_chats, format_discovery_table
 from telegram_tools.doctor import require_tight_modes, run_doctor
-from telegram_tools.envelope import BROKE, PLATFORM, PREFIX, TOOL, ApprovalRequired, CommandError, Reporter, account_command, error_for, platform_error
+from telegram_tools.envelope import BROKE, PLATFORM, PREFIX, TOOL, ApprovalRequired, CommandError, Reporter, error_for, platform_error
 from telegram_tools.exporters import SEARCH_FORMATS, json_text, write_records
 from telegram_tools import messages as message_ops
 from telegram_tools.prompts import BACK, pick_many
@@ -87,6 +88,9 @@ from telegram_tools import __version__
 # Telegram's own vocabulary so a refusal can be read straight into the app.
 CLEAR_RIGHTS = ("delete_messages",)
 SEND_RIGHTS = ("send_messages",)
+# A chat can ban media while it allows text, and the probe answers for both, so
+# a send that carries a file asks for both (card agent-bo-95422318).
+SEND_FILE_RIGHTS = ("send_messages", "send_media")
 # A topic is opened by posting its service message, so posting is the right.
 CREATE_TOPIC_RIGHTS = ("send_messages",)
 # Telegram lets only a chat's creator delete it, which is what the preview says.
@@ -930,7 +934,7 @@ def _local_identity(config, report: Reporter) -> Identity | None:
             name = getattr(config, "profile", profile_store.DEFAULT_PROFILE)
             report.warn(
                 f"profile {name!r} has no record of which account it is, so this run is unsigned; "
-                "`telegram-tools auth` writes one"
+                f"`telegram-tools --profile {name} auth` writes one"
             )
             return None
         report.set_identity(identity)
@@ -1168,7 +1172,7 @@ def _review_io(report: Reporter) -> dict:
 def _review_rows(queue, ids: list[str], *, state: str, what: str) -> list:
     """The candidates `--ids` names, each checked to be in `state` before anything moves."""
     if not ids:
-        raise ValueError(f"Nothing selected: pass --ids with at least one candidate id from `review list`.")
+        raise ValueError("Nothing selected: pass --ids with at least one candidate id from `review list`.")
     rows = []
     for manifest_id in ids:
         try:
@@ -1484,6 +1488,9 @@ async def _run_send(client, args, config, *, report: Reporter | None = None) -> 
     rights = await _rights(client, report, resolved)
     identity = await _acting(client, report)
     mutation_params = {"files": len(files), "text": bool(text)}
+    # A chat may ban media and allow text: what this send carries decides what
+    # the preflight asks for.
+    send_required = SEND_FILE_RIGHTS if files else SEND_RIGHTS
     if reply_to is not None:
         mutation_params["reply_to"] = int(reply_to)
     if at is not None:
@@ -1495,12 +1502,12 @@ async def _run_send(client, args, config, *, report: Reporter | None = None) -> 
         mutations=[Mutation("send_message", destination.rid, mutation_params)],
         approval="yes_allowlist" if args.yes else "prompt_y",
         rights=rights,
-        required=SEND_RIGHTS,
+        required=send_required,
     )
     report.set_plan(plan)
     for warning in warnings:
         report.warn(warning)
-    require_rights(plan, rights, SEND_RIGHTS)
+    require_rights(plan, rights, send_required)
 
     confirm = None
     if args.yes:
@@ -1534,7 +1541,7 @@ async def _run_send(client, args, config, *, report: Reporter | None = None) -> 
             mutations=[Mutation("send_message", fresh.rid, mutation_params)],
             approval="yes_allowlist" if args.yes else "prompt_y",
             rights=rights,
-            required=SEND_RIGHTS,
+            required=send_required,
         )[0]
 
     result = await send_message(
@@ -1723,7 +1730,13 @@ async def _run_message(client, args, config, *, report: Reporter | None = None) 
     report.set_plan(plan)
     for warning in warnings:
         report.warn(warning)
-    require_rights(plan, rights if verb not in message_ops.DESTINATION_VERBS else to_rights, required)
+    destination_verb = verb in message_ops.DESTINATION_VERBS
+    require_rights(
+        plan,
+        to_rights if destination_verb else rights,
+        required,
+        where=to_target if destination_verb else target,
+    )
     if verb == "delete" and others:
         # The gate clear-messages has always had: an unknown right refuses a
         # delete that reaches other people's messages, rather than letting
@@ -2711,13 +2724,15 @@ async def _run_auth(args, config, *, report: Reporter, home: Path | None = None)
         return await _run_logout(profile, config, report=report, read=read, write=write)
 
     if args.qr and not login.qr_available():
+        # The install command is in the message as well as the hint: human mode
+        # prints only the message, and a refusal with no way out is worse than
+        # no refusal at all. It is derived, never frozen: the shipped install is
+        # pipx, where a pip line is `command not found` (card agent-bo-95422362).
+        how = extras.install_hint("qr")
         raise CommandError(
-            # The install command is in the message as well as the hint: human
-            # mode prints only the message, and a refusal with no way out is
-            # worse than no refusal at all.
-            f"Logging in by QR needs the qr extra, which is not installed. Install it with: {login.QR_EXTRA_HINT}",
+            f"Logging in by QR needs the qr extra, which is not installed. Install it with: {how}",
             code="CONFIG_MISSING",
-            hint=login.QR_EXTRA_HINT,
+            hint=how,
         )
 
     write(f"Logging in to profile {name!r}.")
@@ -3992,6 +4007,24 @@ async def run_as_bot(args, config, *, report: Reporter) -> int:
 
 
 async def run(args, *, client=None, config=None, report: Reporter | None = None, acting: Identity | None = None) -> int:
+    """Run one command, and record it when the platform refuses it.
+
+    Every write that reaches Telegram passes through here -- the flag path and
+    the menu both call this, and this is where the audit log is opened -- so it
+    is the one place a call that went out and came back refused can be written
+    down without a wrapper at each of two dozen call sites. `audit_failure`
+    decides what counts: a platform answer, never a refusal this tool made on
+    its own before any call (card agent-bo-95422312).
+    """
+    report = report or Reporter()
+    try:
+        return await _dispatch(args, client=client, config=config, report=report, acting=acting)
+    except BaseException as exc:
+        report.audit_failure(error_for(exc) or platform_error(exc))
+        raise
+
+
+async def _dispatch(args, *, client=None, config=None, report: Reporter | None = None, acting: Identity | None = None) -> int:
     """Run one command.
 
     The menu passes its own already-started client so a whole menu session is one

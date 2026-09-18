@@ -27,6 +27,7 @@ import getpass
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from telegram_tools import extras
 from telegram_tools.envelope import CommandError
 
 # How long one QR block is shown before a fresh one replaces it. Telegram's
@@ -35,8 +36,6 @@ from telegram_tools.envelope import CommandError
 QR_REFRESH_SECONDS = 30.0
 # How many times a QR is redrawn before the command gives up on a scan.
 QR_ATTEMPTS = 20
-
-QR_EXTRA_HINT = "pip install 'telegram-tools[qr]'"
 
 
 class LoginRequired(CommandError):
@@ -71,7 +70,7 @@ def render_qr(url: str) -> str:
         raise CommandError(
             "Showing a QR code needs the qr extra, which is not installed.",
             code="CONFIG_MISSING",
-            hint=QR_EXTRA_HINT,
+            hint=extras.install_hint("qr"),
         ) from exc
     import io
 

@@ -63,7 +63,10 @@ The terms this codebase uses, and the boundaries they imply.
   connects directly when `python-socks` is missing, so `proxy.py` checks the
   import itself and refuses: someone who asked to go through a proxy must never
   silently connect from their own address. The same shape governs `auth --qr`
-  without the `qr` extra.
+  without the `qr` extra. Each refusal names the command that installs the
+  extra, and `extras.install_hint` derives it from where this interpreter lives
+  rather than freezing one: the shipped install is pipx, whose venv has no
+  `pip` on `PATH`, so there the line is `pipx inject`.
 - **Local write** — a write whose target is this machine, not Telegram: a rule
   file, a runner-held schedule row. It carries a plan, a readback and an audit
   line like any other write; its preflight is empty because no Telegram right
@@ -419,16 +422,24 @@ The terms this codebase uses, and the boundaries they imply.
   Telethon's `ParticipantPermissions` answers is_creator, is_admin and the
   admin flags; it never spells `send_messages`, `send_media` or
   `manage_topics`, so those are read off the participant it wraps and the chat
-  entity the resolution fetched. A creator holds every right. An admin holds
-  `manage_topics` from its own `admin_rights`, posts in a broadcast channel
-  only with `post_messages`, and sends in a group whatever its members may
-  not. A member posts nothing in a broadcast channel or once out of the chat,
-  and otherwise holds a send right unless its own `banned_rights` or the
-  chat's `default_banned_rights` sets it; `manage_topics` set there refuses,
+  entity the resolution fetched. `pin_messages`, `change_info` and
+  `invite_users` are read the same way for a member, because Telethon's
+  `_admin_prop` answers all three False for anyone who is not an admin while
+  Telegram lets a chat's defaults grant them to everyone — taking that False as
+  an answer refused pins a member could make. A creator holds every right. An
+  admin holds `manage_topics` from its own `admin_rights`, posts in a broadcast
+  channel only with `post_messages`, and sends in a group whatever its members
+  may not. A member posts nothing in a broadcast channel or once out of the
+  chat, and otherwise holds such a right unless its own `banned_rights` or the
+  chat's `default_banned_rights` sets it — a restriction whose `until_date` has
+  run out no longer binds, and `until_date` 0, which Telethon reads as the
+  epoch, is Telegram's spelling of forever; `send_plain` bans a text message as
+  `send_messages` does; `manage_topics` set there refuses,
   and unset it stays unconfirmed, because Telegram's own documentation
   disagrees on whether an unbanned member may edit topics. A direct chat — a person, or Saved Messages — is not
   asked about at all: it holds the send rights, pin and delete, and nothing an
-  admin would.
+  admin would — and a refusal there says so rather than naming an admin to ask,
+  because a direct chat has none.
 - **Widened rights** — what Telegram sets beyond what a write named, and what
   the preview therefore has to say (`manage.BANNED_FAMILY`,
   `manage.ADMIN_ALWAYS`). One send flag sets the family beneath it — a mute
@@ -608,7 +619,15 @@ The terms this codebase uses, and the boundaries they imply.
   run could confirm, not that it failed.
 - **Audit line** — one redacted JSON line per *executed* write in
   `~/.telegram-tools/audit.jsonl`, from the menu exactly as from a flag. Dry
-  runs and cancellations leave nothing.
+  runs and cancellations leave nothing. A call that went out and came back
+  refused is executed: the line is written with `status: failed` and an
+  `unverified:` readback naming the platform error, because a log that records
+  only the writes that worked cannot answer what this account attempted. A
+  refusal this tool made itself — a missing right, a declined gate, a drifted
+  plan — never reached Telegram and leaves nothing, exactly as a dry run does.
+  `Reporter.audit_failure`, called from `cli.run`, is the one place that
+  decides; `envelope.ANSWERED_BY_PLATFORM` is the rule (an interrupt is the
+  person stopping the run, not the platform, so it is not one).
 - **Redaction** — the single pass every envelope, audit line and error message
   goes through before it is written. Shapes, not vendors: bot tokens, the API
   hash, phone numbers, session paths.

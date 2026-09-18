@@ -98,7 +98,8 @@ telegram-tools auth --qr     # or scan a code from a phone that is already signe
 `auth` asks at the terminal and cannot be run unattended — it has no `--yes`, and there
 is nothing here for a script to drive. If the account has two-step verification, the
 password is asked for at the prompt and stored nowhere. `auth --qr` needs
-`pip install 'telegram-tools[qr]'` to draw the block; open Telegram on the signed-in
+the `qr` extra to draw the block (`pipx inject telegram-tools segno` adds it to an
+install that already exists); open Telegram on the signed-in
 phone, *Settings → Devices → Link Desktop Device*, and scan it.
 
 You can also just run a command: without a session, Telethon's own login prompt still
@@ -190,7 +191,7 @@ TELEGRAM_PROXY=socks5://127.0.0.1:1080
 ```
 
 `socks5://`, `socks4://` and `http://` are understood, with optional `user:password@`.
-This needs `pip install 'telegram-tools[proxy]'`. Without that library the command
+This needs the `proxy` extra (`pipx inject telegram-tools 'python-socks[asyncio]'`). Without that library the command
 **refuses** — Telethon's own behaviour there is a warning and a direct connection from
 your own address, which is exactly the outcome someone asking for a proxy must not get.
 `doctor` tells you before you run anything.
@@ -854,7 +855,10 @@ write in plain output and rides as `evidence` under `--json`, so the doubt
 reaches whoever is reading. `unverified` is not a failure and does not change
 the exit code or the status; it says how much of the result was confirmed. One
 redacted line per executed write is appended to
-`~/.telegram-tools/audit.jsonl` (from the menu exactly as from a flag). No
+`~/.telegram-tools/audit.jsonl` (from the menu exactly as from a flag) — a call
+Telegram refused counts as one, and its line says `failed` with the readback it
+could not confirm, while a write this tool refused before any call (a missing
+right, a declined question) leaves nothing, exactly as a dry run does. No
 token, phone number, API hash or session path can reach that file — the same
 redaction pass covers it, every envelope and every error message.
 

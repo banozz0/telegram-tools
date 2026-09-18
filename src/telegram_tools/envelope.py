@@ -45,6 +45,12 @@ MODE_FLAGS = ("command", "create_kind", "delete_kind", "json_envelope", "jsonl")
 # is the run breaking on something outside it. Both exit 2; the distinction is
 # for the reader, and it decides whether retrying could ever help.
 BROKE = ("PLATFORM_ERROR", "RATE_LIMITED", "INTERRUPTED")
+# The two of those that mean Telegram itself answered: the call went out and
+# came back refused. Everything else this tool decides on its own, before any
+# call -- a missing right, a declined gate, a drifted plan -- and an interrupt
+# is the person stopping the run, not the platform. Only these leave an audit
+# line for a write that did not finish (card agent-bo-95422312).
+ANSWERED_BY_PLATFORM = ("PLATFORM_ERROR", "RATE_LIMITED")
 
 
 class CommandError(ValueError):
@@ -222,6 +228,9 @@ class Reporter:
         self._result: dict[str, Any] = {}
         self._show_invites = False
         self._status = "ok"
+        # The plans this run has already recorded, so a write that audited its
+        # steps and then broke is not counted twice.
+        self._audited: set[str] = set()
         self._warnings: list[str] = []
         self._banner_shown = False
         # Milliseconds this run slept on flood waits, for `meta.waited_ms`.
@@ -395,6 +404,7 @@ class Reporter:
         """
         if self.audit_log is None:
             return
+        self._audited.add(plan.plan_id)
         # A first write on a fresh machine can land before anything has made
         # ~/.telegram-tools/, and the shared writer opens the file rather than
         # creating a tree. Make room for the line, tighten nothing that exists.
@@ -409,6 +419,29 @@ class Reporter:
             approval=plan.approval,
             status=status,
             evidence=evidence,
+        )
+
+    def audit_failure(self, error: Error) -> None:
+        """One line for a write the platform refused, from the one place every command ends.
+
+        A call that went out and came back refused is an executed write: the
+        gate was answered and something was attempted, and a log that records
+        only the writes that worked cannot answer "what did this account do".
+        It is not the same as a write this tool refused itself -- a missing
+        right, a declined gate -- which never reached Telegram and is recorded
+        nowhere, exactly as a dry run is.
+
+        The status is the one the envelope carries for the same error, and the
+        readback is `unverified:`, because what the chat holds now is precisely
+        what this run could not confirm.
+        """
+        plan = self._plan
+        if plan is None or error.code not in ANSWERED_BY_PLATFORM or plan.plan_id in self._audited:
+            return
+        self.audit(
+            plan,
+            status="failed",
+            evidence=Evidence.unverified(f"the call was refused by the platform ({error.platform or error.code})"),
         )
 
     # -- the end ------------------------------------------------------------

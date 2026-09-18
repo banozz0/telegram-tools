@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -66,6 +67,18 @@ def member(*banned: str, left: bool = False, chat: bool = False, user_id: int = 
         date=None,
         banned_rights=types.ChatBannedRights(until_date=None, **{name: True for name in banned}),
         left=left,
+    )
+    return ParticipantPermissions(participant, False)
+
+
+def restricted(*banned_names: str, until, user_id: int = 42) -> ParticipantPermissions:
+    """A member restricted until `until`: a datetime, or None for forever."""
+    participant = types.ChannelParticipantBanned(
+        peer=types.PeerUser(user_id),
+        kicked_by=1,
+        date=None,
+        banned_rights=types.ChatBannedRights(until_date=until, **{name: True for name in banned_names}),
+        left=False,
     )
     return ParticipantPermissions(participant, False)
 
@@ -250,7 +263,7 @@ def test_a_member_holds_the_member_rights_nothing_bans():
     rights = probe(member(), chat)
 
     assert {"send_messages", "send_media"} <= rights.held
-    assert "is_admin" not in rights.held and rights.missing(("pin_messages",)) == ("pin_messages",)
+    assert "is_admin" not in rights.held and rights.missing(("pin_messages",)) == ()
     # Unbanned, manage_topics lets a member open a topic but not edit another's,
     # so Telegram's answer does not settle it either way.
     assert rights.unknown(tuple(EVERY)) == ("manage_topics",)
@@ -278,6 +291,91 @@ def test_a_member_right_is_held_unless_telegram_bans_it(permissions, defaults, m
     assert rights.missing(DERIVED) == missing
     assert rights.unknown(("send_messages", "send_media")) == ()
     assert rights.unknown(("manage_topics",)) == (() if "manage_topics" in missing else ("manage_topics",))
+
+
+# -- the three Telethon answers for admins only ---------------------------------
+#
+# `ParticipantPermissions.pin_messages` and its twins are built by `_admin_prop`,
+# which returns False for anyone who is not an admin (Telethon 1.45.0, read at
+# `tl/custom/participantpermissions.py`). Telegram's own rule is the opposite:
+# `ChatBannedRights` carries all three, so a chat that bans none of them lets
+# every member pin, invite and rename. Taking Telethon's False as an answer
+# refused those writes by name before the call (card agent-bo-95422318).
+
+DEFAULTED = ("pin_messages", "change_info", "invite_users")
+
+
+def test_a_member_holds_the_rights_the_chats_defaults_leave_alone():
+    rights = probe(member(), supergroup(default_banned_rights=banned(send_stickers=True)))
+
+    assert set(DEFAULTED) <= rights.held
+    assert rights.missing(DEFAULTED) == () and rights.unknown(DEFAULTED) == ()
+
+
+@pytest.mark.parametrize(
+    "permissions, defaults, missing",
+    [
+        (member(), banned(pin_messages=True), ("pin_messages",)),
+        (member(), banned(change_info=True, invite_users=True), ("change_info", "invite_users")),
+        (member("pin_messages"), banned(), ("pin_messages",)),
+        (member(), banned(), ()),
+    ],
+)
+def test_a_defaulted_right_is_held_unless_this_chat_or_this_member_bans_it(permissions, defaults, missing):
+    assert probe(permissions, supergroup(default_banned_rights=defaults)).missing(DEFAULTED) == missing
+
+
+def test_an_admin_keeps_the_answer_its_own_rights_give():
+    """Restrictions bind members only, and an admin holds what it was promoted with."""
+    banning = supergroup(default_banned_rights=banned(pin_messages=True, change_info=True, invite_users=True))
+
+    assert "pin_messages" in probe(admin("pin_messages"), banning).held
+    # Allowed to every member, and still not this admin's: an admin is not one.
+    assert probe(admin("ban_users"), supergroup()).missing(("pin_messages",)) == ("pin_messages",)
+
+
+def test_the_defaulted_rights_are_unknown_when_the_chat_cannot_say():
+    for chat in (None, supergroup(min=True)):
+        rights = probe(member(), chat)
+        assert rights.unknown(DEFAULTED) == DEFAULTED and rights.missing(DEFAULTED) == ()
+
+
+def test_a_subscriber_holds_none_of_them_in_a_broadcast_channel():
+    assert probe(member(), broadcast()).missing(DEFAULTED) == DEFAULTED
+
+
+def test_banning_plain_text_alone_still_bans_a_text_message():
+    """`send_plain` bans text and leaves media alone; `send_messages` bans both."""
+    chat = supergroup(default_banned_rights=banned(send_plain=True))
+
+    rights = probe(member(), chat)
+
+    assert rights.missing(("send_messages",)) == ("send_messages",)
+    assert "send_media" in rights.held
+
+
+def test_a_restriction_that_has_run_out_no_longer_binds():
+    """Telegram lifts a timed restriction when it expires; the object can outlive it."""
+    over = datetime(2020, 1, 1, tzinfo=timezone.utc)
+
+    rights = probe(restricted("send_messages", "pin_messages", until=over), supergroup())
+
+    assert rights.missing(("send_messages", "pin_messages")) == ()
+
+
+def test_a_restriction_still_running_binds():
+    later = datetime.now(timezone.utc) + timedelta(days=1)
+
+    rights = probe(restricted("send_messages", until=later), supergroup())
+
+    assert rights.missing(("send_messages",)) == ("send_messages",)
+
+
+def test_a_permanent_restriction_is_not_read_as_expired():
+    """Telegram writes `until_date` 0 for "forever", and Telethon reads 0 as the epoch."""
+    for forever in (None, datetime(1970, 1, 1, tzinfo=timezone.utc)):
+        rights = probe(restricted("send_messages", until=forever), supergroup())
+        assert rights.missing(("send_messages",)) == ("send_messages",), forever
 
 
 @pytest.mark.parametrize("permissions", [member(left=True), member("view_messages"), member("send_polls", left=True)])
