@@ -1,7 +1,7 @@
 ---
 name: telegram-tools
 description: "Use when you need the real numeric ID of a Telegram chat, channel, group or forum topic — 'what's the ID of that topic?', 'which chat is -100…?', 'where do I send this?' — when the user wants their own Telegram messages searched or exported (JSON, CSV, JSONL, Markdown, HTML), when a history question can be answered from the local archive instead of a fresh fetch, when a message must be posted to a chat or topic the user has allowlisted, when a message the user named should get a reply, a reaction, a pin, or be forwarded, copied or bookmarked, when the user asks who the admins of a chat are, who is waiting to join, which invite links exist, what a chat's or a topic's settings are, or which chat folders they have, or when they want a message posted at a set time or a rule that alerts them when something happens in a chat."
-version: 1.22.0
+version: 1.23.0
 author: banozz0
 license: MIT
 platforms: [macos]
@@ -473,6 +473,12 @@ names the files).
   Narrow with `--topic`, `--keyword`, `--from-user` (a username, an ID, or `me`),
   `--since` / `--until` (ISO dates), and `--limit`. With no `--output` it prints a
   readable table, which is usually what you want to summarise from.
+- **A time with no offset is this machine's local time, in every flag that takes
+  one:** `--since`, `--until`, `--expires`, `--at`. A bare date is that whole local
+  day. Everything the tool prints for you is UTC, so a time you copy out of `--json`
+  goes back in with its `Z` (or an offset), which always wins; a time the user said
+  in words ("tomorrow at 9") is theirs, so pass it bare. A human preview echoes the
+  resolved moment with its offset; `plan` and `result` stay UTC.
 - **`--keyword` matches the printed line, not just what somebody typed.** A poll's
   question and answers, a file's name, a forward's author and a service row's event
   are text this tool derives — `[file] flange-spec.pdf`, `[event] message pinned`,

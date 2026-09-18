@@ -89,6 +89,7 @@ from telegram_tools.adapters.manage import TelegramManagePort
 from telegram_tools._core import blueprint as _blueprint
 from telegram_tools.adapters.blueprint import TelegramBlueprintPort, chat_kind
 from telegram_tools.resolver import EntityResolutionError, resolve_chat
+from telegram_tools.records import BARE_TIME_IS_LOCAL, archive_bound
 from telegram_tools.search import PINS_LIMIT, format_message_records, format_pins, pinned_messages, search_messages
 from telegram_tools.send import SendTarget, confirm_send, format_send_preview, format_sent, require_send_allowed, send_message
 from telegram_tools.topics import get_forum_topics, get_forum_topics_by_ids, in_id_order
@@ -227,8 +228,8 @@ def build_parser() -> argparse.ArgumentParser:
     search.add_argument("--topic", type=int, help="Limit search/export to one topic ID")
     search.add_argument("--keyword", "--contains", dest="keyword", help="Case-insensitive text filter")
     search.add_argument("--from-user", help="Sender username, ID, or 'me'")
-    search.add_argument("--since", help="Inclusive ISO date or datetime lower bound")
-    search.add_argument("--until", help="Inclusive ISO date or datetime upper bound")
+    search.add_argument("--since", help=f"Inclusive ISO date or datetime lower bound; {BARE_TIME_IS_LOCAL}")
+    search.add_argument("--until", help=f"Inclusive ISO date or datetime upper bound; {BARE_TIME_IS_LOCAL}")
     search.add_argument("--limit", type=positive_int, help="Maximum exported messages")
     search.add_argument("--format", choices=SEARCH_FORMATS, default="json", help="Export format")
     search.add_argument("--output", help="Output path; prints a readable table when omitted")
@@ -243,7 +244,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     archive_sync = archive_kinds.add_parser("sync", help="Copy what this account can read into the local archive and resume where it stopped")
     archive_sync.add_argument("--scope", dest="scope", action="append", metavar="RID", help="Only this chat or topic (tg:chat:ID or tg:topic:ID:TOPIC); repeatable")
-    archive_sync.add_argument("--since", help="Archive nothing older than this ISO date or datetime")
+    archive_sync.add_argument("--since", help=f"Archive nothing older than this ISO date or datetime; {BARE_TIME_IS_LOCAL}")
     archive_sync.add_argument("--full", action="store_true", help="Walk every scope from the top again instead of resuming")
 
     archive_status = archive_kinds.add_parser("status", help="Scopes, rows, bytes, coverage and the disk budget")
@@ -257,8 +258,8 @@ def build_parser() -> argparse.ArgumentParser:
         query_parser.add_argument("--scope", dest="scope", action="append", metavar="RID", help="Only this chat or topic rid; repeatable")
         query_parser.add_argument("--identity", metavar="ID", help="Only rows archived by this identity (tg:user:ID)")
         query_parser.add_argument("--from", dest="author", metavar="RID", help="Only messages from this sender (tg:user:ID)")
-        query_parser.add_argument("--since", help="Inclusive ISO date or datetime lower bound")
-        query_parser.add_argument("--until", help="Inclusive ISO date or datetime upper bound")
+        query_parser.add_argument("--since", help=f"Inclusive ISO date or datetime lower bound; {BARE_TIME_IS_LOCAL}")
+        query_parser.add_argument("--until", help=f"Inclusive ISO date or datetime upper bound; {BARE_TIME_IS_LOCAL}")
         query_parser.add_argument("--context", type=int, default=0, metavar="N", help="Show N neighbouring messages by date on each side of a match")
         query_parser.add_argument("--limit", type=positive_int, default=50, help="Maximum matches (default 50)")
     archive_export.add_argument("--format", choices=archive_store.EXPORT_FORMATS, default="json", help="Export format")
@@ -322,7 +323,7 @@ def build_parser() -> argparse.ArgumentParser:
     user_help = "The person: numeric ID or @username"
     admin_rights_help = "Comma-separated admin rights, or none. Valid names: " + ", ".join(manage_ops.ADMIN_RIGHT_NAMES)
     banned_rights_help = "Comma-separated rights to take away. Valid names: " + ", ".join(manage_ops.BANNED_RIGHT_NAMES)
-    until_help = "When it ends: a duration (30m, 2h, 7d, 1w) or an ISO date/time; at least a minute, at most a year"
+    until_help = f"When it ends: a duration (30m, 2h, 7d, 1w) or an ISO date/time ({BARE_TIME_IS_LOCAL}); at least a minute, at most a year"
 
     yes_help = "Skip the y/N; the preview still prints"
     admin_parser = subparsers.add_parser("admin", help="Admins and their rights: list, promote, rights, demote (demote asks for the person's exact label)")
@@ -404,7 +405,7 @@ def build_parser() -> argparse.ArgumentParser:
     invite_create = invite_kinds.add_parser("create", help="Make a new invite link and show it once (y/N)")
     invite_create.add_argument("--chat", required=True, help=chat_help)
     invite_create.add_argument("--title", help="A name for the link, shown to admins only")
-    invite_create.add_argument("--expires", help="When the link stops working: a duration (2h, 7d) or an ISO date/time")
+    invite_create.add_argument("--expires", help=f"When the link stops working: a duration (2h, 7d) or an ISO date/time; {BARE_TIME_IS_LOCAL}")
     invite_create.add_argument("--usage-limit", dest="usage_limit", type=positive_int, metavar="N", help="How many people may join through it")
     invite_create.add_argument("--request-needed", dest="request_needed", action="store_true", help="Joining through it needs an admin's approval")
     invite_create.add_argument("--yes", action="store_true", help=yes_help)
@@ -503,7 +504,7 @@ def build_parser() -> argparse.ArgumentParser:
     schedule_post.add_argument("--topic", type=positive_int, help="Topic ID to post into; omit for the chat itself")
     schedule_post.add_argument("--text", required=True, help="The message, or - to read it from stdin")
     schedule_when = schedule_post.add_mutually_exclusive_group(required=True)
-    schedule_when.add_argument("--at", metavar="TIME", help="One ISO 8601 moment; a time with no offset is this machine's local time")
+    schedule_when.add_argument("--at", metavar="TIME", help=f"One ISO 8601 moment; {BARE_TIME_IS_LOCAL}")
     schedule_when.add_argument("--every", metavar="REPEAT", help="Repeating: an interval like 15m, 2h, 1d, or a five-field cron expression")
     schedule_cancel = schedule_kinds.add_parser("cancel", help="Cancel one scheduled message (y/N)")
     schedule_cancel.add_argument("--id", dest="schedule_id", required=True, metavar="ID", help="The id `schedule list` printed")
@@ -538,7 +539,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Skip the preview and send; the destination must be in TELEGRAM_SEND_ALLOWLIST",
     )
     send_parser.add_argument("--reply-to", dest="reply_to", type=positive_int, metavar="MSG", help="Post it as a reply to this message id")
-    send_parser.add_argument("--at", metavar="TIME", help="Hand it to Telegram to post at this ISO 8601 moment; Telegram holds it and posts it with this machine off")
+    send_parser.add_argument("--at", metavar="TIME", help=f"Hand it to Telegram to post at this ISO 8601 moment ({BARE_TIME_IS_LOCAL}); Telegram holds it and posts it with this machine off")
 
     message_parser = subparsers.add_parser("message", help="Act on messages: reply, edit, delete, forward, copy, react, pin, poll, read, bookmark, draft")
     verbs = message_parser.add_subparsers(dest="message_verb")
@@ -972,8 +973,8 @@ def _query_kwargs(args, identity: Identity) -> dict:
         "scope": getattr(args, "scope", None) or None,
         "identity": getattr(args, "identity", None),
         "author": author,
-        "since": getattr(args, "since", None),
-        "until": getattr(args, "until", None),
+        "since": archive_bound(getattr(args, "since", None), end_of_day=False),
+        "until": archive_bound(getattr(args, "until", None), end_of_day=True),
         "context": int(getattr(args, "context", 0) or 0),
         "limit": int(getattr(args, "limit", None) or 50),
         "markers": archive_store.MARKERS,
@@ -1430,8 +1431,8 @@ async def _run_search_archive(args, config, *, report: Reporter) -> int:
             query,
             scope=rids,
             author=author,
-            since=args.since,
-            until=args.until,
+            since=archive_bound(args.since, end_of_day=False),
+            until=archive_bound(args.until, end_of_day=True),
             limit=args.limit or 50,
             markers=archive_store.MARKERS,
         )
@@ -3207,7 +3208,7 @@ async def _run_manage(client, args, *, report: Reporter) -> int:
             details.append(f"Takes   {', '.join(taking)}")
             if set(taking) - set(names):
                 details.append(f"Note    Telegram widens {', '.join(names)} into the family beneath it; every right above is taken.")
-            details.append(f"Until   {manage_ops.until_text(until)}")
+            details.append(f"Until   {manage_ops.until_shown(until)}")
     elif op.verb in ("unban", "unmute"):
         if member.status not in ("banned", "restricted"):
             raise CommandError(f"{member.label} is not banned or restricted in {target.title} (they are {member.status}).", code="TARGET_KIND_MISMATCH")
@@ -3219,7 +3220,7 @@ async def _run_manage(client, args, *, report: Reporter) -> int:
         expires = manage_ops.parse_until(args.expires) if args.expires else None
         params = {"title": args.title or "", "expires": manage_ops.until_text(expires), "usage_limit": args.usage_limit, "request_needed": bool(args.request_needed)}
         details.append(f"Title   {args.title or '(none)'}")
-        details.append(f"Expires {manage_ops.until_text(expires) or 'never'}")
+        details.append(f"Expires {manage_ops.until_shown(expires) or 'never'}")
         details.append(f"Uses    {args.usage_limit or 'unlimited'}")
         if args.request_needed:
             details.append("Joining needs an admin's approval")

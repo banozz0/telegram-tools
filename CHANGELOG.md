@@ -4,6 +4,15 @@ All notable changes to this project will be documented here.
 
 This project follows a practical changelog style: user-visible changes, safety changes, and release notes belong here; active task tracking belongs outside the repo.
 
+## 3.36.0 - 2026-09-18
+
+One change, and it is a behaviour change: every time you type is read in one stated zone.
+
+- **A time with no offset is this machine's local time, everywhere.** `search`, `archive search`, `archive export` and `archive sync` read a bare `--since`/`--until` as UTC, and so did `--until` on `member mute` and `member restrict` and `--expires` on `invite create`, while `send --at` and `schedule post --at` read the same characters on this machine's clock; one help line of nine said which, and no menu prompt did. Local is now the one reading. **If you typed bare times into `--since`, `--until` or `--expires` and meant UTC, add a `Z`:** an offset or a trailing `Z` always wins, and nothing about a duration (`30m`, `7d`) changes.
+- **A bare date is that whole local day,** from its first instant to its last. `archive search --until 2026-09-06` used to stop at the first second of that day, because the archive compares dates as text; the bound now reaches the store as the UTC moment it means, so `--until` is inclusive there as its help has always said.
+- **A bare time takes the offset of its own date, not of today.** `--at 2026-11-01T09:00` typed in September was read with September's offset and would have posted an hour early once the clocks changed.
+- **Every help line and menu prompt that takes a time says so,** in the same sentence, and the `member mute`, `member restrict` and `invite create` previews echo the moment they resolved with its offset spelled out (`Until   2026-09-06T14:30:00+02:00`), as `send --at` already did. Everything written for machines stays UTC: `--json`, exports, the archive and the audit log.
+
 ## 3.35.0 - 2026-09-18
 
 The final wave of this cycle: the shared core at v0.14, one new read verb, and the small faults the live menu campaign left on the board.

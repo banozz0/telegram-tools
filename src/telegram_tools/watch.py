@@ -441,7 +441,9 @@ def local_zone():
 def parse_when(text: str) -> datetime:
     """`--at` as an aware datetime; a time with no offset is this machine's local time."""
     try:
-        return _runner.parse_at(text, local_zone())
+        # No zone handed over: core then reads a bare time on this machine's
+        # clock for that date, where `local_zone()` is today's offset only.
+        return _runner.parse_at(text)
     except _runner.RunnerError as exc:
         raise ValueError(
             f"--at {text!r} is not an ISO 8601 date and time (2026-09-09T09:00, or 2026-09-09T09:00+02:00): {exc}"

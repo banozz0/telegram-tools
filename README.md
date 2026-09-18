@@ -337,6 +337,20 @@ so one message would otherwise reorder the list between two runs; sorting by ID
 means reading the same chat twice gives the same list, and a rename does not
 move a row either.
 
+### Typing a time
+
+Every flag and menu prompt that takes a time reads it the same way: **a time with
+no offset is this machine's local time**. That is `--since` and `--until` on
+`search` and the archive commands, `--until` on `member mute` and `member
+restrict`, `--expires` on `invite create`, and `--at` on `send` and `schedule
+post`. A bare date is that whole local day, and a time takes the offset of its own
+date, so one typed in September for November lands on the winter clock. An offset
+or a trailing `Z` always wins (`2026-09-06T14:30Z`, `2026-09-06T14:30+05:00`). A
+preview echoes the moment it resolved with the offset spelled out
+(`Until   2026-09-06T14:30:00+02:00`); what the tool writes for machines (`--json`,
+exports, the archive, the audit log) stays UTC, so a time copied out of JSON goes
+back in with its `Z`.
+
 ## Message tools
 
 `telegram-tools message <verb> --chat CHAT …` does to a message what the app's long-press

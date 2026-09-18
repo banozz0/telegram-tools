@@ -9,6 +9,7 @@ from telethon.errors.rpcbaseerrors import BadRequestError
 
 from telegram_tools.envelope import CommandError
 from telegram_tools.search import DERIVED_SCAN, format_message_records, search_messages
+from test_typed_time_zone import malta  # noqa: F401 - fixture
 
 
 class FakeClient:
@@ -57,7 +58,7 @@ def test_topic_search_filters_locally_by_keyword_user_and_date():
     assert "search" not in client.iter_calls[0][1]
 
 
-def test_non_topic_search_uses_telethon_server_side_filters_then_local_dates():
+def test_non_topic_search_uses_telethon_server_side_filters_then_local_dates(malta):
     messages = [
         SimpleNamespace(id=1, date=datetime(2026, 7, 1, tzinfo=UTC), sender_id=123, raw_text="deploy old"),
         SimpleNamespace(id=2, date=datetime(2026, 7, 5, tzinfo=UTC), sender_id=123, raw_text="deploy ok"),
@@ -81,7 +82,8 @@ def test_non_topic_search_uses_telethon_server_side_filters_then_local_dates():
     assert client.iter_calls[0][1]["search"] == "deploy"
     assert client.iter_calls[0][1]["from_user"] == "@alice"
     assert client.iter_calls[0][1]["limit"] == 50
-    assert client.iter_calls[0][1]["offset_date"] == datetime(2026, 7, 6, 23, 59, 59, 999999, tzinfo=UTC)
+    # A bare `--until 2026-07-06` is that whole day on this machine's clock: Malta's, +02:00 in July.
+    assert client.iter_calls[0][1]["offset_date"] == datetime(2026, 7, 6, 21, 59, 59, 999999, tzinfo=UTC)
 
 
 def test_format_message_records_outputs_human_readable_table():

@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 
 from telegram_tools.records import message_to_record, parse_date_bound, topic_id_for_message
+from test_typed_time_zone import malta  # noqa: F401 - fixture
 
 
 def test_topic_id_prefers_reply_to_top_id():
@@ -55,12 +56,13 @@ def test_message_to_record_keeps_metadata_and_text_without_media_download():
     assert record["has_media"] is True
 
 
-def test_parse_date_bound_supports_dates_and_datetimes():
+def test_parse_date_bound_supports_dates_and_datetimes(malta):
+    # A bare date is the local day (Malta in July is +02:00); an offset is read as written.
     assert parse_date_bound("2026-07-06", end_of_day=False) == datetime(
-        2026, 7, 6, 0, 0, tzinfo=UTC
+        2026, 7, 5, 22, 0, tzinfo=UTC
     )
     assert parse_date_bound("2026-07-06", end_of_day=True) == datetime(
-        2026, 7, 6, 23, 59, 59, 999999, tzinfo=UTC
+        2026, 7, 6, 21, 59, 59, 999999, tzinfo=UTC
     )
     assert parse_date_bound("2026-07-06T12:30:00+00:00", end_of_day=False) == datetime(
         2026, 7, 6, 12, 30, tzinfo=UTC

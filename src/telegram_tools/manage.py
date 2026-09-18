@@ -344,7 +344,8 @@ def parse_until(text: str, *, now: datetime | None = None) -> datetime:
                 f"--until {raw!r} is neither a duration (30m, 2h, 7d, 1w) nor an ISO date or datetime."
             ) from exc
         if moment.tzinfo is None:
-            moment = moment.replace(tzinfo=timezone.utc)
+            # `records.BARE_TIME_IS_LOCAL`: this machine's clock on that date.
+            moment = moment.astimezone()
     if moment < now + UNTIL_MIN:
         raise ValueError(f"--until {raw!r} is less than a minute ahead; a restriction needs an end that has not passed.")
     if moment > now + UNTIL_MAX:
@@ -356,6 +357,13 @@ def until_text(moment: datetime | None) -> str | None:
     if moment is None:
         return None
     return moment.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def until_shown(moment: datetime | None) -> str | None:
+    """The same moment for a person's preview: this machine's clock, offset spelled out."""
+    if moment is None:
+        return None
+    return moment.astimezone().isoformat()
 
 
 def parse_slow_mode(value: int) -> int:
@@ -791,6 +799,7 @@ __all__ = [
     "require_hierarchy",
     "terminal_present",
     "until_phrase",
+    "until_shown",
     "until_text",
     "user_label",
     "user_rid",

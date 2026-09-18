@@ -484,9 +484,21 @@ The terms this codebase uses, and the boundaries they imply.
   refused and names `admin demote`. Checked after the preflight and before the
   gate, naming both rights sets, because Telegram would refuse after the call
   without saying which right was short.
+- **Typed time** — a time a person types into a flag or a menu prompt. One
+  reading everywhere, `records.BARE_TIME_IS_LOCAL`, and every help line and
+  prompt that takes one carries that sentence: with no offset it is this
+  machine's local time on that date (`naive.astimezone()`, never today's
+  offset, so a clock change between now and then is respected); an offset or
+  a trailing `Z` wins. `records.parse_date_bound` (`--since`/`--until`, a
+  bare date being the whole local day), `manage.parse_until` and
+  `watch.parse_when` are the three readers. The archive compares its UTC
+  `...Z` dates as text, so a typed bound reaches it through
+  `records.archive_bound`. A human preview echoes the resolved moment with
+  its offset (`manage.until_shown`); plans, envelopes, exports and the audit
+  log stay UTC (`manage.until_text`).
 - **Bounded restriction** — `member mute` and `member restrict` need
   `--until` (`manage.parse_until`): a duration (`30m`, `2h`, `7d`, `1w`) or an
-  ISO date or time, at least a minute ahead and at most a year, because
+  ISO date or time (a **typed time**), at least a minute ahead and at most a year, because
   Telegram reads more than a year as forever and a restriction with no end is
   a ban under another name. Without it the command is a usage error, exit 2.
 - **Local reason** — a ban's `--reason`. Telegram has no reason field beside a

@@ -6,6 +6,14 @@ from datetime import UTC, date, datetime, time
 from typing import Any, Mapping
 
 
+# The one reading of a time a person types, carried by every help line and menu
+# prompt that asks for one. `search` bounds and `member --until` used to read a
+# bare time as UTC while `--at` read it as this machine's clock, so the same
+# characters meant two moments. An offset or a trailing `Z` always wins, and
+# what the tool prints for machines stays UTC.
+BARE_TIME_IS_LOCAL = "a time with no offset is this machine's local time"
+
+
 def parse_date_bound(value: str | None, *, end_of_day: bool) -> datetime | None:
     if not value:
         return None
@@ -13,12 +21,21 @@ def parse_date_bound(value: str | None, *, end_of_day: bool) -> datetime | None:
     if "T" not in value and len(value) == 10:
         parsed_date = date.fromisoformat(value)
         parsed_time = time.max if end_of_day else time.min
-        return datetime.combine(parsed_date, parsed_time, tzinfo=UTC)
+        return datetime.combine(parsed_date, parsed_time).astimezone(UTC)
 
-    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=UTC)
-    return parsed.astimezone(UTC)
+    # `astimezone` reads a naive moment as this machine's local time on that
+    # date, so a bound typed across a clock change takes the right offset.
+    return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(UTC)
+
+
+def archive_bound(value: str | None, *, end_of_day: bool) -> str | None:
+    """A typed bound as the archive stores a date: UTC, to the second, with a `Z`.
+
+    The store compares dates as text, so it has to be asked in the shape it
+    keeps; a bare `--until 2026-09-06` is that whole local day.
+    """
+    bound = parse_date_bound(value, end_of_day=end_of_day)
+    return None if bound is None else bound.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def topic_id_for_message(message: Any) -> int | None:

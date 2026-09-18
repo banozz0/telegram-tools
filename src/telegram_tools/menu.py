@@ -24,7 +24,7 @@ from telegram_tools.config import ConfigError, load_config, lookup_bot_token, re
 from telegram_tools.delete import kind_for_type
 from telegram_tools.discovery import list_dialog_choices
 from telegram_tools.envelope import error_for
-from telegram_tools.records import parse_date_bound
+from telegram_tools.records import BARE_TIME_IS_LOCAL, parse_date_bound
 from telegram_tools import messages as message_ops
 from telegram_tools.prompts import BACK, CLEAR, EXIT, MENU, RULE, Extra, after_action, after_run, ask_int, ask_lines, ask_text, choose, edit_field, pick, pick_many
 from telegram_tools.resolver import resolve_chat
@@ -1809,7 +1809,7 @@ def ask_date(label: str, *, read, write) -> Any:
     asks again for anything else.
     """
     while True:
-        typed = ask_text(label, read=read, write=write)
+        typed = ask_text(f"{label} ({BARE_TIME_IS_LOCAL})", read=read, write=write)
         if typed is BACK:
             return BACK
         value = typed.strip()
@@ -1823,6 +1823,15 @@ def ask_date(label: str, *, read, write) -> Any:
             write(_DATE_HINT)
             continue
         return value
+
+
+# The form rows whose answer is a typed time. The row keeps its short label; the
+# prompt a person types into is what says which zone reads the answer.
+TIME_FIELDS = ("at", "until", "expires")
+
+
+def time_prompt(key: str, label: str) -> str:
+    return f"{label}; {BARE_TIME_IS_LOCAL}" if key in TIME_FIELDS else label
 
 
 def _yes_no(value: bool) -> str:
@@ -2432,7 +2441,7 @@ async def _run_form(fields, required, *, title, read, write, run_it, initial=Non
         if kind == "toggle":
             staged[key] = not staged[key]
             continue
-        answer = ask_int(label, read=read, write=write, current=staged[key]) if kind == "int" else ask_text(label, read=read, write=write, current=staged[key] or None)
+        answer = ask_int(label, read=read, write=write, current=staged[key]) if kind == "int" else ask_text(time_prompt(key, label), read=read, write=write, current=staged[key] or None)
         if answer is BACK:
             continue
         staged[key] = None if answer is CLEAR else answer
@@ -2873,7 +2882,7 @@ def _flow_manage_verb(group: str, verb: str, title: str):
                     elif kind == "lines":
                         answer = ask_lines(label, read=read, write=write, current=_preview_line(staged[key]) if staged[key] else None)
                     else:
-                        answer = ask_text(label, read=read, write=write, current=staged[key] or None)
+                        answer = ask_text(time_prompt(key, label), read=read, write=write, current=staged[key] or None)
                     if answer is BACK:
                         continue
                     staged[key] = None if answer is CLEAR else answer

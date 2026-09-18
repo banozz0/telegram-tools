@@ -238,6 +238,10 @@ _ROOT_ADDITIONS = (
     "leave Leave a group or channel: nothing in it is deleted (dry-run by default)",
 )
 
+# Spelled out rather than imported: a frozen surface that read the sentence off
+# the source would follow any rewording of it without a word here.
+_ZONE = "a time with no offset is this machine's local time"
+
 ALLOWED_ADDITIONS = {
     "root": _ROOT_ADDITIONS,
     # The profiles-remove card (agent-bo-95422197): `profiles` gained one verb,
@@ -302,12 +306,13 @@ ALLOWED_ADDITIONS = {
         "--execute Actually switch topics off, after typing the chat's exact title (no other setting needs it)",
     ),
     # `send` gained one flag on the message-ops card and one on the watch card:
-    # a reply target, and the moment Telegram is to hold the message until.
+    # a reply target, and the moment Telegram is to hold the message until. The
+    # typed-time-zones card (agent-bo-95422371) put the zone sentence in `--at`.
     "send": (
         "[--reply-to MSG]",
         "--reply-to MSG Post it as a reply to this message id",
         "[--at TIME]",
-        "--at TIME Hand it to Telegram to post at this ISO 8601 moment; Telegram holds it and posts it with this machine off",
+        f"--at TIME Hand it to Telegram to post at this ISO 8601 moment ({_ZONE}); Telegram holds it and posts it with this machine off",
     ),
     # The --yes-on-y/N card (agent-bo-95422198): every command whose only gate
     # was an interactive y/N takes `--yes`, as its Discord counterpart does.
@@ -345,11 +350,19 @@ _RULE_FLAG_REWRITES = (
     ),
 )
 
+# The typed-time-zones card's two shared rewrites; the reason is on the entries
+# that use them, at the end of `ALLOWED_REWRITES`.
+_BOUND_ZONE_REWRITES = (
+    (f"Inclusive ISO date or datetime lower bound; {_ZONE}", "Inclusive ISO date or datetime lower bound"),
+    (f"Inclusive ISO date or datetime upper bound; {_ZONE}", "Inclusive ISO date or datetime upper bound"),
+)
+_UNTIL_ZONE_REWRITES = ((f"or an ISO date/time ({_ZONE}); at least a minute", "or an ISO date/time; at least a minute"),)
+
 ALLOWED_REWRITES = {
     # A choice list that grew. The help line is the same words; the braces name
     # more formats. Section 15: `--format` gains jsonl, markdown and html, and
     # json and csv stay first so a script reading the usage line still finds them.
-    "search": (("{json,csv,jsonl,markdown,html}", "{json,csv}"),),
+    "search": (("{json,csv,jsonl,markdown,html}", "{json,csv}"), *_BOUND_ZONE_REWRITES),
     # The member-kick card (agent-bo-95422192): the choice list grew by one
     # verb, in the middle, because ban and kick belong side by side.
     "member": (("{list,ban,kick,unban,mute,unmute,restrict}", "{list,ban,unban,mute,unmute,restrict}"),),
@@ -396,6 +409,21 @@ ALLOWED_REWRITES = {
     # there. `add` and `edit` share the flag definitions, so they share both.
     "watch-rules-add": _RULE_FLAG_REWRITES,
     "watch-rules-edit": _RULE_FLAG_REWRITES,
+    # The typed-time-zones card (agent-bo-95422371). `search` bounds and
+    # `--until` read a bare time as UTC while `--at` read it as this machine's
+    # clock, and one help line of nine said which. Local is now the one reading
+    # and every flag that takes a time says so with the same sentence
+    # (`records.BARE_TIME_IS_LOCAL`). Each entry only appends that sentence to a
+    # help line whose other words are unchanged; `schedule post --at` already
+    # carried it and needs no entry, and `send --at` is an addition above.
+    "archive-search": _BOUND_ZONE_REWRITES,
+    "archive-export": _BOUND_ZONE_REWRITES,
+    "archive-sync": (
+        (f"Archive nothing older than this ISO date or datetime; {_ZONE}", "Archive nothing older than this ISO date or datetime"),
+    ),
+    "member-mute": _UNTIL_ZONE_REWRITES,
+    "member-restrict": _UNTIL_ZONE_REWRITES,
+    "invite-create": ((f"or an ISO date/time; {_ZONE}", "or an ISO date/time"),),
 }
 
 # The per-command `--json` gained an optional path, which argparse spells with
