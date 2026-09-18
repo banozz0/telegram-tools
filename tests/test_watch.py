@@ -27,6 +27,7 @@ from telethon.tl.types import MessageEntityTextUrl, MessageEntityUrl
 
 from telegram_tools import archive as archive_store
 from telegram_tools import cli
+from telegram_tools import profiles as profile_store
 from telegram_tools import watch as watch_ops
 from telegram_tools._core import rules as _rules
 from telegram_tools._core import runner as _runner
@@ -1549,8 +1550,13 @@ def test_a_profile_with_no_record_is_asked_once_and_never_through_a_second_clien
     identity = run(cli._offline_identity(config, report, client=held))
     assert identity.id == "tg:user:4242" and identity.label == "Sven (@sven)" and identity.profile == "default"
     assert held.get_me_calls == 1
+    # And the answer is written down, so nothing asks again (card agent-bo-95422332).
+    assert profile_store.load("default").user_id == 4242
 
-    # Without one, exactly one client is opened and disconnected again.
+    # Without one, exactly one client is opened and disconnected again. The
+    # record the first half healed is removed, because it is the profile with
+    # no record that this half is about.
+    (profile_store.profile_dir("default") / profile_store.PROFILE_FILE).unlink()
     opened = MenuClient()
     monkeypatch.setattr(cli, "create_client", lambda _config: opened)
 

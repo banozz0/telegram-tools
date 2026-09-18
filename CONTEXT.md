@@ -45,8 +45,10 @@ The terms this codebase uses, and the boundaries they imply.
   than an unknown. The menu has no bot mode: it is one account session.
 - **Via** — the account a bot identity acts through: `identity.via` is its rid,
   and the banner names it after the mode, `bot (via Sven (@sven))`. Read from
-  the profile record `auth` wrote (a label and an id) so no account session is
-  opened; a profile with no record is asked once through its session.
+  the profile record (a label and an id) so no account session is opened; a
+  profile with no record is asked once through its session, and `_heal_record`
+  writes the answer into the record -- only the fields that were missing, and
+  never `last_login`, because a read is not a login.
 - **Banner** — the `Acting as: <label> · <mode> · Target: <path> (<ids>)` line
   every screen opens with (`_core.identity.banner`). A command prints it once,
   through the reporter, so `--json` puts it on stderr and the envelope carries

@@ -3947,8 +3947,7 @@ async def _via_account(config, report: Reporter, *, client=None) -> tuple[int, s
     if stored.label and stored.user_id:
         return int(stored.user_id), stored.label
     if client is not None:
-        user = await client.get_me()
-        return int(getattr(user, "id", 0)), account_label(user)
+        return _heal_record(stored, await client.get_me(), report)
     client = await start_client(create_client(config), authorize=not report.machine)
     try:
         if report.machine and not await client.is_user_authorized():
@@ -3956,7 +3955,33 @@ async def _via_account(config, report: Reporter, *, client=None) -> tuple[int, s
         user = await client.get_me()
     finally:
         await _disconnect_quietly(client)
-    return int(getattr(user, "id", 0)), account_label(user)
+    return _heal_record(stored, user, report)
+
+
+def _heal_record(stored, user, report: Reporter) -> tuple[int, str]:
+    """Who the account is, and the profile record told so when it did not know (card agent-bo-95422332).
+
+    A login made before profiles existed has no record, which left every run of
+    it unsigned until someone knew to run `auth`. Once a run has paid for its
+    `get_me` the answer is in hand, so it is written down here -- never on its
+    own account: no extra round trip, and this is the one place where the
+    record was missing and the connection had already been made.
+
+    Local bookkeeping, not a platform write: no plan and no audit line, exactly
+    as the record `auth` writes has none. The bot a `--as-bot` run acts as never
+    reaches this -- what is asked here is always the account's own session --
+    and a record that cannot be written is a warning, not a failed read.
+    """
+    user_id, label = int(getattr(user, "id", 0)), account_label(user)
+    if user_id:
+        try:
+            profile_store.record_identity(stored, label=label, user_id=user_id)
+        except (OSError, profile_store.ProfileError) as exc:
+            report.warn(
+                f"which account profile {stored.name!r} is could not be recorded, "
+                f"so the next run asks again: {exc}"
+            )
+    return user_id, label
 
 
 async def run_as_bot(args, config, *, report: Reporter) -> int:

@@ -279,6 +279,33 @@ def test_a_profile_record_carries_no_secret_and_no_path(home):
     assert str(home) not in body
 
 
+def test_a_record_that_is_missing_is_filled_in_without_claiming_a_login(home):
+    """Card 332: a connected run may say which account a profile is; it has not logged it in."""
+    profile = profiles.load("work", home=home)
+
+    saved = profiles.record_identity(profile, label="Sven (@sven)", user_id=4242)
+
+    record = saved.directory / "profile.json"
+    body = json.loads(record.read_text())
+    assert (saved.label, saved.user_id) == ("Sven (@sven)", 4242)
+    assert body["last_login"] is None, "a read is not a login"
+    assert body["created"] is None, "the profile was not made now; nothing here knows when it was"
+    assert stat.S_IMODE(record.stat().st_mode) == 0o600
+    assert stat.S_IMODE(saved.directory.stat().st_mode) == 0o700
+
+
+def test_an_identity_already_recorded_is_never_replaced_by_a_read(home):
+    """A record that names another account is a different login on this profile: only `auth` moves it."""
+    profiles.record_login(profiles.load("work", home=home), label="Sven (@sven)", user_id=4242)
+    record = profiles.profile_dir("work", home) / "profile.json"
+    before = record.read_text()
+
+    saved = profiles.record_identity(profiles.load("work", home=home), label="Someone (@else)", user_id=99)
+
+    assert (saved.label, saved.user_id) == ("Sven (@sven)", 4242)
+    assert record.read_text() == before, "nothing at all is written when nothing is missing"
+
+
 # -- --profile, TELEGRAM_TOOLS_PROFILE and TELEGRAM_TOOLS_SESSION ----------
 
 
@@ -799,6 +826,55 @@ def test_the_banner_carries_no_phone_number_when_the_account_has_no_username(run
     assert redaction.find(out) == []
 
 
+# -- a profile that predates records heals itself (card 332) ----------------
+
+
+def test_a_connected_run_records_which_account_the_profile_is(run_cli, home, capsys):
+    """The login Sven made before profiles existed has no record, so every run of it is unsigned.
+
+    The first run that has already asked Telegram who it is writes the answer
+    down: label and user id, nothing else, so the next run needs no connection
+    to know whose rows it is reading.
+    """
+    legacy_login(home)
+
+    code, out, err, _fake = run_cli(["--json", "archive", "status"], capsys=capsys)
+
+    envelope = json.loads(out)
+    assert code == 0
+    assert envelope["warnings"] == [], "healing a record is bookkeeping, not something to announce"
+    healed = profiles.load("default", home=home)
+    assert (healed.label, healed.user_id) == ("Sven (@sven)", 4242)
+    assert healed.last_login is None
+
+
+def test_the_next_offline_run_of_a_healed_profile_is_no_longer_unsigned(run_cli, home, capsys):
+    legacy_login(home)
+    run_cli(["--json", "archive", "status"], capsys=capsys)
+
+    code, out, err, _fake = run_cli(["--json", "watch", "status"], capsys=capsys)
+
+    envelope = json.loads(out)
+    assert code == 0
+    assert "unsigned" not in err
+    assert envelope["identity"]["label"] == "Sven (@sven)"
+
+
+def test_a_record_that_cannot_be_written_does_not_take_the_read_down(run_cli, home, capsys, monkeypatch):
+    legacy_login(home)
+    monkeypatch.setattr(profiles, "save", _refuses_to_save)
+
+    code, out, err, _fake = run_cli(["--json", "archive", "status"], capsys=capsys)
+
+    assert code == 0, "a read command that read what it was asked for has not failed"
+    envelope = json.loads(out)
+    # Said on stderr, and carried in the envelope exactly as the unsigned-run
+    # warning is: an agent reading --json is told the record is still missing.
+    assert "could not be recorded" in err
+    assert [w for w in envelope["warnings"] if "could not be recorded" in w]
+    assert not (profiles.profile_dir("default", home) / "profile.json").exists()
+
+
 # -- machine mode has nobody to log in with --------------------------------
 
 
@@ -839,6 +915,11 @@ def test_no_command_output_carries_a_token_a_number_or_a_session_path(run_cli, h
 
 
 # -- small helpers ---------------------------------------------------------
+
+
+def _refuses_to_save(_profile):
+    """A profile store on a disk that will not take the write."""
+    raise OSError("read-only file system")
 
 
 def _write_private(path: Path, body: str) -> Path:
