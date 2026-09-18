@@ -8,7 +8,7 @@ import sys
 from functools import partial
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Sequence
+from typing import Any, Sequence
 
 from telegram_tools._core import export as _export
 from telegram_tools._core import rid as _rid
@@ -63,7 +63,7 @@ from telegram_tools.delete import (
 )
 from telegram_tools.discovery import classify_entity, discover_chats, filter_chats, format_discovery_table
 from telegram_tools.doctor import require_tight_modes, run_doctor
-from telegram_tools.envelope import BROKE, PLATFORM, PREFIX, TOOL, ApprovalRequired, CommandError, Reporter, account_command, error_for, platform_error
+from telegram_tools.envelope import BROKE, PLATFORM, PREFIX, TOOL, ApprovalRequired, CommandError, Reporter, error_for, platform_error
 from telegram_tools.exporters import SEARCH_FORMATS, json_text, write_records
 from telegram_tools import messages as message_ops
 from telegram_tools.prompts import BACK, pick_many
@@ -88,6 +88,9 @@ from telegram_tools import __version__
 # Telegram's own vocabulary so a refusal can be read straight into the app.
 CLEAR_RIGHTS = ("delete_messages",)
 SEND_RIGHTS = ("send_messages",)
+# A chat can ban media while it allows text, and the probe answers for both, so
+# a send that carries a file asks for both (card agent-bo-95422318).
+SEND_FILE_RIGHTS = ("send_messages", "send_media")
 # A topic is opened by posting its service message, so posting is the right.
 CREATE_TOPIC_RIGHTS = ("send_messages",)
 # Telegram lets only a chat's creator delete it, which is what the preview says.
@@ -1169,7 +1172,7 @@ def _review_io(report: Reporter) -> dict:
 def _review_rows(queue, ids: list[str], *, state: str, what: str) -> list:
     """The candidates `--ids` names, each checked to be in `state` before anything moves."""
     if not ids:
-        raise ValueError(f"Nothing selected: pass --ids with at least one candidate id from `review list`.")
+        raise ValueError("Nothing selected: pass --ids with at least one candidate id from `review list`.")
     rows = []
     for manifest_id in ids:
         try:
@@ -1485,6 +1488,9 @@ async def _run_send(client, args, config, *, report: Reporter | None = None) -> 
     rights = await _rights(client, report, resolved)
     identity = await _acting(client, report)
     mutation_params = {"files": len(files), "text": bool(text)}
+    # A chat may ban media and allow text: what this send carries decides what
+    # the preflight asks for.
+    send_required = SEND_FILE_RIGHTS if files else SEND_RIGHTS
     if reply_to is not None:
         mutation_params["reply_to"] = int(reply_to)
     if at is not None:
@@ -1496,12 +1502,12 @@ async def _run_send(client, args, config, *, report: Reporter | None = None) -> 
         mutations=[Mutation("send_message", destination.rid, mutation_params)],
         approval="yes_allowlist" if args.yes else "prompt_y",
         rights=rights,
-        required=SEND_RIGHTS,
+        required=send_required,
     )
     report.set_plan(plan)
     for warning in warnings:
         report.warn(warning)
-    require_rights(plan, rights, SEND_RIGHTS)
+    require_rights(plan, rights, send_required)
 
     confirm = None
     if args.yes:
@@ -1535,7 +1541,7 @@ async def _run_send(client, args, config, *, report: Reporter | None = None) -> 
             mutations=[Mutation("send_message", fresh.rid, mutation_params)],
             approval="yes_allowlist" if args.yes else "prompt_y",
             rights=rights,
-            required=SEND_RIGHTS,
+            required=send_required,
         )[0]
 
     result = await send_message(
@@ -1724,7 +1730,13 @@ async def _run_message(client, args, config, *, report: Reporter | None = None) 
     report.set_plan(plan)
     for warning in warnings:
         report.warn(warning)
-    require_rights(plan, rights if verb not in message_ops.DESTINATION_VERBS else to_rights, required)
+    destination_verb = verb in message_ops.DESTINATION_VERBS
+    require_rights(
+        plan,
+        to_rights if destination_verb else rights,
+        required,
+        where=to_target if destination_verb else target,
+    )
     if verb == "delete" and others:
         # The gate clear-messages has always had: an unknown right refuses a
         # delete that reaches other people's messages, rather than letting

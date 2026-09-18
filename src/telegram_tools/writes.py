@@ -76,22 +76,36 @@ def build_plan(
     return plan, tuple(warnings)
 
 
-def require_rights(plan: Plan, rights: Rights, required: Sequence[str]) -> None:
+def require_rights(plan: Plan, rights: Rights, required: Sequence[str], *, where: Target | None = None) -> None:
     """Refuse before any mutation when Telegram says a needed right is absent.
 
     Only a right Telegram answered for can refuse a run. A right it would not
     answer for is unknown, and this tool has always let those writes through to
     Telegram's own error -- narrowing that would break sends that work today.
+
+    `where` is the chat these rights were probed in, for the writes whose
+    effect lands somewhere other than the plan's first target: `forward` and
+    `copy` check `--to`, and naming the source chat sent the reader to ask for
+    a right in the wrong place (card agent-bo-95422318).
     """
     missing = rights.missing(required)
     if not missing:
         return
     names = ", ".join(missing)
-    target = plan.targets[0].title if plan.targets else "this chat"
+    target = where or (plan.targets[0] if plan.targets else None)
+    title = target.title if target is not None else "this chat"
+    if getattr(target, "type", None) == "user":
+        # Nobody administers a direct chat, so "ask an admin of Harry" is a
+        # fix that does not exist; what is missing there is missing to both.
+        raise CommandError(
+            f"Telegram gives nobody {names} in a direct chat, and this one is with {title}.",
+            code="PERMISSION_DENIED",
+            hint=f"A direct chat has no admins to ask: {names} exists only in a group or channel.",
+        )
     raise CommandError(
-        f"Your Telegram account lacks {names} in {target}.",
+        f"Your Telegram account lacks {names} in {title}.",
         code="PERMISSION_DENIED",
-        hint=f"Ask an admin of {target} for {names}, or run this as an account that has it.",
+        hint=f"Ask an admin of {title} for {names}, or run this as an account that has it.",
     )
 
 

@@ -363,6 +363,44 @@ def test_a_send_the_chats_defaults_forbid_is_refused_by_name(run_cli, monkeypatc
     assert fake.sent == []
 
 
+def test_a_send_that_carries_a_file_asks_for_send_media(run_cli, monkeypatch, capsys, tmp_path):
+    """A chat can ban media and allow text, and the probe answers for both.
+
+    Asking only for send_messages let the upload go out to Telegram's own
+    refusal, after the gate (card agent-bo-95422318).
+    """
+    monkeypatch.setenv("TELEGRAM_SEND_ALLOWLIST", str(CHAT_ID))
+    picture = tmp_path / "shot.png"
+    picture.write_bytes(b"not really a png")
+    fake = FakeClient(rights=member())
+    fake.dialogs[0].entity.default_banned_rights = ChatBannedRights(until_date=None, send_media=True)
+
+    code, out, _err, _fake = run_cli(
+        ["--json", "send", "--chat", str(CHAT_ID), "--file", str(picture), "--yes"], client=fake, capsys=capsys
+    )
+
+    envelope = envelope_of(out)
+    assert (code, envelope["error"]["code"]) == (2, "PERMISSION_DENIED")
+    assert "send_media" in envelope["error"]["message"]
+    assert fake.sent == []
+
+
+def test_a_send_with_no_file_asks_for_nothing_extra(run_cli, monkeypatch, capsys):
+    """The same chat, the same member: text alone is what the chat still allows."""
+    monkeypatch.setenv("TELEGRAM_SEND_ALLOWLIST", str(CHAT_ID))
+    fake = FakeClient(rights=member())
+    fake.dialogs[0].entity.default_banned_rights = ChatBannedRights(until_date=None, send_media=True)
+
+    code, out, _err, _fake = run_cli(
+        ["--json", "send", "--chat", str(CHAT_ID), "--text", "ship it", "--yes"], client=fake, capsys=capsys
+    )
+
+    envelope = envelope_of(out)
+    assert (code, envelope["status"]) == (0, "ok")
+    assert envelope["plan"]["preflight"]["required"] == ["send_messages"]
+    assert fake.sent
+
+
 def test_a_direct_chat_send_asks_for_no_rights_and_warns_nothing(run_cli, monkeypatch, capsys):
     harry = SimpleNamespace(
         id=777,

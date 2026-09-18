@@ -20,6 +20,7 @@ the shared redaction before it goes anywhere.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Sequence
 
 from telethon.tl import types
@@ -30,6 +31,9 @@ from telegram_tools._core.redaction import redact_text
 from telegram_tools.discovery import classify_entity
 from telegram_tools.envelope import PLATFORM, PREFIX
 from telegram_tools.resolver import resolve_chat
+
+# What Telethon reads an `until_date` of 0 -- Telegram's spelling of "forever" -- as.
+_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
 
 # Every right this tool asks about or reports.
 RIGHT_NAMES = (
@@ -51,6 +55,18 @@ RIGHT_NAMES = (
 # The three Telethon's `ParticipantPermissions` never spells, whatever the
 # chat, which are also the three ChatBannedRights carries under the same names.
 MEMBER_RIGHTS = ("send_messages", "send_media", "manage_topics")
+# Three more ChatBannedRights carries, which Telethon answers for admins only:
+# its `_admin_prop` returns False for anyone who is not one (1.45.0,
+# `tl/custom/participantpermissions.py`). Telegram's rule is the opposite way
+# round -- a chat that bans none of them lets every member pin, invite and
+# rename -- so for a member they are read off the banned rights like the three
+# above, and Telethon's False is not an answer (card agent-bo-95422318).
+DEFAULTED_RIGHTS = ("pin_messages", "change_info", "invite_users")
+# Everything a chat's or a member's banned rights decide.
+BANNABLE_RIGHTS = MEMBER_RIGHTS + DEFAULTED_RIGHTS
+# `send_messages` in ChatBannedRights bans every kind of message; `send_plain`
+# bans text and leaves media alone. Either one refuses a text message.
+PLAIN_BANS = ("send_messages", "send_plain")
 # The rest it spells as properties: is_creator, is_admin, and the admin flags it
 # reads off the participant's admin_rights (every one of them true for a basic
 # group's admin, add_admins only for its creator).
@@ -231,12 +247,16 @@ def rights_from(permissions: Any, chat: Any = None) -> Rights:
       covers both.
 
     A member right the chat cannot settle -- no chat entity, or a `min` one
-    that carries no rights -- stays unanswered rather than guessed.
+    that carries no rights -- stays unanswered rather than guessed. The three
+    `DEFAULTED_RIGHTS` are settled the same way for a member, and Telethon's
+    answer for them is discarded rather than read as absent.
     """
     answered = {name for name in TELETHON_RIGHTS if hasattr(permissions, name)}
     held = {name for name in answered if getattr(permissions, name)}
     if "is_creator" in held:
         return Rights(EVERY_RIGHT, EVERY_RIGHT)
+    if not getattr(permissions, "is_admin", False):
+        answered -= set(DEFAULTED_RIGHTS)
     for name, holds in _member_rights(permissions, chat).items():
         answered.add(name)
         if holds:
@@ -259,12 +279,18 @@ def _member_rights(permissions: Any, chat: Any) -> dict[str, bool]:
             found.update(send_messages=posts, send_media=posts)
         return found
     if _out_of_chat(participant) or broadcast:
-        return dict.fromkeys(MEMBER_RIGHTS, False)
+        return dict.fromkeys(BANNABLE_RIGHTS, False)
     defaults = _defaults(chat)
     if defaults is None:
         return {}
-    own = getattr(participant, "banned_rights", None)
-    found = {name: not (getattr(own, name, False) or getattr(defaults, name, False)) for name in MEMBER_RIGHTS}
+    own = _in_force(getattr(participant, "banned_rights", None))
+
+    def bans(*names: str) -> bool:
+        return any(getattr(own, name, False) or getattr(defaults, name, False) for name in names)
+
+    found = {name: not bans(name) for name in BANNABLE_RIGHTS}
+    # A chat that bans plain text alone still refuses a message with text in it.
+    found["send_messages"] = not bans(*PLAIN_BANS)
     if found["manage_topics"]:
         del found["manage_topics"]
     return found
@@ -274,7 +300,28 @@ def _defaults(chat: Any) -> Any:
     """The chat's default banned rights; an empty set when it has none, None when it cannot say."""
     if chat is None or getattr(chat, "min", False):
         return None
-    return getattr(chat, "default_banned_rights", None) or types.ChatBannedRights(until_date=None)
+    return _in_force(getattr(chat, "default_banned_rights", None)) or types.ChatBannedRights(until_date=None)
+
+
+def _in_force(banned: Any, now: datetime | None = None) -> Any:
+    """`banned` while it still binds, else None: a restriction can outlive its `until_date`.
+
+    Telegram lifts a timed restriction when it runs out, but the participant
+    object a probe reads can still carry the one that has expired -- and a
+    member refused a send it may make is the failure this checks for.
+
+    "Forever" is `until_date` 0 on the wire, and Telethon reads a date as the
+    epoch plus that many seconds, so forever arrives here as 1970-01-01 rather
+    than as None. Anything at or before the epoch is permanent; a date after it
+    and in the past has run out.
+    """
+    until = getattr(banned, "until_date", None)
+    if banned is None or until is None or not isinstance(until, datetime):
+        return banned
+    moment = until if until.tzinfo else until.replace(tzinfo=timezone.utc)
+    if moment <= _EPOCH:
+        return banned
+    return None if moment <= (now or datetime.now(timezone.utc)) else banned
 
 
 def _out_of_chat(participant: Any) -> bool:
