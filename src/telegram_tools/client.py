@@ -33,8 +33,8 @@ class SessionUnreadableError(RuntimeError):
     envelope_hint = "Log the profile in again with `telegram-tools auth`."
 
 
-def create_client(config: Config) -> TelegramClient:
-    """A client for this run's profile, through this run's proxy.
+def create_client(config: Config, *, receive_updates: bool = False) -> TelegramClient:
+    """A client for this run's profile, through this run's proxy. Not subscribed to updates.
 
     The session's directory is made 0700 and the file 0600: a login is the
     closest thing on disk to a credential, and the tool that writes it is the
@@ -42,6 +42,21 @@ def create_client(config: Config) -> TelegramClient:
     built, because Telethon opens its SQLite session in the constructor and
     creates that file at the process umask -- 0644 on a normal machine, which
     every later write would then refuse over.
+
+    `receive_updates=False` is what makes `watch run` work. Telegram delivers
+    each update through exactly one of an authorization's currently active
+    sessions, chosen at random (https://core.telegram.org/api/updates), and the
+    runner shares this profile's authorization with every other command by
+    design (`create_detached_client`). A one-shot connection that subscribed
+    would be in that draw and would swallow the pushed message the runner is
+    watching for -- the menu holding its own session while its runner ran was
+    enough to lose them. `invokeWithoutUpdates`, which this sends, takes this
+    connection out of the draw. Nothing here needs an update: what a command
+    changes comes back on its own RPC result, not as a pushed one.
+
+    `receive_updates=True` is for the one caller that does need them: QR login
+    waits for `updateLoginToken`, which Telegram will not send to a connection
+    that is not subscribed.
     """
     _prepare_session_dir(config.session_path)
     proxy = getattr(config, "proxy", None)
@@ -50,6 +65,7 @@ def create_client(config: Config) -> TelegramClient:
         config.api_id,
         config.api_hash,
         proxy=proxy.as_telethon() if proxy is not None else None,
+        receive_updates=receive_updates,
     )
     client.flood_sleep_threshold = 24 * 60 * 60
     tighten_session(config.session_path)
@@ -161,6 +177,11 @@ def create_detached_client(config: Config) -> TelegramClient:
     What `watch run` connects with. Everything else about it -- the proxy, the
     flood threshold -- is what `create_client` builds, because a runner that
     behaved differently from a one-shot command would be a second tool.
+
+    One thing does differ, and it is the whole point: this is the only client
+    here that subscribes to updates, so it is the only one Telegram can pick
+    when it hands a pushed message to one session of this authorization. See
+    `create_client`.
     """
     proxy = getattr(config, "proxy", None)
     client = TelegramClient(

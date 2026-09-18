@@ -2720,7 +2720,11 @@ async def _run_auth(args, config, *, report: Reporter, home: Path | None = None)
         )
 
     write(f"Logging in to profile {name!r}.")
-    client = await start_client(create_client(config), authorize=False)
+    # The one command that needs its connection subscribed to updates: QR login
+    # waits for `updateLoginToken`, and Telegram sends none to a connection that
+    # asked not to have them. Every other command stays out of that draw so the
+    # runner wins it -- see `create_client`.
+    client = await start_client(create_client(config, receive_updates=True), authorize=False)
     try:
         if await client.is_user_authorized():
             user = await client.get_me()
