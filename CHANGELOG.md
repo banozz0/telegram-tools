@@ -4,6 +4,24 @@ All notable changes to this project will be documented here.
 
 This project follows a practical changelog style: user-visible changes, safety changes, and release notes belong here; active task tracking belongs outside the repo.
 
+## Unreleased
+
+The final wave of this cycle: the shared core at v0.14, one new read verb, and the small faults the live menu campaign left on the board.
+
+- **`message pins` lists what a chat, or one of its forum topics, has pinned.** Newest message first, each row in `search`'s format. There is no pin time, because Telegram records none, and `--as-bot` refuses it, since Telegram marks `messages.search` users-only.
+- **A forum's chat-level watch cursor is retired instead of replayed forever.** Every event in a forum carries its topic's rid, so a cursor stored under the chat's own rid by an older version could never advance, and each `watch run` walked the whole forum again. Nothing else is retired: not a chat without topics, not a topic, and never a chat that would not resolve.
+- **A dropped event shows.** The runner's log names an event the engine discarded before any rule ran, with its reason; `watch status`' Last tick counts a drop, so a runner that discards everything it receives no longer reads as one that did nothing; and `watch run` prints what it did when it stops.
+- **`archive search --query campaign-alert-721` finds its row.** A query FTS5 cannot parse is searched again as the words it is made of, and `deploy AND` or an unbalanced quote finds nothing instead of raising. Deliberate FTS5 syntax still means what it says.
+- **Every archive readback goes through the shared store's own methods** rather than SQL spelled here. Bookmarking a message that already has a bookmark relabels it and keeps the original `created`, and an exports directory you keep at 0755 stays 0755 when an export lands in it.
+- **A write Telegram refuses leaves one `failed` line in `audit.jsonl`,** like every other executed write. A write this tool refused before the call still leaves nothing.
+- **`settings set`, every `admin`, `member` and `join-requests` write, and a `structure apply` that edits topics report what Telegram holds after the write,** not a copy served from before it. `settings set --forum` can now report a change at all.
+- **The preflight asks the right question of the right chat.** It names the chat it actually checked (the `--to` chat for a forward or a copy), asks for `send_media` when a send carries a file, stops refusing pins, invites and renames that a chat's own defaults allow, treats a plain-text ban and an expired restriction correctly, and no longer tells you to ask an admin of a direct chat.
+- **`message react` keeps the reactions you already hold on a message** instead of replacing them, within the one (or three, with Premium) Telegram lets an account hold. If Telegram refuses the longer set it keeps the new reaction and says which came off.
+- **A profile with no record of which account it is records it the first time a run has already asked Telegram,** so a login made before profiles existed stops being unsigned without anyone running `auth`. Nothing already recorded is ever replaced.
+- **A hint that names a profile prints the command with `--profile <name>` in it,** so following it acts on the profile it named instead of on `default`. The hints for the `qr` and `proxy` extras print `pipx inject` when the tool was installed with pipx.
+- **The Watch screens tell the truth.** The rule form no longer promises a prompt it never asks, the name and scope rows name their two traps, `watch status` says nobody holds the lock instead of claiming there is no lock file, `schedule list --chat` says when Telegram holds nothing, and the review queue labels its date `sent=`. A `watch run` teardown that fails for an unexpected reason now says so instead of vanishing.
+- **Smaller wording.** A message preview row says its time zone (`2026-09-05 10:00 UTC`); a typed `n` at any y/N prints `Answered no - cancelled.`, as a blank answer already did; two menu prompts say one thing about a blank; and the Create, Delete, Leave and My bots screens name the group they were opened from (`Main › Build › Create`).
+
 ## 3.34.0 - 2026-09-18
 
 Twenty-one defects the live menu campaign of 2026-09-17 and 2026-09-18 found, fixed on branches of their own and merged together.
