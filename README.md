@@ -4,11 +4,13 @@
 
 A command-line tool for your own Telegram account. Find the real IDs of your chats and forum topics, search and export messages, keep an archive you can search offline, send and schedule messages, and run your groups — admins, members, invites, topics, settings — from a menu, a terminal or a script.
 
-It also empties a forum topic without deleting the topic, the one job the Telegram app won't do.
+<a href="https://cli-tools-site.vercel.app/"><img src="https://raw.githubusercontent.com/banozz0/telegram-tools/main/assets/menu.png" alt="The telegram-tools menu: 1 Find IDs, 2 Read, 3 Write, 4 Build, 5 Clear messages, 6 Manage, 7 Watch, 8 Identity, 9 Check setup, 0 Exit" width="600"></a>
+
+Run `telegram-tools` with no arguments and that is what you get. **Try it before you install:** the [website](https://cli-tools-site.vercel.app/) lets you click through the real menu in your browser, and [its guide](https://cli-tools-site.vercel.app/docs#telegram-tools) goes further into most commands.
+
+The tool also empties a forum topic without deleting the topic, the one job the Telegram app won't do.
 
 Everything runs on your machine with your own API key: no server, no third party, nothing leaves your computer except the Telegram calls you asked for and the downloads you approve. Built on [Telethon](https://github.com/LonamiWebs/Telethon).
-
-**Try it before you install:** the [website](https://cli-tools-site.vercel.app/) lets you click through the real menu in your browser, and [its guide](https://cli-tools-site.vercel.app/docs#telegram-tools) goes further into most commands.
 
 ## Install
 
@@ -74,25 +76,7 @@ Every command has `--help` with all of its flags.
 
 ## The menu
 
-Run `telegram-tools` with no arguments:
-
-```text
-telegram-tools
-Acting as: Sven (@sven) · account
---------------------------------------------
-1. Find IDs (chats, topics)
-2. Read (search live, archive, export)
-3. Write (send, reply, message tools)
-4. Build (create, delete, structure)
-5. Clear messages
-6. Manage (admins, members, invites, settings)
-7. Watch (rules, runner, review queue)
-8. Identity (profiles, my bots)
-9. Check setup
-0. Exit
-```
-
-Every command has a row, so you never need to remember a flag. You pick chats, topics and bots from live lists instead of typing IDs, and `0` steps back. The menu asks exactly what the commands ask, and has no `--yes` at all.
+Run `telegram-tools` with no arguments and you get the nine rows pictured at the top; once it has connected, the line above them names the account it acts as. Every command has a row, so you never need to remember a flag. You pick chats, topics and bots from live lists instead of typing IDs, and `0` steps back. The menu asks exactly what the commands ask, and has no `--yes` at all.
 
 ## What it can do
 
