@@ -4,6 +4,10 @@ All notable changes to this project will be documented here.
 
 This project follows a practical changelog style: user-visible changes, safety changes, and release notes belong here; active task tracking belongs outside the repo.
 
+## Unreleased
+
+- **The README is a front page now, and it names the website.** It had grown to 915 lines and 12,500 words — every flag, edge case and error code of every command — which is more than anyone reads before installing. It is about 220 lines: what the tool does, install and setup, a quick start, the menu, one table of commands, what it won't do, the safety model in three tiers, the options most people need, and the contract for scripts. The detail it dropped lives where it is used — each command's `--help`, the guide at https://cli-tools-site.vercel.app/docs, and `skill/SKILL.md` for agents — and the website, until now only a badge under the title, is linked in the opening lines. It reaches the PyPI project page with the next release.
+
 ## 3.36.0 - 2026-09-18
 
 One change, and it is a behaviour change: every time you type is read in one stated zone.
