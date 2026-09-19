@@ -13,10 +13,22 @@ Everything runs on your machine with your own API key: no server, no third party
 ## Install
 
 ```bash
-pipx install telegram-tools     # or: uv tool install telegram-tools
+pipx install telegram-tools
+# or
+uv tool install telegram-tools
+# or
+pip install telegram-tools
 ```
 
-Needs Python 3.11+. GitHub has the newest version before PyPI does: `pipx install git+https://github.com/banozz0/telegram-tools.git`.
+Needs Python 3.11+, and `uv` downloads one for you if it's missing. `pipx` and `uv` keep the tool in an environment of its own; `pip` installs it into whichever one is active.
+
+The newest version reaches GitHub before PyPI:
+
+```bash
+pipx install git+https://github.com/banozz0/telegram-tools.git
+# or
+uv tool install git+https://github.com/banozz0/telegram-tools.git
+```
 
 Two optional extras: `proxy` to connect through a proxy, and `qr` to log in by QR code — `pipx install 'telegram-tools[proxy,qr]'`. Without its extra, a command that needs one refuses instead of quietly doing without.
 
