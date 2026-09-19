@@ -7,6 +7,7 @@ This project follows a practical changelog style: user-visible changes, safety c
 ## Unreleased
 
 - **The README is a front page now, and it names the website.** It had grown to 915 lines and 12,500 words — every flag, edge case and error code of every command — which is more than anyone reads before installing. It is about 220 lines: what the tool does, install and setup, a quick start, the menu, one table of commands, what it won't do, the safety model in three tiers, the options most people need, and the contract for scripts. The detail it dropped lives where it is used — each command's `--help`, the guide at https://cli-tools-site.vercel.app/docs, and `skill/SKILL.md` for agents — and the website, until now only a badge under the title, is linked in the opening lines. It reaches the PyPI project page with the next release.
+- **The bundled agent skill says what `--as-bot` runs.** Rule 9 of `skill/SKILL.md` said only `send` and `create topic` run as a bot and every other command refuses, so an agent asked to pin, react or ban as a named bot was told those refuse. It now lists what the tool runs as a bot: `send` (never `--at`), `create topic`, the message verbs but `read`, `unread`, `bookmark`, `draft` and `pins`, the five administration groups where the bot is an admin, `leave` and `watch`. The skill moves 1.23.0 -> 1.24.0.
 
 ## 3.36.0 - 2026-09-18
 

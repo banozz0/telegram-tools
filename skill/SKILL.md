@@ -1,7 +1,7 @@
 ---
 name: telegram-tools
 description: "Use when you need the real numeric ID of a Telegram chat, channel, group or forum topic — 'what's the ID of that topic?', 'which chat is -100…?', 'where do I send this?' — when the user wants their own Telegram messages searched or exported (JSON, CSV, JSONL, Markdown, HTML), when a history question can be answered from the local archive instead of a fresh fetch, when a message must be posted to a chat or topic the user has allowlisted, when a message the user named should get a reply, a reaction, a pin, or be forwarded, copied or bookmarked, when the user asks who the admins of a chat are, who is waiting to join, which invite links exist, what a chat's or a topic's settings are, or which chat folders they have, or when they want a message posted at a set time or a rule that alerts them when something happens in a chat."
-version: 1.23.0
+version: 1.24.0
 author: banozz0
 license: MIT
 platforms: [macos]
@@ -141,10 +141,12 @@ alert into the void, and they will not find out until something they needed neve
 arrived.
 
 **9. `--as-bot` only when the user named the bot.** Without it every run is the
-user's own account (rule 1). With it, `send` and `create topic` run as that bot —
-a different identity, with different reach and different consequences — and the
-switch is theirs to make: pass it only when the user said, in this conversation,
-which bot should post ("send that from the alerts bot"). Never pick a bot because
+user's own account (rule 1). With it, the run acts as that bot — `send` (never
+`--at`), `create topic`, the message verbs but `read`, `unread`, `bookmark`,
+`draft` and `pins`, the five administration groups where the bot is an admin,
+`leave` and `watch` — a different identity, with different reach and different
+consequences, and the switch is theirs to make: pass it only when the user said,
+in this conversation, which bot should act ("send that from the alerts bot"). Never pick a bot because
 its token happens to be configured, never fall back to it when the account is
 refused, and never use it to reach a chat the account is not in. Every other
 command refuses under it with `IDENTITY_MODE_UNSUPPORTED` and names the command

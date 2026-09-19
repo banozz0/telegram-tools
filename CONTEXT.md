@@ -203,10 +203,12 @@ The terms this codebase uses, and the boundaries they imply.
   a supergroup or channel is left through `channels.leaveChannel`, a basic
   group through `messages.deleteChatUser` with the account itself, and a
   private chat is refused because it has no seat to give up. It takes the
-  typed name anyway — dry-run, `--execute`, the chat's exact title, a terminal
-  in either mode, no `--yes` — because a chat the account **created** and left
-  keeps running without an owner and cannot be re-entered as its creator; the
-  dry-run says so (`creator` in the result and the mutation). A bot may leave.
+  typed name all the same — dry-run, `--execute`, the chat's exact title, a
+  terminal in either mode, no `--yes` — and getting back in takes an invite, a
+  public username or someone inside adding you. A chat the account **created**
+  is refused in both modes, the dry-run included (`PLATFORM_UNSUPPORTED`):
+  Telegram answers a creator's leave without an error and without effect, so
+  the hint points at transferring ownership or at `delete`. A bot may leave.
 - **Record** — the plain dict a message becomes (`records.py`): what `search`
   prints and what both export formats write. `has_media` keeps an
   attachment-only message from reading as empty.
