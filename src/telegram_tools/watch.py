@@ -46,6 +46,7 @@ from telegram_tools._core import rid as _rid
 from telegram_tools._core import rules as _rules
 from telegram_tools._core import runner as _runner
 from telegram_tools.envelope import PREFIX, CommandError
+from telegram_tools.send import allowlist_remedy, send_allowed
 
 RULE = "--------------------------------------------"
 
@@ -184,6 +185,96 @@ def rule_from(args: Any, base: Mapping[str, Any] | None = None) -> dict[str, Any
         data["enabled"] = bool(enabled)
     data.setdefault("enabled", True)
     return data
+
+
+# -- where an alert is allowed to land ---------------------------------------
+
+
+def _chat_id(text: str) -> int | None:
+    """`text` as the signed decimal id it spells, or None -- a name, not an id."""
+    return int(text) if text.lstrip("-").isdecimal() else None
+
+
+def _alert_destinations(rule) -> tuple[tuple[str, int, int | None], ...]:
+    """Every alert this rule aims at a chat or a topic here, as `(rid, chat id, topic id)`.
+
+    A command destination is how an alert leaves this platform, so the send
+    allowlist has no say over it; nor has it over a rid whose id segments are
+    not numbers, which is not something the runner could turn into a chat at
+    all (`adapters/events.TelegramMessageSender.send` reads `int(ids[0])`).
+    """
+    found: list[tuple[str, int, int | None]] = []
+    for action in rule.actions:
+        destination = action.destination
+        if action.kind != "alert" or destination is None or destination.kind != "platform":
+            continue
+        parsed = _rid.parse(str(destination.rid))
+        if parsed.kind not in ("chat", "topic"):
+            continue
+        chat_id = _chat_id(parsed.ids[0])
+        topic_id = _chat_id(parsed.ids[1]) if parsed.kind == "topic" else None
+        if chat_id is None or (parsed.kind == "topic" and topic_id is None):
+            continue
+        found.append((str(destination.rid), chat_id, topic_id))
+    return tuple(found)
+
+
+def require_alerts_allowlisted(rule, allowlist: Sequence[Any]) -> tuple[str, ...]:
+    """Refuse an alert TELEGRAM_SEND_ALLOWLIST can only ever refuse; name what it cannot decide.
+
+    `--alert-to` has always promised "the destination must be in
+    TELEGRAM_SEND_ALLOWLIST" and never asked, so a rule aimed off the list was
+    accepted, stored, and refused by `TelegramMessageSender` hours later in
+    the runner's log with nobody reading it -- the failure `schedule post`
+    had, fixed the same way (cards agent-bo-95422629 and agent-bo-95422403).
+
+    The hard part, and the reason this is not just `send_allowed`: a rule is
+    written offline, so the rid is never resolved to an entity, while
+    `send_allowed` matches an entry by the chat's id **or** its `@username`
+    and only the id is on the rid. Three things follow, and they decide the
+    shape of the check:
+
+    * A **numeric** entry is decidable here: it equals the rid's chat segment
+      or it never will. So is the topic half of either kind of entry, because
+      a topic id is a number the rid carries and nothing resolves it.
+    * A **@username** entry is not decidable here at all: `tg:chat:-100...`
+      could be that channel. Refusing over one would refuse a destination the
+      user did allowlist, which is a worse bug than the one being fixed.
+    * So this refuses only on an **unambiguous mismatch** -- nothing matches
+      by id *and* no name entry could still match -- and otherwise writes the
+      rule and says plainly which entries it could not read. The case in the
+      card, and the default, is the list being unset: no entries of either
+      kind, so every alert destination is unambiguously refused.
+
+    What this is not is a promise the alert will land. Resolution happens at
+    fire time and so does the decision that counts: `TelegramMessageSender`
+    resolves the chat and calls `require_send_allowed` with the id *and* the
+    username Telegram answered with. That is the gate; this only brings the
+    refusals it can decide forward to where somebody is reading, so it must
+    never be the reason to weaken the one there.
+
+    Raises on the refusal; returns the lines to warn with.
+    """
+    notes: list[str] = []
+    for rid, chat_id, topic_id in _alert_destinations(rule):
+        if send_allowed(allowlist, chat_id=chat_id, username=None, topic_id=topic_id):
+            continue
+        names = ", ".join(sorted("@" + entry.chat for entry in allowlist if _chat_id(entry.chat) is None and entry.topic in (None, topic_id)))
+        if names:
+            notes.append(
+                f"{rid} is not named by id in TELEGRAM_SEND_ALLOWLIST, which also names {names} -- a chat a rule "
+                "write cannot resolve, so whether the alert may land there is decided when the alert fires."
+            )
+            continue
+        raise WatchError(
+            f"{rid} is not in TELEGRAM_SEND_ALLOWLIST, and the runner alerts with nobody watching.",
+            code="NOT_ALLOWLISTED",
+            hint=(
+                f"{allowlist_remedy(chat_id, topic_id)}, or point the rule at --alert-command, "
+                "which is how an alert leaves this platform and answers to no list here."
+            ),
+        )
+    return tuple(notes)
 
 
 def read_rule_file(path) -> dict[str, Any]:

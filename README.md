@@ -94,7 +94,7 @@ Run `telegram-tools` with no arguments and you get the nine rows pictured at the
 | `structure` | A chat's shape as a file: export a blueprint (topics, default rights, slow mode — never people or messages), diff it against another chat, apply it. |
 | `admin`, `member`, `join-requests`, `invite`, `settings` | Running a group: admins and their rights; bans, kicks, mutes and restrictions; join requests; invite links; a chat's or a topic's settings. |
 | `folders` | Your chat folders — the tabs above your chat list: list, create, edit, delete. |
-| `watch` | Rules over live events — alert, tag, bookmark, archive, queue for review, never download or change anything — and the foreground runner that fires them. |
+| `watch` | Rules over live events — alert, tag, bookmark, archive, queue for review, never download or change anything — and the foreground runner that fires them. An alert's destination answers to your [send allowlist](#sending-without-the-prompt), checked when the rule is written and again when it fires. |
 | `schedule` | Messages posted later. `send --at` is **server-held**: Telegram posts it even with your machine off. `schedule post` is **runner-held**: `watch run` posts it, only while it's up — and it is the only way to repeat one. Because that post goes out with nobody watching, the chat has to be in your [send allowlist](#sending-without-the-prompt) before the schedule is written. |
 | `bots` | The bots you own, and what @BotFather edits: name, bio, description, commands, photo, default admin rights. |
 | `auth`, `profiles` | Log accounts in and out, list them, remove one. |
@@ -170,7 +170,7 @@ Every screen then names both identities: `Acting as: @alertsbot · bot (via Sven
 TELEGRAM_SEND_ALLOWLIST=-1001234567890:141,-1009876543210,@myalerts
 ```
 
-Each entry is a chat ID or `@username`, optionally `:topic-id` for one topic. Unset, every `--yes` send is refused. The same list covers the message verbs, the alerts a `watch` rule sends, and `schedule post` — which has no `--yes` at all, but hands the runner a message to post hours later with nobody there, so it refuses a chat off the list while you are still at the keyboard to read why.
+Each entry is a chat ID or `@username`, optionally `:topic-id` for one topic. Unset, every `--yes` send is refused. The same list covers the message verbs, the alerts a `watch` rule sends, and `schedule post` — which has no `--yes` at all, but hands the runner a message to post hours later with nobody there, so it refuses a chat off the list while you are still at the keyboard to read why. `watch rules add` and `edit` refuse an `--alert-to` for the same reason, with one honest limit: a rule is written with nothing connected, so its rid is never resolved into a chat. An ID on the list settles it either way; an entry naming that chat by `@username` cannot be read against a rid at all, so the rule is written, the command names the entries it could not decide, and the runner settles it when the alert fires.
 
 ### Through a proxy
 

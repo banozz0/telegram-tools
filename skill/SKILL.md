@@ -1,7 +1,7 @@
 ---
 name: telegram-tools
 description: "Telegram through the user's own account: look up chat or topic IDs, search or export messages, post, reply, react, pin, schedule, and run a chat's admins, invites, join requests, settings, folders and alert rules."
-version: 1.27.0
+version: 1.28.0
 author: banozz0
 license: MIT
 platforms: [macos]
@@ -91,11 +91,15 @@ fine. Anything that writes is theirs to run, not yours.
 
 **2. A send with no human in the loop only goes where the user already said it may.**
 `send --yes` posts with nobody watching, and so does a `schedule post` once the runner
-fires it hours later. The CLI refuses both for any destination not in the user's
-`TELEGRAM_SEND_ALLOWLIST` — `schedule post` at the moment the row is written, so the
-refusal arrives while somebody is there to read it. That refusal is the whole safety
-model — do not work around it by dropping `--yes` (which would block on a `y/N` prompt
-no agent can answer), by editing the user's `.env`, or by picking a different chat. A
+fires it hours later, and so does the alert of a `watch` rule. The CLI refuses all three
+for any destination not in the user's `TELEGRAM_SEND_ALLOWLIST` — `schedule post` and
+`watch rules add|edit` at the moment the row or the rule is written, so the refusal
+arrives while somebody is there to read it. A rule write resolves nothing, so when the
+list names a chat by `@username` it cannot tell whether an `--alert-to` rid is that chat:
+it writes the rule, says which entries it could not decide, and leaves the decision to
+the runner — read that line out to the user rather than treating it as approval. That
+refusal is the whole safety model — do not work around it by dropping `--yes` (which
+would block on a `y/N` prompt no agent can answer), by editing the user's `.env`, or by picking a different chat. A
 destination that is not allowlisted is a destination the user has not approved: draft
 the message, show it to them, and let them send it or add the entry.
 
@@ -318,8 +322,9 @@ check), **2** refused, **3** a gate needs a human and there is no terminal,
 a confirmation you cannot give, and `error.hint` is the command to hand the user.
 
 Codes you will actually meet: `NOT_ALLOWLISTED` (a send nobody is watching,
-aimed outside `TELEGRAM_SEND_ALLOWLIST`: a `--yes` send, or a `schedule post`,
-which the runner fires unattended — rule 2, relay it), `APPROVAL_REQUIRED` (rule 4 or 5
+aimed outside `TELEGRAM_SEND_ALLOWLIST`: a `--yes` send, a `schedule post`,
+or a `watch rules add|edit` whose `--alert-to` the list does not cover, each of them
+something the runner sends unattended — rule 2, relay it), `APPROVAL_REQUIRED` (rule 4 or 5
 territory: hand it over), `TARGET_NOT_FOUND` and `TARGET_KIND_MISMATCH` (the
 chat reference is wrong — run `discover`, never guess), `PERMISSION_DENIED` (the
 account lacks the right, named), `SESSION_IN_USE` (the user has the menu open —
@@ -615,8 +620,11 @@ names the files).
 - **`watch rules add`, `edit`, `enable`, `disable`, `remove`, and `watch run`** — the
   first five write a file that acts on the user's account without them present, and
   `watch run` is a long-running process they start and stop (it blocks until they do).
-  Rule 14. `watch rules list`, `watch status`, `schedule list` and `watch rules test`
-  are the read-only half and are fine to run, and so is `watch reload`; `watch stop`
+  Rule 14. `add` and `edit` also refuse, before writing anything, an `--alert-to` that
+  `TELEGRAM_SEND_ALLOWLIST` cannot cover (`NOT_ALLOWLISTED`) — the runner alerts with
+  nobody watching — so relay that refusal and let the user add the entry rather than
+  picking another chat. `watch rules list`, `watch status`, `schedule list` and
+  `watch rules test` are the read-only half and are fine to run, and so is `watch reload`; `watch stop`
   only when the user asked for it.
 - **`schedule post`** — it asks `y/N` and has no `--yes`, so from an agent session it
   blocks. Rule 14; hand the user the command. It also refuses, before the preview,

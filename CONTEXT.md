@@ -142,9 +142,20 @@ The terms this codebase uses, and the boundaries they imply.
   — a human typing `y` there is approving a send that happens hours later with
   nobody present, so the list is the only gate it has, and the write-time check
   is keyed on the same `chat[:topic]` the runner re-checks when it fires.
-  `send_allowed` in `send.py` is the one place the match is decided. An
-  interactive send is not restricted, because a human who saw the preview has
-  already made the decision the list exists to make for them.
+  `watch rules add|edit` check it too, and carry the one honesty a rule write
+  forces: nothing is connected, so the `--alert-to` rid is never resolved,
+  while an entry may name its chat by `@username`. So an id on the list
+  settles the destination, a `@username` entry leaves it undecided and is
+  reported rather than refused, and only an unambiguous mismatch — nothing by
+  id and no name entry that could still match — refuses the write
+  (`watch.require_alerts_allowlisted`). The topic half is settled either way,
+  because a topic id is a number the rid carries and nothing resolves it.
+  `send_allowed` in `send.py` is the one place the match is decided for this
+  tool; `_core/runner.PlatformDelivery` holds a third spelling, an exact-rid
+  set for a tool that hands it one, and this one hands it none, so the
+  sender's check is the only one the runner makes. An interactive send is not
+  restricted, because a human who saw the preview has already made the
+  decision the list exists to make for them.
 - **Archive** — `~/.telegram-tools/archive.sqlite`, the shared store
   (`_core/archive.py`, schema `cli-tools/archive/1`) holding what this
   account can read, opened through `archive.open_archive`. The file is created

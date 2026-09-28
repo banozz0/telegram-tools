@@ -3701,8 +3701,17 @@ async def _run_watch_rules(args, config, *, report: Reporter) -> int:
         # a regex that does not compile and a command that is not on PATH are
         # all refused here, at rule load, not when the rule would fire.
         rule = _rules.load_rule(data, source=f"{name}.json")
+        # And the send allowlist, for the reason the core's validation is here
+        # too: an alert the list could only ever refuse is worth refusing while
+        # somebody is at the keyboard, not at three in the morning in the
+        # runner's log. `require_alerts_allowlisted` says what a rule write can
+        # and cannot decide with no client to resolve a rid; the fire-time
+        # check in `TelegramMessageSender` is still the gate.
+        notes = watch_ops.require_alerts_allowlisted(rule, config.send_allowlist)
         plan = _watch_plan(identity, f"watch rules {verb}", f"rule.{verb}", {"name": name, "actions": [action.kind for action in rule.actions]})
         report.set_plan(plan)
+        for note in notes:
+            report.warn(note)
         _rules.write_rule(paths, rule)
         written = _rules.load_file(path)
         evidence = Evidence.verified(f"{path.name} holds rule {written.name} with {len(written.actions)} action(s)")

@@ -27,6 +27,7 @@ from telethon.tl.types import MessageEntityTextUrl, MessageEntityUrl
 
 from telegram_tools import archive as archive_store
 from telegram_tools import cli
+from telegram_tools import menu
 from telegram_tools import profiles as profile_store
 from telegram_tools import watch as watch_ops
 from telegram_tools._core import rules as _rules
@@ -1035,7 +1036,7 @@ def add_a_rule(run_watch, capsys, *extra, name="deploys"):
 # -- rules ---------------------------------------------------------------------
 
 
-def test_a_rule_is_written_read_back_and_listed(run_watch, capsys, home):
+def test_a_rule_is_written_read_back_and_listed(run_watch, capsys, alerts_allowlisted):
     code, out, _err, _fake = add_a_rule(run_watch, capsys, "--alert-to", ALERTS_RID, "--tag", "deploy")
     assert code == 0
     payload = envelope_of(out)
@@ -1092,7 +1093,130 @@ def test_an_action_kind_outside_the_closed_list_cannot_be_written_by_hand_either
     assert envelope_of(out)["error"]["code"] == "RULE_INVALID"
 
 
-def test_editing_replaces_the_fields_the_flags_name_and_leaves_the_rest(run_watch, capsys, home):
+def test_a_rule_alerting_outside_the_allowlist_is_refused_before_the_file_is_written(run_watch, capsys, home):
+    """Card agent-bo-95422629: `--alert-to` promised the allowlist and never asked it.
+
+    The runner alerts through `TelegramMessageSender` under `yes_allowlist`, so
+    a rule aimed off the list could only ever be refused -- at three in the
+    morning, in the runner's log, with nobody reading. With the list unset,
+    which is the default, nothing is allowlisted and no resolution could change
+    that, so the refusal is decidable here and arrives here.
+    """
+    code, out, err, _fake = run_watch(
+        ["--json", "watch", "rules", "add", "--name", "deploys", "--on", "message", "--alert-to", ALERTS_RID],
+        capsys=capsys,
+    )
+    assert code == 2, out
+    error = envelope_of(out)["error"]
+    assert error["code"] == "NOT_ALLOWLISTED"
+    assert ALERTS_RID in error["message"] and "TELEGRAM_SEND_ALLOWLIST" in error["message"]
+    assert f"TELEGRAM_SEND_ALLOWLIST={CHANNEL_ID}" in error["hint"]
+    assert "--alert-command" in error["hint"], "the other destination kind the list has no say over"
+    assert not (archive_store.paths_for(home).rules / "deploys.json").exists(), "and no rule was written"
+    assert "Written to" not in out and "Written to" not in err
+
+
+def test_an_allowlisted_alert_destination_still_writes_the_rule(run_watch, capsys, alerts_allowlisted):
+    code, out, _err, _fake = run_watch(
+        ["--json", "watch", "rules", "add", "--name", "deploys", "--on", "message", "--alert-to", ALERTS_RID],
+        capsys=capsys,
+    )
+    assert code == 0, out
+    payload = envelope_of(out)
+    assert [action["kind"] for action in payload["result"]["rule"]["actions"]] == ["alert"]
+    assert payload.get("warnings", []) == [], "an id on the list decides it outright"
+
+
+def test_a_chat_allowlisted_for_one_topic_does_not_carry_an_alert_into_another(run_watch, capsys, home, monkeypatch):
+    """The topic half is decidable offline either way: a topic id is never resolved."""
+    monkeypatch.setenv("TELEGRAM_SEND_ALLOWLIST", f"{FORUM_ID}:141")
+    code, out, _err, _fake = run_watch(
+        ["--json", "watch", "rules", "add", "--name", "topic141", "--on", "message", "--alert-to", TOPIC_RID],
+        capsys=capsys,
+    )
+    assert code == 0, out
+
+    other = f"tg:topic:{FORUM_ID}:217"
+    code, out, _err, _fake = run_watch(
+        ["--json", "watch", "rules", "add", "--name", "topic217", "--on", "message", "--alert-to", other],
+        capsys=capsys,
+    )
+    assert code == 2, out
+    error = envelope_of(out)["error"]
+    assert error["code"] == "NOT_ALLOWLISTED"
+    assert f"TELEGRAM_SEND_ALLOWLIST={FORUM_ID}:217" in error["hint"]
+    assert not (archive_store.paths_for(home).rules / "topic217.json").exists()
+
+
+def test_a_username_entry_cannot_be_decided_offline_so_the_rule_is_written_and_says_so(run_watch, capsys, home, monkeypatch):
+    """The one honest gap: a rule is written with no client, so a rid is never resolved.
+
+    `send_allowed` matches an entry by id *or* by the chat's @username, and the
+    username is only knowable once something resolves the rid. So an entry that
+    names a chat by @username leaves this destination undecided rather than
+    refused -- the rid could be that channel. The rule is written, the tool
+    says which entries it could not decide, and `TelegramMessageSender` decides
+    it for real when the alert fires.
+    """
+    monkeypatch.setenv("TELEGRAM_SEND_ALLOWLIST", "@agencyalerts")
+    code, out, err, _fake = run_watch(
+        ["--json", "watch", "rules", "add", "--name", "deploys", "--on", "message", "--alert-to", ALERTS_RID],
+        capsys=capsys,
+    )
+    assert code == 0, out
+    payload = envelope_of(out)
+    (warning,) = payload["warnings"]
+    assert ALERTS_RID in warning and "agencyalerts" in warning
+    assert "when the alert fires" in warning, "it must not read as an approval"
+    assert "warning:" in err
+    assert (archive_store.paths_for(home).rules / "deploys.json").exists()
+
+
+def test_the_menus_rule_form_is_refused_by_the_same_check(home, monkeypatch):
+    """The Add and Edit rule screens hand `cli.run` a namespace, so they answer to it too.
+
+    `menu._rule_values` folds each list row into the one comma-separated string
+    the CLI splits exactly as it folds a repeated flag, so this is the shape
+    `_run_watch_rules` really sees from the menu -- the path that would
+    otherwise still have written a rule whose alert can only be refused.
+    """
+    fake = SendingClient()
+
+    async def started(_client, *, authorize=True):
+        return fake
+
+    monkeypatch.setattr(cli, "create_client", lambda _config: fake)
+    monkeypatch.setattr(cli, "start_client", started)
+
+    staged = {key: (False if kind == "toggle" else None) for key, _label, kind in menu.RULE_FIELDS}
+    staged.update({"name": "deploys", "on": "message", "alert_to": ALERTS_RID})
+    args = SimpleNamespace(command="watch", watch_kind="rules", rules_verb="add", **menu._rule_values(staged))
+
+    with pytest.raises(watch_ops.WatchError) as refused:
+        run(cli.run(args))
+    assert refused.value.code == "NOT_ALLOWLISTED"
+    assert not (archive_store.paths_for(home).rules / "deploys.json").exists()
+
+
+def test_editing_a_rule_onto_a_destination_outside_the_allowlist_is_refused(run_watch, capsys, alerts_allowlisted, home):
+    """`edit` sets destinations too, so it answers to the same list the write does."""
+    code, _out, _err, _fake = run_watch(
+        ["--json", "watch", "rules", "add", "--name", "deploys", "--on", "message", "--alert-to", ALERTS_RID],
+        capsys=capsys,
+    )
+    assert code == 0
+
+    elsewhere = f"tg:chat:{FORUM_ID}"
+    code, out, _err, _fake = run_watch(
+        ["--json", "watch", "rules", "edit", "--name", "deploys", "--alert-to", elsewhere], capsys=capsys
+    )
+    assert code == 2, out
+    assert envelope_of(out)["error"]["code"] == "NOT_ALLOWLISTED"
+    stored = json.loads((archive_store.paths_for(home).rules / "deploys.json").read_text())
+    assert stored["actions"] == [{"kind": "alert", "destination": {"kind": "platform", "rid": ALERTS_RID}}], "unchanged"
+
+
+def test_editing_replaces_the_fields_the_flags_name_and_leaves_the_rest(run_watch, capsys, alerts_allowlisted):
     add_a_rule(run_watch, capsys, "--alert-to", ALERTS_RID, "--cooldown", "300")
     code, out, _err, _fake = run_watch(
         ["--json", "watch", "rules", "edit", "--name", "deploys", "--domain", "github.com"], capsys=capsys
@@ -1157,7 +1281,7 @@ def test_rules_remove_yes_skips_the_prompt_and_the_preview_still_prints(run_watc
     assert not path.exists() and "[y/N]" not in err and "deploys" in err
 
 
-def test_test_says_what_would_fire_and_fires_nothing(run_watch, capsys, home, tmp_path):
+def test_test_says_what_would_fire_and_fires_nothing(run_watch, capsys, alerts_allowlisted, tmp_path):
     add_a_rule(run_watch, capsys, "--alert-to", ALERTS_RID)
     event_file = tmp_path / "event.json"
     event_file.write_text(json.dumps(watch_events.message_events(fake_message(1))[0]))
@@ -1205,9 +1329,18 @@ def test_a_second_runner_exits_two_with_runner_locked_naming_the_holder(run_watc
     assert fake.pages == [], "it refused before it connected"
 
 
-def test_an_alert_outside_the_send_allowlist_is_reported_not_allowlisted(run_watch, capsys, home):
-    """The P8 row: automated alerts answer to the same list an unattended `send --yes` does."""
+def test_an_alert_outside_the_send_allowlist_is_reported_not_allowlisted(run_watch, capsys, home, monkeypatch):
+    """The P8 row: automated alerts answer to the same list an unattended `send --yes` does.
+
+    The rule is written while the channel is on the list and the entry is gone
+    by the time the runner is up, which is the case the fire-time check exists
+    for: the write-time check added for card agent-bo-95422629 only moves the
+    refusals it can decide forward, and an allowlist that changed afterwards is
+    not one of them. `TelegramMessageSender` is still the gate.
+    """
+    monkeypatch.setenv("TELEGRAM_SEND_ALLOWLIST", str(CHANNEL_ID))
     add_a_rule(run_watch, capsys, "--alert-to", ALERTS_RID)
+    monkeypatch.delenv("TELEGRAM_SEND_ALLOWLIST")
     source = RecordedSource(live=[watch_events.message_events(fake_message(1))[0]])
     code, out, _err, fake = run_watch(["--json", "watch", "run"], capsys=capsys, source=source)
     assert code == 0
