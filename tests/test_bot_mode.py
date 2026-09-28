@@ -213,7 +213,13 @@ def test_a_bare_as_bot_gets_no_menu(monkeypatch, capsys):
         cli.main(["--as-bot", "alerts"])
 
     assert raised.value.code == 2
-    assert "bot mode has no menu" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "bot mode has no menu" in err
+    # The line gives an example and points at --help for the rest: the whole
+    # list is BOT_MODE_COMMANDS, and an error line that spelled it out went
+    # stale the moment a group joined it.
+    assert "--help names what a bot may run" in err
+    assert "create topic" not in err
 
 
 def test_an_unknown_nickname_refuses_by_code_without_opening_a_bot(run_cli, capsys):

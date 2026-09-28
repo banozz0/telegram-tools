@@ -4293,7 +4293,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command is None:
             if getattr(args, "as_bot", None):
                 # The menu is the account's session; a bot has no rows in it.
-                parser.error("--as-bot needs a command (send, or create topic); bot mode has no menu.")
+                parser.error("--as-bot needs a command (`send`, for example); bot mode has no menu. --help names what a bot may run.")
             if not sys.stdin.isatty():
                 # A menu needs a human. Scripts and agents get the help they
                 # actually wanted instead of a blocked input() prompt.
