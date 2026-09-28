@@ -207,7 +207,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--as-bot",
         dest="as_bot",
         metavar="NICK",
-        help="Act as this bot (a TELEGRAM_BOT_TOKENS nickname) instead of the account: send, create topic and the message verbs except read, unread, bookmark and draft",
+        help="Act as this bot (a TELEGRAM_BOT_TOKENS nickname) instead of the account: send (never --at), create topic, the message verbs but read, unread, bookmark, draft and pins, the five administration groups where the bot is an admin, leave and watch",
     )
     subparsers = parser.add_subparsers(dest="command")
 
@@ -572,7 +572,7 @@ def build_parser() -> argparse.ArgumentParser:
         selection = verb_parsers[verb].add_mutually_exclusive_group(required=True)
         selection.add_argument("--ids", action="append", metavar="ID[,ID…]", help="Message ids; repeatable, comma-separated")
         selection.add_argument("--from-search", dest="from_search", metavar="QUERY", help="Select every archived message in this chat matching an archive search query")
-        verb_parsers[verb].add_argument("--limit", type=positive_int, metavar="N", help="Refuse a selection larger than this (default 200, at most 1000)")
+        verb_parsers[verb].add_argument("--limit", type=positive_int, metavar="N", help="Refuse a selection larger than this (default 200; above 1000 needs --i-know)")
         verb_parsers[verb].add_argument("--i-know", dest="i_know", action="store_true", help="Allow more than 1000 messages; the count is asked for at the prompt")
     verb_parsers["delete"].add_argument("--execute", action="store_true", help="Actually delete them after typing DELETE")
     for verb in ("forward", "copy"):

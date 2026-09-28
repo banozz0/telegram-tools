@@ -36,13 +36,16 @@ The terms this codebase uses, and the boundaries they imply.
   through `TELEGRAM_BOT_TOKENS` exactly as `bots --bot` does, the token opens a
   `MemorySession` (`bot_session.bot_client`, never on disk), and the run is
   handed that client with a `BotIdentity` already set. It narrows, never
-  widens: `BOT_MODE_COMMANDS` is the whole list of what runs (`send`, `create
-  topic`), everything else refuses with `IDENTITY_MODE_UNSUPPORTED` before
-  config is read, because Telegram marks the dialog list, history, search and
-  the rest user-only (Telethon raises `BotMethodInvalidError`). Targets resolve
-  by id or `@username` only (`adapters/bot.py`, `resolve_chat_as_bot`), and the
-  preflight is the bot's rights, with "not a member" a named refusal rather
-  than an unknown. The menu has no bot mode: it is one account session.
+  widens: `BOT_MODE_COMMANDS` with `BOT_MODE_CREATE_KINDS` and
+  `messages.BOT_VERBS` is the whole list of what runs (`send` but never
+  `--at`, `create topic`, the message verbs bar `read`, `unread`, `bookmark`,
+  `draft` and `pins`, the five administration groups where the bot is an
+  admin, `leave`, `watch`), everything else refuses with
+  `IDENTITY_MODE_UNSUPPORTED` before config is read, because Telegram marks the
+  dialog list, history, search and the rest user-only (Telethon raises
+  `BotMethodInvalidError`). Targets resolve by id or `@username` only
+  (`adapters/bot.py`, `resolve_chat_as_bot`), and the preflight is the bot's
+  rights, with "not a member" a named refusal rather than an unknown. The menu has no bot mode: it is one account session.
 - **Via** — the account a bot identity acts through: `identity.via` is its rid,
   and the banner names it after the mode, `bot (via Sven (@sven))`. Read from
   the profile record (a label and an id) so no account session is opened; a

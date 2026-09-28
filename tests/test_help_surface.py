@@ -183,10 +183,16 @@ _ROOT_ADDITIONS = (
     # The bot-mode card (agent-bo-95421937): one global flag, the explicit
     # switch into acting as an owned bot. No subcommand gained or lost a flag.
     "[--as-bot NICK]",
-    # Reworded on the message-ops card (agent-bo-95421945): the flag's help
-    # names what a bot may run now that eleven message verbs join send and
-    # create topic, and the four account-only verbs it refuses.
-    "--as-bot NICK Act as this bot (a TELEGRAM_BOT_TOKENS nickname) instead of the account: send, create topic and the message verbs except read, unread, bookmark and draft",
+    # Reworded on the message-ops card (agent-bo-95421945), and again on the
+    # bot-mode help card (agent-bo-95422402): the line stopped at send, create
+    # topic and the message verbs, three groups short of what the tool runs.
+    # `BOT_MODE_COMMANDS` has carried `leave`, `watch` and the five
+    # administration groups since their own cards landed, and the two refusals
+    # a caller trips over -- `send --at` in `require_bot_mode_supports` and
+    # `message pins` through `messages.READ_VERBS` -- were unnamed. The list is
+    # now the one `skill/SKILL.md` rule 9 and the README already give. Help
+    # text only: nothing about what bot mode runs changed.
+    "--as-bot NICK Act as this bot (a TELEGRAM_BOT_TOKENS nickname) instead of the account: send (never --at), create topic, the message verbs but read, unread, bookmark, draft and pins, the five administration groups where the bot is an admin, leave and watch",
     # The archive card (agent-bo-95421940): one new subcommand group, and on
     # the live `search` a switch that is the documented alias of `archive
     # search`. The subcommand name appears twice, as `auth,profiles,` does.
@@ -358,6 +364,20 @@ _BOUND_ZONE_REWRITES = (
 )
 _UNTIL_ZONE_REWRITES = ((f"or an ISO date/time ({_ZONE}); at least a minute", "or an ISO date/time; at least a minute"),)
 
+# The bot-mode help card (agent-bo-95422402). `--limit` said "at most 1000"
+# while `--i-know`, two lines under it on the same parser, said it allows more
+# than 1000 -- and `messages.bound_selection` is the second line: above the
+# hard limit the flag plus the typed count opens it. The line now says what
+# the flag does rather than contradicting its neighbour; the bound itself is
+# untouched. The three bulk verbs share one flag definition, so they share the
+# rewrite.
+_BULK_LIMIT_REWRITES = (
+    (
+        "--limit N Refuse a selection larger than this (default 200; above 1000 needs --i-know)",
+        "--limit N Refuse a selection larger than this (default 200, at most 1000)",
+    ),
+)
+
 ALLOWED_REWRITES = {
     # A choice list that grew. The help line is the same words; the braces name
     # more formats. Section 15: `--format` gains jsonl, markdown and html, and
@@ -424,6 +444,11 @@ ALLOWED_REWRITES = {
     "member-mute": _UNTIL_ZONE_REWRITES,
     "member-restrict": _UNTIL_ZONE_REWRITES,
     "invite-create": ((f"or an ISO date/time; {_ZONE}", "or an ISO date/time"),),
+    # The bot-mode help card (agent-bo-95422402); the reason is on
+    # `_BULK_LIMIT_REWRITES` above.
+    "message-delete": _BULK_LIMIT_REWRITES,
+    "message-forward": _BULK_LIMIT_REWRITES,
+    "message-copy": _BULK_LIMIT_REWRITES,
 }
 
 # The per-command `--json` gained an optional path, which argparse spells with
