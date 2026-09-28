@@ -91,7 +91,16 @@ from telegram_tools.adapters.blueprint import TelegramBlueprintPort, chat_kind
 from telegram_tools.resolver import EntityResolutionError, resolve_chat
 from telegram_tools.records import BARE_TIME_IS_LOCAL, archive_bound
 from telegram_tools.search import PINS_LIMIT, format_message_records, format_pins, pinned_messages, search_messages
-from telegram_tools.send import SendTarget, confirm_send, format_send_preview, format_sent, require_send_allowed, send_message
+from telegram_tools.send import (
+    SendTarget,
+    confirm_send,
+    allowlist_remedy,
+    format_send_preview,
+    format_sent,
+    require_send_allowed,
+    send_allowed,
+    send_message,
+)
 from telegram_tools.topics import get_forum_topics, get_forum_topics_by_ids, in_id_order
 from telegram_tools.writes import build_plan, read_back, recheck_for, require_rights
 from telegram_tools import __version__
@@ -500,7 +509,11 @@ def build_parser() -> argparse.ArgumentParser:
     schedule_list = schedule_kinds.add_parser("list", help="What is scheduled, each row saying which of the two guarantees it has")
     schedule_list.add_argument("--chat", help="Also read what Telegram is holding for this chat (server-held); without it, only this runner's own")
     schedule_post = schedule_kinds.add_parser("post", help="Store a message for this runner to post later (runner-held: it fires only while `watch run` is up)")
-    schedule_post.add_argument("--chat", required=True, help="Chat/channel username, link, or ID")
+    schedule_post.add_argument(
+        "--chat",
+        required=True,
+        help="Chat/channel username, link, or ID; it must be in TELEGRAM_SEND_ALLOWLIST, because the runner posts it with nobody here",
+    )
     schedule_post.add_argument("--topic", type=positive_int, help="Topic ID to post into; omit for the chat itself")
     schedule_post.add_argument("--text", required=True, help="The message, or - to read it from stdin")
     schedule_when = schedule_post.add_mutually_exclusive_group(required=True)
@@ -3793,7 +3806,7 @@ async def _run_schedule(args, config, *, client=None, report: Reporter) -> int:
             if kind == "list":
                 return await _run_schedule_list(args, schedules, client=client, report=report, reference=reference)
             if kind == "post":
-                return await _run_schedule_post(args, schedules, identity, client=client, report=report)
+                return await _run_schedule_post(args, schedules, identity, config, client=client, report=report)
             return await _run_schedule_cancel(args, schedules, identity, client=client, report=report, reference=reference)
     finally:
         if owns:
@@ -3819,12 +3832,13 @@ async def _run_schedule_list(args, schedules, *, client, report: Reporter, refer
     return 0
 
 
-async def _run_schedule_post(args, schedules, identity: Identity, *, client, report: Reporter) -> int:
+async def _run_schedule_post(args, schedules, identity: Identity, config, *, client, report: Reporter) -> int:
     """A message this runner will post. It says plainly that a runner that is down posts nothing."""
     text = _message_text(args.text, has_files=False)
     if not text:
         raise ValueError("schedule post needs --text.")
-    resolved, _chat, _topic, destination = await _resolve_destination(client, report, args.chat, getattr(args, "topic", None))
+    topic_id = args.topic
+    resolved, _chat, _topic, destination = await _resolve_destination(client, report, args.chat, topic_id)
     report.set_target(destination)
     when = None if args.at is None else watch_ops.require_future(watch_ops.parse_when(args.at))
     every = None if args.every is None else watch_ops.check_every(args.every)
@@ -3844,6 +3858,21 @@ async def _run_schedule_post(args, schedules, identity: Identity, *, client, rep
     # The right is checked now, even though the send is later: a schedule that
     # could never post is worth refusing while somebody is here to read why.
     require_rights(plan, rights, SEND_RIGHTS)
+    # And the allowlist for the same reason. `TelegramMessageSender` sends
+    # under `yes_allowlist`, so a destination off the list is a row that can
+    # only ever fail with NOT_ALLOWLISTED, hours from now with nobody reading.
+    # The key is the destination including its topic -- the same one the
+    # sender re-checks when it fires -- so a chat allowlisted for one topic
+    # does not carry another.
+    if not send_allowed(config.send_allowlist, chat_id=resolved.id, username=getattr(resolved.entity, "username", None), topic_id=topic_id):
+        raise CommandError(
+            f"{destination.display} is not in TELEGRAM_SEND_ALLOWLIST, and this runner posts unattended.",
+            code="NOT_ALLOWLISTED",
+            hint=(
+                f"{allowlist_remedy(resolved.id, topic_id)}. A scheduled post goes out with nobody watching, "
+                "so the allowlist is the only gate it has."
+            ),
+        )
     preview = "\n".join(
         [
             f"Scheduling into {destination.display}",

@@ -449,6 +449,18 @@ ALLOWED_REWRITES = {
     "message-delete": _BULK_LIMIT_REWRITES,
     "message-forward": _BULK_LIMIT_REWRITES,
     "message-copy": _BULK_LIMIT_REWRITES,
+    # The schedule-allowlist card (agent-bo-95422403). `schedule post` now
+    # refuses a destination outside `TELEGRAM_SEND_ALLOWLIST` when the row is
+    # written, rather than letting the runner discover it hours later with
+    # nobody reading, so the flag that names the destination says so. The
+    # `--chat` line keeps its words and appends the gate; nothing was removed,
+    # and `schedule post` still has no `--yes`.
+    "schedule-post": (
+        (
+            "--chat CHAT Chat/channel username, link, or ID; it must be in TELEGRAM_SEND_ALLOWLIST, because the runner posts it with nobody here",
+            "--chat CHAT Chat/channel username, link, or ID",
+        ),
+    ),
 }
 
 # The per-command `--json` gained an optional path, which argparse spells with

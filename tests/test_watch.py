@@ -1007,6 +1007,18 @@ def run_watch(home, monkeypatch):
     return go
 
 
+@pytest.fixture
+def alerts_allowlisted(home, monkeypatch):
+    """`@agencyalerts` in TELEGRAM_SEND_ALLOWLIST, which `home` otherwise unsets.
+
+    A test asks for this when it wants an unattended send into that channel to
+    go through -- `schedule post` above all, which refuses a destination the
+    list does not name, because the runner posts it with nobody there (card
+    agent-bo-95422403).
+    """
+    monkeypatch.setenv("TELEGRAM_SEND_ALLOWLIST", str(CHANNEL_ID))
+
+
 def envelope_of(out: str) -> dict:
     payload = json.loads(out)
     validate_envelope(payload)
@@ -1414,7 +1426,7 @@ def test_a_send_at_in_the_past_refuses_before_anything_is_asked(run_watch, capsy
     assert fake.sent == []
 
 
-def test_schedule_post_is_runner_held_and_says_so_before_it_is_answered(run_watch, capsys, home):
+def test_schedule_post_is_runner_held_and_says_so_before_it_is_answered(run_watch, capsys, alerts_allowlisted):
     """The P8 row: `schedule post` lists as runner-held."""
     when = (datetime.now().astimezone() + timedelta(hours=2)).replace(microsecond=0)
     code, out, _err, fake = run_watch(
@@ -1434,7 +1446,7 @@ def test_schedule_post_is_runner_held_and_says_so_before_it_is_answered(run_watc
     assert row["guarantee"] == watch_ops.RUNNER_HELD and row["rid"] == ALERTS_RID
 
 
-def test_schedule_post_takes_a_repeat_and_refuses_a_repeat_it_cannot_read(run_watch, capsys):
+def test_schedule_post_takes_a_repeat_and_refuses_a_repeat_it_cannot_read(run_watch, capsys, alerts_allowlisted):
     code, out, _err, _fake = run_watch(
         ["--json", "schedule", "post", "--chat", "@agencyalerts", "--text", "standup", "--every", "0 9 * * mon"],
         capsys=capsys,
@@ -1450,7 +1462,7 @@ def test_schedule_post_takes_a_repeat_and_refuses_a_repeat_it_cannot_read(run_wa
     assert code == 2 and "cron" in err
 
 
-def test_schedule_list_shows_both_kinds_each_with_its_own_guarantee(run_watch, capsys, home):
+def test_schedule_list_shows_both_kinds_each_with_its_own_guarantee(run_watch, capsys, alerts_allowlisted):
     when = (datetime.now().astimezone() + timedelta(days=1)).replace(microsecond=0)
     client = SendingClient()
     run_watch(["send", "--chat", "@agencyalerts", "--text", "native", "--at", when.isoformat()], capsys=capsys, client=client, answer="y")
@@ -1466,7 +1478,7 @@ def test_schedule_list_shows_both_kinds_each_with_its_own_guarantee(run_watch, c
     assert "Held by Telegram (server-held)" in out and "Held by this runner (runner-held" in out
 
 
-def test_asking_telegram_for_a_chat_says_so_even_when_it_holds_nothing(run_watch, capsys, home):
+def test_asking_telegram_for_a_chat_says_so_even_when_it_holds_nothing(run_watch, capsys, alerts_allowlisted):
     """A chat Telegram holds nothing for gets a block saying that, not silence.
 
     Telegram 7, 2026-09-17: the list for a chat printed only the runner's own
@@ -1512,7 +1524,7 @@ def test_cancelling_one_telegram_holds_needs_its_chat_and_reads_back_that_it_is_
     assert client.scheduled[CHANNEL_ID] == []
 
 
-def test_schedule_cancel_yes_skips_the_prompt_for_both_kinds(run_watch, capsys, home):
+def test_schedule_cancel_yes_skips_the_prompt_for_both_kinds(run_watch, capsys, alerts_allowlisted):
     """Card agent-bo-95422198: no terminal, answer n, both a runner-held and a Telegram-held one cancelled."""
     code, out, _err, _fake = run_watch(
         ["--json", "schedule", "post", "--chat", "@agencyalerts", "--text", "standup", "--every", "1d"], capsys=capsys, isatty=True, answer="y"
@@ -1535,7 +1547,7 @@ def test_schedule_cancel_yes_skips_the_prompt_for_both_kinds(run_watch, capsys, 
     assert client.scheduled[CHANNEL_ID] == [] and "[y/N]" not in err
 
 
-def test_cancelling_one_this_runner_holds_needs_no_chat_and_no_connection(run_watch, capsys, home):
+def test_cancelling_one_this_runner_holds_needs_no_chat_and_no_connection(run_watch, capsys, alerts_allowlisted):
     code, out, _err, _fake = run_watch(
         ["--json", "schedule", "post", "--chat", "@agencyalerts", "--text", "standup", "--every", "1d"],
         capsys=capsys,
@@ -1553,7 +1565,7 @@ def test_cancelling_one_this_runner_holds_needs_no_chat_and_no_connection(run_wa
     assert code == 2 and envelope_of(out)["error"]["code"] == "TARGET_NOT_FOUND"
 
 
-def test_a_schedule_the_account_cannot_post_into_is_refused_at_the_preflight(run_watch, capsys, monkeypatch):
+def test_a_schedule_the_account_cannot_post_into_is_refused_at_the_preflight(run_watch, capsys, monkeypatch, alerts_allowlisted):
     client = SendingClient()
 
     async def no_rights(_peer, _user):
@@ -1567,6 +1579,66 @@ def test_a_schedule_the_account_cannot_post_into_is_refused_at_the_preflight(run
     )
     assert code == 2
     assert envelope_of(out)["error"]["code"] == "PERMISSION_DENIED"
+
+
+def test_a_schedule_into_a_chat_the_allowlist_does_not_name_is_refused_while_somebody_is_here(run_watch, capsys, home):
+    """Card agent-bo-95422403: the runner posts under `yes_allowlist`, so this schedule could only ever be refused.
+
+    The refusal used to arrive hours later, unattended, in the runner's log.
+    It arrives now, before the preview, before the prompt, and before a row is
+    written -- the same argument the rights preflight two lines above it makes.
+    """
+    code, out, err, fake = run_watch(
+        ["--json", "schedule", "post", "--chat", "@agencyalerts", "--text", "standup", "--every", "1d"],
+        capsys=capsys,
+        isatty=True,
+        answer="y",
+    )
+    assert code == 2, out
+    error = envelope_of(out)["error"]
+    assert error["code"] == "NOT_ALLOWLISTED"
+    assert "TELEGRAM_SEND_ALLOWLIST" in error["message"]
+    assert f"TELEGRAM_SEND_ALLOWLIST={CHANNEL_ID}" in error["hint"]
+    assert "Schedule it?" not in out and "Schedule it?" not in err, "refused before the preview"
+    assert fake.sent == []
+
+    code, out, _err, _fake = run_watch(["--json", "schedule", "list"], capsys=capsys)
+    assert envelope_of(out)["result"]["local"] == [], "and before a row was written"
+
+
+def test_an_allowlisted_chat_still_schedules(run_watch, capsys, alerts_allowlisted):
+    code, out, _err, _fake = run_watch(
+        ["--json", "schedule", "post", "--chat", "@agencyalerts", "--text", "standup", "--every", "1d"],
+        capsys=capsys,
+        isatty=True,
+        answer="y",
+    )
+    assert code == 0, out
+    assert envelope_of(out)["result"]["schedule"]["rid"] == ALERTS_RID
+
+
+def test_a_chat_allowlisted_for_one_topic_does_not_pass_for_another(run_watch, capsys, home, monkeypatch):
+    """The key is the destination including its topic, exactly as the runner's send re-checks it."""
+    monkeypatch.setenv("TELEGRAM_SEND_ALLOWLIST", f"{FORUM_ID}:141")
+    code, out, _err, _fake = run_watch(
+        ["--json", "schedule", "post", "--chat", "@teamhermes", "--topic", "141", "--text", "standup", "--every", "1d"],
+        capsys=capsys,
+        isatty=True,
+        answer="y",
+    )
+    assert code == 0, out
+    assert envelope_of(out)["result"]["schedule"]["rid"] == TOPIC_RID
+
+    code, out, _err, _fake = run_watch(
+        ["--json", "schedule", "post", "--chat", "@teamhermes", "--topic", "217", "--text", "standup", "--every", "1d"],
+        capsys=capsys,
+        isatty=True,
+        answer="y",
+    )
+    assert code == 2, out
+    error = envelope_of(out)["error"]
+    assert error["code"] == "NOT_ALLOWLISTED"
+    assert f"TELEGRAM_SEND_ALLOWLIST={FORUM_ID}:217" in error["hint"]
 
 
 # -- bot mode ------------------------------------------------------------------

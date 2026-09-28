@@ -90,8 +90,10 @@ The terms this codebase uses, and the boundaries they imply.
   `folders create`/`edit`, `watch rules remove` and `schedule cancel` = a
   `y/N` that `--yes` answers with the preview still printed and no allowlist
   (the plan's approval kind stays `prompt_y`); `schedule post` = a `y/N` with
-  no `--yes`, because nothing unattended should write a schedule. The menu builds the same args the flags would and never sets
-  `yes`/`execute` itself — it is never a shorter path past a gate.
+  no `--yes`, because nothing unattended should write a schedule, plus the
+  destination in the allowlist, because the runner posts it unattended. The
+  menu builds the same args the flags would and never sets `yes`/`execute`
+  itself — it is never a shorter path past a gate.
 - **Message verb** — one of the fifteen things `message` does to a message
   (`messages.VERBS`). Each is an `Op`: its approval kind, the rights its plan
   states, the mutation op the plan records (one per message), and the heading
@@ -132,9 +134,16 @@ The terms this codebase uses, and the boundaries they imply.
 - **Mentions line** — `Mentions @harry, @all (everyone in the chat)`, above the
   body of every posting preview (`mentions.py`). Telegram has no mass-mention
   control beyond the text, so naming them is the whole control.
-- **Allowlist** — `TELEGRAM_SEND_ALLOWLIST`: the `chat[:topic]` destinations an
-  unattended (`--yes`) send may reach. Unset refuses every one of them; only
-  the unattended path consults it, because a human who saw the preview has
+- **Allowlist** — `TELEGRAM_SEND_ALLOWLIST`: the `chat[:topic]` destinations a
+  send nobody is watching may reach. Unset refuses every one of them. Which
+  sends those are: `--yes` on `send` and the message verbs, an alert or a
+  runner-held schedule the runner fires (`adapters/events.TelegramMessageSender`,
+  always `yes_allowlist`), and `schedule post` at the moment the row is written
+  — a human typing `y` there is approving a send that happens hours later with
+  nobody present, so the list is the only gate it has, and the write-time check
+  is keyed on the same `chat[:topic]` the runner re-checks when it fires.
+  `send_allowed` in `send.py` is the one place the match is decided. An
+  interactive send is not restricted, because a human who saw the preview has
   already made the decision the list exists to make for them.
 - **Archive** — `~/.telegram-tools/archive.sqlite`, the shared store
   (`_core/archive.py`, schema `cli-tools/archive/1`) holding what this

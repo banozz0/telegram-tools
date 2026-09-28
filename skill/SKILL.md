@@ -1,7 +1,7 @@
 ---
 name: telegram-tools
 description: "Telegram through the user's own account: look up chat or topic IDs, search or export messages, post, reply, react, pin, schedule, and run a chat's admins, invites, join requests, settings, folders and alert rules."
-version: 1.25.0
+version: 1.26.0
 author: banozz0
 license: MIT
 platforms: [macos]
@@ -89,13 +89,15 @@ answer its gates.
 it is their user account, the same one their friends message. Reads are read-only and
 fine. Anything that writes is theirs to run, not yours.
 
-**2. `send` only goes where the user already said it may.** `send --yes` posts with
-no human in the loop, and the CLI refuses it for any destination not in the user's
-`TELEGRAM_SEND_ALLOWLIST`. That refusal is the whole safety model — do not work
-around it by dropping `--yes` (which would block on a `y/N` prompt no agent can
-answer), by editing the user's `.env`, or by picking a different chat. A destination
-that is not allowlisted is a destination the user has not approved: draft the message,
-show it to them, and let them send it or add the entry.
+**2. A send with no human in the loop only goes where the user already said it may.**
+`send --yes` posts with nobody watching, and so does a `schedule post` once the runner
+fires it hours later. The CLI refuses both for any destination not in the user's
+`TELEGRAM_SEND_ALLOWLIST` — `schedule post` at the moment the row is written, so the
+refusal arrives while somebody is there to read it. That refusal is the whole safety
+model — do not work around it by dropping `--yes` (which would block on a `y/N` prompt
+no agent can answer), by editing the user's `.env`, or by picking a different chat. A
+destination that is not allowlisted is a destination the user has not approved: draft
+the message, show it to them, and let them send it or add the entry.
 
 **3. Never run `create` unprompted.** New groups, channels and topics are real,
 visible objects in the user's Telegram — other people see them appear. Create one only
@@ -306,8 +308,9 @@ check), **2** refused, **3** a gate needs a human and there is no terminal,
 **130** interrupted. Exit 3 is the one to recognise: it means the command wanted
 a confirmation you cannot give, and `error.hint` is the command to hand the user.
 
-Codes you will actually meet: `NOT_ALLOWLISTED` (a `--yes` send outside
-`TELEGRAM_SEND_ALLOWLIST` — rule 2, relay it), `APPROVAL_REQUIRED` (rule 4 or 5
+Codes you will actually meet: `NOT_ALLOWLISTED` (a send nobody is watching,
+aimed outside `TELEGRAM_SEND_ALLOWLIST`: a `--yes` send, or a `schedule post`,
+which the runner fires unattended — rule 2, relay it), `APPROVAL_REQUIRED` (rule 4 or 5
 territory: hand it over), `TARGET_NOT_FOUND` and `TARGET_KIND_MISMATCH` (the
 chat reference is wrong — run `discover`, never guess), `PERMISSION_DENIED` (the
 account lacks the right, named), `SESSION_IN_USE` (the user has the menu open —
@@ -387,7 +390,7 @@ names the files).
 | "alert me when X is posted in Y" | hand them `telegram-tools watch rules add --name <n> --on message --scope <rid> --keyword X --alert-to <rid>` then `telegram-tools watch run` — rule 14, they run both |
 | "what's scheduled?" | `telegram-tools --json schedule list --chat <id>` — quote each row's `guarantee` verbatim |
 | "send this tomorrow at 9" (allowlisted) | `telegram-tools --json send --chat <id> --text "..." --at 2026-09-09T09:00 --yes` — Telegram holds it (`server-held`); account only |
-| "post this every Monday at 9" | hand them `telegram-tools schedule post --chat <id> --text "..." --every "0 9 * * mon"` — rule 14; it is `runner-held`, so say it fires only while `watch run` is up |
+| "post this every Monday at 9" | hand them `telegram-tools schedule post --chat <id> --text "..." --every "0 9 * * mon"` — rule 14; it is `runner-held`, so say it fires only while `watch run` is up, and the chat must be in `TELEGRAM_SEND_ALLOWLIST` or the command refuses it (`NOT_ALLOWLISTED`) |
 | "cancel that scheduled message" | `telegram-tools --json schedule cancel --id <id> --yes` (add `--chat <id>` for one Telegram holds) — rule 14 |
 | "make me a group with topics" (they asked) | `telegram-tools create group --title "..." --forum --yes` |
 | "add a topic to that group" (they asked) | `telegram-tools create topic --chat <id> --title "..." --yes` |
@@ -601,7 +604,10 @@ names the files).
   are the read-only half and are fine to run, and so is `watch reload`; `watch stop`
   only when the user asked for it.
 - **`schedule post`** — it asks `y/N` and has no `--yes`, so from an agent session it
-  blocks. Rule 14; hand the user the command. `schedule cancel --yes` cancels one the
+  blocks. Rule 14; hand the user the command. It also refuses, before the preview,
+  any chat outside `TELEGRAM_SEND_ALLOWLIST` (`NOT_ALLOWLISTED`), because the runner
+  posts it with nobody present — rule 2 covers it, so relay the refusal and let the
+  user add the entry rather than picking another chat. `schedule cancel --yes` cancels one the
   user named. `send --at` is a `send` and follows rule 2: allowlisted destination,
   `--yes`, and the user asked.
 - **`archive retention` and `archive forget`** — they remove rows from the user's

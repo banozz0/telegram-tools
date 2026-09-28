@@ -152,28 +152,52 @@ def confirm_send(preview: str, *, read: Callable[[str], str] = input, write: Cal
 
 
 def _destination(chat_id: int, topic_id: int | None) -> str:
+    """The destination as TELEGRAM_SEND_ALLOWLIST spells it."""
     return str(chat_id) if topic_id is None else f"{chat_id}:{topic_id}"
 
 
-def require_send_allowed(allowlist: Sequence[Any], *, chat_id: int, username: str | None, topic_id: int | None) -> None:
-    """Raise unless TELEGRAM_SEND_ALLOWLIST names this destination.
+def allowlist_remedy(chat_id: int, topic_id: int | None) -> str:
+    """The line that fixes a NOT_ALLOWLISTED refusal, wherever the refusal is worded.
 
-    Only the unattended path (`--yes`) goes through here. A human who saw the
-    preview and typed `y` has already made the decision this list exists to make
-    on their behalf, so the menu and the interactive CLI are not restricted.
+    Every site that refuses an unattended send says something different about
+    *why*, and they should -- `--yes` and `schedule post` are refused for
+    different reasons. What none of them should own a second copy of is the
+    setting's name, the file it lives in and how a destination is spelled
+    there, so this sentence is written once and each refusal finishes it.
+    """
+    return (
+        f"Add it in ~/.telegram-tools/.env as TELEGRAM_SEND_ALLOWLIST={_destination(chat_id, topic_id)} "
+        "(comma-separated for several)"
+    )
+
+
+def send_allowed(allowlist: Sequence[Any], *, chat_id: int, username: str | None, topic_id: int | None) -> bool:
+    """Does TELEGRAM_SEND_ALLOWLIST name this destination?
+
+    The one place the match is decided, so every unattended path agrees on what
+    "allowlisted" means: an entry names the chat by id or by username, and it
+    covers either the whole chat (no topic) or the one topic it names.
     """
     keys = {str(chat_id)}
     if username:
         keys.add(str(username).lstrip("@").lower())
 
-    for entry in allowlist:
-        if entry.chat in keys and entry.topic in (None, topic_id):
-            return
+    return any(entry.chat in keys and entry.topic in (None, topic_id) for entry in allowlist)
+
+
+def require_send_allowed(allowlist: Sequence[Any], *, chat_id: int, username: str | None, topic_id: int | None) -> None:
+    """Raise unless TELEGRAM_SEND_ALLOWLIST names this destination.
+
+    Only `--yes` goes through here. A human who saw the preview and typed `y`
+    has already made the decision this list exists to make on their behalf, so
+    the menu and the interactive CLI are not restricted.
+    """
+    if send_allowed(allowlist, chat_id=chat_id, username=username, topic_id=topic_id):
+        return
 
     raise SendNotAllowedError(
         f"--yes refuses to send to {_destination(chat_id, topic_id)}: it is not in TELEGRAM_SEND_ALLOWLIST. "
-        f"Add it in ~/.telegram-tools/.env as TELEGRAM_SEND_ALLOWLIST={_destination(chat_id, topic_id)} "
-        "(comma-separated for several), or run without --yes and confirm the preview yourself."
+        f"{allowlist_remedy(chat_id, topic_id)}, or run without --yes and confirm the preview yourself."
     )
 
 

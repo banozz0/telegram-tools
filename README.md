@@ -95,7 +95,7 @@ Run `telegram-tools` with no arguments and you get the nine rows pictured at the
 | `admin`, `member`, `join-requests`, `invite`, `settings` | Running a group: admins and their rights; bans, kicks, mutes and restrictions; join requests; invite links; a chat's or a topic's settings. |
 | `folders` | Your chat folders — the tabs above your chat list: list, create, edit, delete. |
 | `watch` | Rules over live events — alert, tag, bookmark, archive, queue for review, never download or change anything — and the foreground runner that fires them. |
-| `schedule` | Messages posted later. `send --at` is **server-held**: Telegram posts it even with your machine off. `schedule post` is **runner-held**: `watch run` posts it, only while it's up — and it is the only way to repeat one. |
+| `schedule` | Messages posted later. `send --at` is **server-held**: Telegram posts it even with your machine off. `schedule post` is **runner-held**: `watch run` posts it, only while it's up — and it is the only way to repeat one. Because that post goes out with nobody watching, the chat has to be in your [send allowlist](#sending-without-the-prompt) before the schedule is written. |
 | `bots` | The bots you own, and what @BotFather edits: name, bio, description, commands, photo, default admin rights. |
 | `auth`, `profiles` | Log accounts in and out, list them, remove one. |
 | `doctor` | Checks your setup without printing a secret. |
@@ -169,7 +169,7 @@ Every screen then names both identities: `Acting as: @alertsbot · bot (via Sven
 TELEGRAM_SEND_ALLOWLIST=-1001234567890:141,-1009876543210,@myalerts
 ```
 
-Each entry is a chat ID or `@username`, optionally `:topic-id` for one topic. Unset, every `--yes` send is refused. The same list covers the message verbs and the alerts a `watch` rule sends.
+Each entry is a chat ID or `@username`, optionally `:topic-id` for one topic. Unset, every `--yes` send is refused. The same list covers the message verbs, the alerts a `watch` rule sends, and `schedule post` — which has no `--yes` at all, but hands the runner a message to post hours later with nobody there, so it refuses a chat off the list while you are still at the keyboard to read why.
 
 ### Through a proxy
 
