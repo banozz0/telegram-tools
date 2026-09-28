@@ -1,7 +1,7 @@
 ---
 name: telegram-tools
 description: "Telegram through the user's own account: look up chat or topic IDs, search or export messages, post, reply, react, pin, schedule, and run a chat's admins, invites, join requests, settings, folders and alert rules."
-version: 1.24.0
+version: 1.25.0
 author: banozz0
 license: MIT
 platforms: [macos]
@@ -241,7 +241,11 @@ on the user's account without them present, so propose the exact command and let
 run it; the same for `watch run`, which is a process they start and stop, and which
 blocks until they do. The reads are yours: `watch rules list`, `watch status`,
 `schedule list`, and `watch rules test --event FILE`, which says what a recorded event
-*would* do and fires none of it. `watch rules remove` asks `y/N` or takes `--yes`;
+*would* do and fires none of it. `watch reload` is yours too, once the user has changed
+a rule: it asks their running runner to re-read the rules, and a bad file keeps the set
+already loaded. `watch stop` ends their runner, and every `runner-held` schedule with
+it until they start it again, so run it only when they asked for it stopped.
+`watch rules remove` asks `y/N` or takes `--yes`;
 pass it only for a rule the user named. `--name` is the rule's file name, so it
 takes letters, digits, dot, dash and underscore and nothing else — a name with a
 space is refused before anything is written — and `--scope` is compared with the
@@ -378,6 +382,8 @@ names the files).
 | "what am I watching for?" / "what rules do I have?" | `telegram-tools --json watch rules list` — offline |
 | "is the watcher running?" | `telegram-tools --json watch status` — offline; reports the holder, the last tick and the rules loaded |
 | "would this have fired?" | `telegram-tools --json watch rules test --event /path/event.json` — fires nothing, contacts nobody |
+| "pick up the rule I just changed" | `telegram-tools --json watch reload` — offline; `RUNNER_NOT_RUNNING` means there is nothing to pick it up |
+| "stop the watcher" (they asked) | `telegram-tools --json watch stop` — offline; waits for the lock to clear. Rule 14 |
 | "alert me when X is posted in Y" | hand them `telegram-tools watch rules add --name <n> --on message --scope <rid> --keyword X --alert-to <rid>` then `telegram-tools watch run` — rule 14, they run both |
 | "what's scheduled?" | `telegram-tools --json schedule list --chat <id>` — quote each row's `guarantee` verbatim |
 | "send this tomorrow at 9" (allowlisted) | `telegram-tools --json send --chat <id> --text "..." --at 2026-09-09T09:00 --yes` — Telegram holds it (`server-held`); account only |
@@ -592,7 +598,8 @@ names the files).
   first five write a file that acts on the user's account without them present, and
   `watch run` is a long-running process they start and stop (it blocks until they do).
   Rule 14. `watch rules list`, `watch status`, `schedule list` and `watch rules test`
-  are the read-only half and are fine to run.
+  are the read-only half and are fine to run, and so is `watch reload`; `watch stop`
+  only when the user asked for it.
 - **`schedule post`** — it asks `y/N` and has no `--yes`, so from an agent session it
   blocks. Rule 14; hand the user the command. `schedule cancel --yes` cancels one the
   user named. `send --at` is a `send` and follows rule 2: allowlisted destination,
@@ -634,4 +641,5 @@ yourself.
 
 This file lives in the tool's own repo at `skill/SKILL.md` and that copy is the source
 of truth; every installed copy is a derivative. When the CLI gains a command, this file
-changes in the same commit.
+changes in the same commit. An installed copy does not update itself: after upgrading
+the CLI, fetch this file again over the old one.
