@@ -321,3 +321,21 @@ def test_the_skill_line_never_changes_doctors_exit_code(home, tmp_path):
     assert any(line.startswith("WARN Agent skill: version 0.1.0") for line in lines)
     assert not any(line.startswith("FAIL") for line in lines)
     assert code == 0
+
+
+def test_an_unreadable_copy_is_a_warn_line_and_the_other_checks_still_run(home, tmp_path):
+    target = home / ".claude" / "skills" / "telegram-tools" / "SKILL.md"
+    target.parent.mkdir(parents=True)
+    target.write_text(skill_text("0.1.0"))
+    target.chmod(0o000)
+    lines: list[str] = []
+    env = {"TELEGRAM_API_ID": "1", "TELEGRAM_API_HASH": "0123456789abcdef0123456789abcdef"}
+    try:
+        code = doctor.run_doctor(root=tmp_path, env=env, home=home, report=SimpleNamespace(info=lines.append, result=lambda *_a, **_k: None))
+    finally:
+        target.chmod(0o644)
+
+    [line] = [line for line in lines if "Agent skill: " in line]
+    assert line.startswith("WARN Agent skill: ~/.claude/skills/telegram-tools/SKILL.md could not be read")
+    assert any(line.startswith("OK   Python version") for line in lines)
+    assert code == 0

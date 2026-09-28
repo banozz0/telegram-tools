@@ -73,9 +73,19 @@ The terms this codebase uses, and the boundaries they imply.
   rather than freezing one: the shipped install is pipx, whose venv has no
   `pip` on `PATH`, so there the line is `pipx inject`.
 - **Local write** — a write whose target is this machine, not Telegram: a rule
-  file, a runner-held schedule row. It carries a plan, a readback and an audit
-  line like any other write; its preflight is empty because no Telegram right
-  exists to check, which is stated rather than skipped.
+  file, a runner-held schedule row, the agent skill. It carries a plan, a
+  readback and an audit line like any other write; its preflight is empty
+  because no Telegram right exists to check, which is stated rather than
+  skipped. The one exception is `skill install` before any `auth`: with no
+  profile record there is no identity to sign a plan, so the file is written
+  and read back with no plan and no audit line, and the run says it went
+  unsigned (Sven, 2026-09-28, card agent-bo-95422633).
+- **Agent skill** — `skill/SKILL.md`, the one source, which the wheel also
+  carries inside the package (`agent_skill.bundled_text` reads that copy, or
+  the repo's in an editable install). `skill install` copies it into a skill
+  folder, `~/.claude/skills/telegram-tools` unless `--dir` names another,
+  through the core's `skill` module; `doctor`'s skill line is the core's
+  `skill_state` for that default folder.
 - **Gate** — the confirmation pattern on every path that writes. `send` =
   full-message preview + `y/N` (`--yes` instead requires the allowlist);
   `create` = preview + `y/N`; `clear-messages` = dry-run default + `--execute`
