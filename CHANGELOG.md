@@ -4,6 +4,10 @@ All notable changes to this project will be documented here.
 
 This project follows a practical changelog style: user-visible changes, safety changes, and release notes belong here; active task tracking belongs outside the repo.
 
+## 3.39.3 - 2026-09-28
+
+- **The menu's Profiles rows and Move the pre-profile session run on a machine with no config yet.** Identity > Profiles > List them and Remove a profile, and Identity > Move the pre-profile session into a profile, loaded the config before running, so with no `.env` anywhere they stopped at `error: TELEGRAM_API_ID is required.` `telegram-tools profiles`, `profiles remove` and `auth --migrate` have never needed credentials, and the three rows now reach the same commands without loading anything, the way Check the setup does since 3.39.2. Logging in and out still need the config, because they talk to Telegram.
+
 ## 3.39.2 - 2026-09-28
 
 - **The menu's Check the setup row runs `doctor` on a machine with no config yet.** The row looked up the profile by loading the config first, so on a fresh install, with no `.env` anywhere, it stopped at `error: TELEGRAM_API_ID is required.` and never reached `doctor`, whose job is to tell you exactly that. It now takes the profile name without loading anything, the way `telegram-tools doctor` always has, and prints every check.

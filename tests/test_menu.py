@@ -1,11 +1,13 @@
 import asyncio
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from telegram_tools import cli, menu
 from telegram_tools import messages as message_ops
+from telegram_tools import profiles as profile_store
 from telegram_tools import surface
 from telegram_tools._core.archive import SearchError
 from telegram_tools._core.columns import width
@@ -16,6 +18,7 @@ from telegram_tools.config import ConfigError
 from telegram_tools.envelope import CommandError
 from telegram_tools.models import BotCommandInfo, BotInfo, ChatChoice, TopicInfo
 from telegram_tools.prompts import END_OF_MESSAGE
+from test_profiles import legacy_login
 
 
 def reader(*answers):
@@ -1321,17 +1324,57 @@ def test_install_the_agent_skill_passes_a_typed_folder_through():
     assert calls[0].dir == "~/.codex/skills/telegram-tools"
 
 
-def test_check_the_setup_reaches_doctor_on_a_home_with_no_config(tmp_path, monkeypatch, capsys):
-    """A fresh install is when doctor is reached for, so row 9 must not load a config first."""
+@pytest.fixture
+def bare_home(tmp_path, monkeypatch):
+    """A machine with no config at all: no credentials in the environment, no .env."""
     for name in ("TELEGRAM_API_ID", "TELEGRAM_API_HASH", "TELEGRAM_TOOLS_PROFILE", "TELEGRAM_TOOLS_SESSION"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.chdir(tmp_path)
+    return tmp_path
 
+
+def test_check_the_setup_reaches_doctor_on_a_home_with_no_config(bare_home, capsys):
+    """A fresh install is when doctor is reached for, so row 9 must not load a config first."""
     code, _calls, _output = run_menu([DOCTOR, "", "0"], session=menu.MenuSession(), runner=cli.run)
 
     assert code == 0
     assert "FAIL Telegram config is missing" in capsys.readouterr().out
+
+
+# The CLI runs `profiles` and `auth --migrate` before it loads a config, so the
+# menu rows for them must not load one either (card agent-bo-95422646).
+
+
+def test_profiles_list_runs_on_a_home_with_no_config(bare_home, capsys):
+    code, _calls, _output = run_menu([PROFILES_LIST, "", "0"], session=menu.MenuSession(), runner=cli.run)
+
+    assert code == 0
+    assert "No profiles yet." in capsys.readouterr().out
+
+
+def test_profiles_remove_runs_on_a_home_with_no_config(bare_home, monkeypatch, capsys):
+    profile_store.save(profile_store.load("work"))
+    monkeypatch.setattr(cli.sys, "stdin", SimpleNamespace(isatty=lambda: True))
+    monkeypatch.setattr("builtins.input", lambda _prompt="": "work")
+
+    # 1 = work, the one profile on this machine; the typed name is the CLI's own ask.
+    code, _calls, _output = run_menu([PROFILES_REMOVE, "1", "", "0"], session=menu.MenuSession(), runner=cli.run)
+
+    assert code == 0
+    assert "Profile 'work' was removed from this machine." in capsys.readouterr().out
+    assert "work" not in profile_store.names()
+
+
+def test_move_the_pre_profile_session_runs_on_a_home_with_no_config(bare_home, monkeypatch, capsys):
+    legacy = legacy_login(bare_home)
+    monkeypatch.setattr("builtins.input", lambda _prompt="": "y")
+
+    code, _calls, _output = run_menu([MIGRATE, "", "0"], session=menu.MenuSession(), runner=cli.run)
+
+    assert code == 0
+    assert "Moved." in capsys.readouterr().out
+    assert not legacy.exists()
 
 
 def test_doctor_keeps_the_plain_enter_or_zero_prompt():

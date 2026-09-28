@@ -218,6 +218,10 @@ async def _call(args, *, session, runner, write, connect: bool = True, execute_r
     The identity goes with it either way: an offline row still acts as someone,
     and a session that already knows who it is must not send the command off to
     ask again through a second client (card 319).
+
+    `session=None` hands over no client, config or identity, for the commands
+    the CLI runs before it loads a config: reading `session.config` loads one,
+    and a fresh install has none to load.
     """
     try:
         client = await session.client() if session is not None and connect else None
@@ -3113,11 +3117,12 @@ async def _flow_identity(*, session, runner, read, write) -> bool:
 
         # `auth` opens its own client on the session file the menu is holding,
         # so the file has to be free first, and afterwards what the menu cached
-        # was learned as whoever was logged in before this screen.
+        # was learned as whoever was logged in before this screen. A migration
+        # only moves that file and needs no config, so it gets no session.
         await session.release()
         result = await _act(
             args,
-            session=session,
+            session=None if args.migrate else session,
             runner=runner,
             read=read,
             write=write,
@@ -3136,7 +3141,8 @@ async def _flow_profiles(*, session, runner, read, write) -> bool:
     Listing and removing run the `profiles` command itself, so the typed-name
     gate a removal meets here is the command's own -- the menu is never a
     shorter path past it. Both read the store and open nothing, so the menu
-    keeps its connection. A switch drops it: the next screen that needs a
+    keeps its connection, and neither needs a config, so neither gets the
+    session. A switch drops the connection: the next screen that needs a
     client opens one on the chosen profile's session.
     """
     trail = crumb(MAIN, "Identity", "Profiles")
@@ -3147,13 +3153,12 @@ async def _flow_profiles(*, session, runner, read, write) -> bool:
         if choice == 0:
             result = await _act(
                 _namespace(command="profiles", profiles_kind=None, profile=session.profile),
-                session=session,
+                session=None,
                 runner=runner,
                 read=read,
                 write=write,
                 trail=crumb(trail, "List"),
                 rows=((STAY, "Back to Profiles"),),
-                connect=False,
             )
             if result is not STAY:
                 return _leave(result)
@@ -3183,13 +3188,12 @@ async def _flow_profiles(*, session, runner, read, write) -> bool:
             continue
         result = await _act(
             _namespace(command="profiles", profiles_kind="remove", name=chosen, profile=session.profile),
-            session=session,
+            session=None,
             runner=runner,
             read=read,
             write=write,
             trail=crumb(trail, "Remove"),
             rows=((STAY, "Back to Profiles"),),
-            connect=False,
         )
         if result is not STAY:
             return _leave(result)
