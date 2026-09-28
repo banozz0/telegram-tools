@@ -489,9 +489,9 @@ async def _flow_doctor(*, session, runner, read, write) -> Any:
             return True
         if choice == 0:
             # No session: doctor never opens a connection, which is the point of it. And
-            # no after-run screen: running doctor again tells you nothing new.
-            profile = getattr(session.config, "profile", None) if session is not None else None
-            await _call(_namespace(command="doctor", profile=profile), session=None, runner=runner, write=write)
+            # no after-run screen: running doctor again tells you nothing new. The profile
+            # comes off the session, not its config: a fresh install has none to load.
+            await _call(_namespace(command="doctor", profile=session.profile), session=None, runner=runner, write=write)
             return _leave_action(after_action(read=read, write=write))
         outcome = await _group(_flow_skill_install, session=session, runner=runner, read=read, write=write)
         if outcome is not True:

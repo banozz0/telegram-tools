@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from telegram_tools import menu
+from telegram_tools import cli, menu
 from telegram_tools import messages as message_ops
 from telegram_tools import surface
 from telegram_tools._core.archive import SearchError
@@ -1319,6 +1319,19 @@ def test_install_the_agent_skill_passes_a_typed_folder_through():
     _code, calls, _output = run_menu([SKILL_INSTALL, "~/.codex/skills/telegram-tools", "", "0"])
 
     assert calls[0].dir == "~/.codex/skills/telegram-tools"
+
+
+def test_check_the_setup_reaches_doctor_on_a_home_with_no_config(tmp_path, monkeypatch, capsys):
+    """A fresh install is when doctor is reached for, so row 9 must not load a config first."""
+    for name in ("TELEGRAM_API_ID", "TELEGRAM_API_HASH", "TELEGRAM_TOOLS_PROFILE", "TELEGRAM_TOOLS_SESSION"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+
+    code, _calls, _output = run_menu([DOCTOR, "", "0"], session=menu.MenuSession(), runner=cli.run)
+
+    assert code == 0
+    assert "FAIL Telegram config is missing" in capsys.readouterr().out
 
 
 def test_doctor_keeps_the_plain_enter_or_zero_prompt():
