@@ -1,7 +1,7 @@
 ---
 name: telegram-tools
 description: "Telegram through the user's own account: look up chat or topic IDs, search or export messages, post, reply, react, pin, schedule, and run a chat's admins, invites, join requests, settings, folders and alert rules."
-version: 1.26.0
+version: 1.27.0
 author: banozz0
 license: MIT
 platforms: [macos]
@@ -263,6 +263,15 @@ download or change anything — `alert`, `tag`, `bookmark`, `capture_metadata`,
 automatically, say plainly that the tool will not, and that `queue_review` is the
 nearest thing: it puts the file in front of them to approve.
 
+**16. Run `skill install` only when the user asked.** It rewrites this file — your own
+instructions — in `~/.claude/skills/telegram-tools`, or in the folder `--dir` names, with
+the copy the installed CLI ships. Run it when the user asked for the skill installed or
+updated, never because `doctor` reported an older or newer one: relay that line and let
+them decide. With `--yes` it writes after printing the preview; without it, from a
+session with no terminal, it refuses with `APPROVAL_REQUIRED`. A linked folder or file
+is refused with `TARGET_KIND_MISMATCH`, because a link means the user manages that copy
+by hand — leave it. A `LOCAL.md` beside this file is never touched.
+
 ## Machine-readable output
 
 Put `--json` **before** the subcommand and the command prints exactly one object
@@ -402,6 +411,7 @@ names the files).
 | "log me in" / "log me out" | hand them `telegram-tools auth` or `telegram-tools auth --logout` — rule 6, they run it |
 | "get rid of that old profile" | hand them `telegram-tools profiles remove --name <name>` — rule 6, they type the name. It deletes the local session and record only; the one they are acting as refuses until `auth --logout` |
 | "is telegram-tools set up?" | `telegram-tools doctor` |
+| "install / update the telegram-tools skill" (they asked) | `telegram-tools --json skill install --yes` (`--dir <folder>` for another agent's skills folder) — rule 16; it asks nothing when the copy is already current |
 
 - **`discover` defaults to admin/managed chats only** — the ones the user runs. Add
   `--all` only when the chat you want is one they merely belong to; it is a much
@@ -552,7 +562,9 @@ names the files).
 - **`doctor` is the setup answer, and it needs no login.** It reports the profiles,
   whether the current one has a session, whether the local files are private
   enough to write, and whether a configured proxy is usable — all without printing
-  a path, a number or a token.
+  a path, a number or a token. Its last line says whether `~/.claude/skills/telegram-tools`
+  holds this release's skill: not installed, current, older, newer, or managed by
+  hand. That line never fails the check; installing is rule 16.
 - **The menu is for the human at the keyboard.** `telegram-tools` with no arguments
   opens a looping menu with pick-lists. Every action it offers is a flag combination
   this CLI already has — nothing in the menu is a capability the flags lack.
@@ -573,6 +585,9 @@ names the files).
 - **`create` on your own initiative** — rule 3. If a new group or topic looks like
   the right answer, propose it and let the user say yes; do not create it and report
   back.
+- **`skill install` on your own initiative** — rule 16. It rewrites your own
+  instructions; a `doctor` line saying a newer skill ships is news for the user, not
+  a task for you.
 - **`auth`** — the login itself, in every form. Rule 6 above. `profiles` (the list)
   is the read-only half and is fine to run; `profiles remove` is rule 6 too.
 - **`review approve`, `review accept`, `review reject`, `review retry`** — the two
@@ -647,5 +662,6 @@ yourself.
 
 This file lives in the tool's own repo at `skill/SKILL.md` and that copy is the source
 of truth; every installed copy is a derivative. When the CLI gains a command, this file
-changes in the same commit. An installed copy does not update itself: after upgrading
-the CLI, fetch this file again over the old one.
+changes in the same commit. Every package carries the copy that matches its own
+version, and an installed copy does not update itself: after upgrading the CLI,
+`telegram-tools skill install` brings it level, when the user asks (rule 16).

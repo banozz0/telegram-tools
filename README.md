@@ -99,6 +99,7 @@ Run `telegram-tools` with no arguments and you get the nine rows pictured at the
 | `bots` | The bots you own, and what @BotFather edits: name, bio, description, commands, photo, default admin rights. |
 | `auth`, `profiles` | Log accounts in and out, list them, remove one. |
 | `doctor` | Checks your setup without printing a secret. |
+| `skill install` | Copies the [agent skill](#for-scripts-and-agents) this release ships into your agent's skills folder. |
 
 ## What it won't do (on purpose)
 
@@ -116,10 +117,10 @@ How much a command asks before it acts depends on how hard its change is to undo
 | Kind of command | What it asks before acting |
 | --- | --- |
 | **Reads** — `discover`, `search`, `archive search`, every `list`, `show` and `status`, `doctor` | Nothing. |
-| **Changes** — `send`, the message verbs, `create`, `bots`, `settings set`, admin, member, join-request, invite and folder changes | A preview, then `y/N`. |
+| **Changes** — `send`, the message verbs, `create`, `bots`, `settings set`, admin, member, join-request, invite and folder changes, `skill install` | A preview, then `y/N`. |
 | **Hard to undo** — `clear-messages`, `message delete`, `delete`, `leave`, `member ban` and `kick`, `admin demote`, `settings set --forum off`, `folders delete`, `structure apply`, `archive retention` and `forget` | A dry-run by default. For real: `--execute` **and** typing a confirmation — `DELETE`, or the exact title or name of what you're touching. No `--yes`. |
 
-`--yes` answers the `y/N` in advance, for scripts. On `send` and the message verbs it works only for a chat in your [send allowlist](#sending-without-the-prompt), and there, as on `create` and `bots`, it skips the preview too; the admin, member, join-request, invite and folder changes still print theirs. It doesn't exist on `auth`, `profiles remove`, `settings set`, `schedule post`, or the review queue's approve, accept and reject.
+`--yes` answers the `y/N` in advance, for scripts. On `send` and the message verbs it works only for a chat in your [send allowlist](#sending-without-the-prompt), and there, as on `create` and `bots`, it skips the preview too; the admin, member, join-request, invite and folder changes and `skill install` still print theirs. It doesn't exist on `auth`, `profiles remove`, `settings set`, `schedule post`, or the review queue's approve, accept and reject.
 
 Whichever row it's in, every write:
 
@@ -200,14 +201,18 @@ The object carries a `status` (`ok`, `empty`, `partial`, `dry_run`, `cancelled`,
 
 Under `--json`, a command that needs an answer and has no terminal to ask on exits 3 with `APPROVAL_REQUIRED` instead of waiting, and `error.hint` is the command for a person to run. `--yes` answers only a `y/N`, and only where the [Safety model](#safety-model) says it does. [`skill/SKILL.md`](https://github.com/banozz0/telegram-tools/blob/main/skill/SKILL.md) is a ready-made agent skill: every command, field and rule an agent needs.
 
-`pip`, `pipx` and `uv` install the CLI without the skill, so put it where your agent loads skills from. For Claude Code:
+The package carries the skill that matches its own version, and one command puts it where Claude Code loads skills from, `~/.claude/skills/telegram-tools`:
+
+```bash
+telegram-tools skill install
+```
+
+It shows the file and both versions and asks `y/N`; an identical copy asks nothing, and before your first `auth` it installs unsigned, with a warning and no audit line. `--dir` names another agent's folder (`--dir ~/.codex/skills/telegram-tools`), and `--yes` answers for a script. Run it again after you upgrade — an installed copy does not update itself, and `doctor` says whether yours is current. A version before 3.38.0 has no `skill install`; for one of those, or for the skill on `main`, fetch the file:
 
 ```bash
 mkdir -p ~/.claude/skills/telegram-tools
 curl -fsSL https://raw.githubusercontent.com/banozz0/telegram-tools/main/skill/SKILL.md -o ~/.claude/skills/telegram-tools/SKILL.md
 ```
-
-Run it again after you upgrade; an installed copy does not update itself.
 
 ## Where your files live
 

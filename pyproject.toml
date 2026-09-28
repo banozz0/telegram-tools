@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "telegram-tools"
-version = "3.37.0"
+version = "3.38.0"
 description = "Local CLI for your own Telegram chats and forum topics: chat/topic ID discovery, message search/export, topic message clearing, and bot settings editing — signed in as you, built on Telethon."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -55,6 +55,12 @@ Changelog = "https://github.com/banozz0/telegram-tools/blob/main/CHANGELOG.md"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/telegram_tools"]
+
+[tool.hatch.build.targets.wheel.force-include]
+# The agent skill rides inside the package, so every install holds the skill of
+# its own version for `skill install` to copy. The repository file stays the
+# source; `agent_skill.bundled_text` reads this copy, or that file when editable.
+"skill/SKILL.md" = "telegram_tools/skill/SKILL.md"
 
 [tool.hatch.build.targets.sdist]
 # Build-process artifacts, not part of the distributed software. They stay public

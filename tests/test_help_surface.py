@@ -157,6 +157,8 @@ COMMANDS = {
     "schedule-list": ("schedule", "list"),
     "schedule-post": ("schedule", "post"),
     "schedule-cancel": ("schedule", "cancel"),
+    "skill": ("skill",),
+    "skill-install": ("skill", "install"),
 }
 
 # The only text these cards were allowed to add, spelled exactly as the help
@@ -242,6 +244,11 @@ _ROOT_ADDITIONS = (
     # a group or channel behind `delete`'s gate. Both spellings of the name.
     "leave,",
     "leave Leave a group or channel: nothing in it is deleted (dry-run by default)",
+    # The skill-install card (agent-bo-95422633): one new command, this
+    # release's agent skill copied where an agent reads it, beside `doctor` on
+    # the menu's row 9. Both spellings of the name, as `leave,` has.
+    "skill,",
+    "skill The agent skill this release ships: install puts it where an agent reads it",
 )
 
 # Spelled out rather than imported: a frozen surface that read the sentence off

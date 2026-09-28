@@ -9,12 +9,13 @@ from typing import Mapping
 from dotenv import dotenv_values
 
 from telegram_tools import archive as archive_store
-from telegram_tools import extras, profiles, proxy
+from telegram_tools import agent_skill, extras, profiles, proxy
 from telegram_tools._core.archive import fts5_report
 from telegram_tools._core.config import human_bytes
 from telegram_tools._core.review import directory_bytes
 from telegram_tools._core import rules as _rules
 from telegram_tools._core import runner as _runner
+from telegram_tools._core import skill as _skill
 from telegram_tools._core.scanner import ClamAVAdapter
 from telegram_tools.config import ConfigError, config_dir, parse_bot_tokens, parse_send_allowlist
 
@@ -251,6 +252,34 @@ def check_runner(home: Path | None = None) -> DoctorCheck:
     return DoctorCheck("OK", f"Runner: pid {holder.pid} since {holder.started_at}{tick}; {rules}")
 
 
+def check_agent_skill(home: Path | None = None) -> DoctorCheck:
+    """Whether Claude Code's skills folder holds the agent skill this release ships.
+
+    Information, never a verdict on the setup: a missing skill is a machine
+    whose agent has not been given one, not a broken install, so no state here
+    is a FAIL. An older copy is the one WARN, because an agent reading it is
+    told about a surface this release has moved past. Only the default folder
+    is looked at -- a `--dir` install elsewhere is somewhere doctor cannot know.
+    """
+    shown = agent_skill.DEFAULT_SHOWN
+    folder = agent_skill.default_dir(home)
+    bundled = agent_skill.bundled_text()
+    state = _skill.skill_state(bundled, folder.name, folder.parent)
+    if state == "managed-by-hand":
+        return DoctorCheck("OK", f"Agent skill: {shown} is a link or not a plain folder, so it is managed by hand")
+    plan = _skill.install_plan(bundled, folder.name, folder.parent)
+    shipped, installed = plan.bundled_version or "unknown", plan.installed_version or "unknown"
+    if state == "not-installed":
+        return DoctorCheck("OK", f"Agent skill: not installed in {shown}; `{agent_skill.TOOL} skill install` puts version {shipped} there")
+    if state == "current":
+        return DoctorCheck("OK", f"Agent skill: version {shipped} in {shown}, current")
+    if state == "newer":
+        return DoctorCheck("OK", f"Agent skill: version {installed} in {shown} is newer than the {shipped} this release ships")
+    return DoctorCheck(
+        "WARN", f"Agent skill: version {installed} in {shown}; this release ships {shipped}, and `{agent_skill.TOOL} skill install` updates it"
+    )
+
+
 def _effective_env(root: Path, env: Mapping[str, str], home: Path | None = None) -> dict[str, str]:
     merged: dict[str, str] = {}
     for path in (config_dir(home) / ".env", root / ".env"):
@@ -336,6 +365,7 @@ def run_doctor(
         check_quarantine(home),
         check_scanner(),
         check_runner(home),
+        check_agent_skill(home),
     ]
 
     for check in checks:

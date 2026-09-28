@@ -9,6 +9,7 @@ from typing import Any
 
 from telethon.errors import ChannelForumMissingError, RPCError
 
+from telegram_tools import agent_skill
 from telegram_tools import archive as archive_store
 from telegram_tools import cli
 from telegram_tools.bots import IMPLICIT_OTHER_RIGHT, format_bot_profile, get_bot_profile, list_bots, resolve_bot, right_names
@@ -476,12 +477,37 @@ async def _flow_discover(*, session, runner, read, write) -> bool:
             return _leave(result)
 
 
-async def _flow_doctor(*, session, runner, read, write) -> bool:
-    # No session: doctor never opens a connection, which is the point of it. And
-    # no after-run screen: running doctor again tells you nothing new.
-    profile = getattr(session.config, "profile", None) if session is not None else None
-    await _call(_namespace(command="doctor", profile=profile), session=None, runner=runner, write=write)
-    return _leave_action(after_action(read=read, write=write))
+SETUP_ROWS = ("Check the setup", "Install the agent skill")
+
+
+async def _flow_doctor(*, session, runner, read, write) -> Any:
+    """Row 9. Doctor, and the agent skill this release ships. Neither needs a login."""
+    trail = crumb(MAIN, "Check setup")
+    while True:
+        choice = choose(list(SETUP_ROWS), title=trail, read=read, write=write)
+        if choice is BACK:
+            return True
+        if choice == 0:
+            # No session: doctor never opens a connection, which is the point of it. And
+            # no after-run screen: running doctor again tells you nothing new.
+            profile = getattr(session.config, "profile", None) if session is not None else None
+            await _call(_namespace(command="doctor", profile=profile), session=None, runner=runner, write=write)
+            return _leave_action(after_action(read=read, write=write))
+        outcome = await _group(_flow_skill_install, session=session, runner=runner, read=read, write=write)
+        if outcome is not True:
+            return outcome
+
+
+async def _flow_skill_install(*, session, runner, read, write) -> Any:
+    """`skill install`, with the folder asked and the CLI's own preview and y/N.
+
+    Enter takes Claude Code's folder, the one `--dir` defaults to. No session
+    either: the command copies a file out of the package and connects to nothing.
+    """
+    folder = read(f"Skill folder [{agent_skill.DEFAULT_SHOWN}] (Enter uses it): ").strip()
+    args = _namespace(command="skill", skill_kind="install", dir=folder or None, yes=False, profile=session.profile)
+    trail = crumb(MAIN, "Check setup", SETUP_ROWS[1])
+    return _leave(await _act(args, session=None, runner=runner, read=read, write=write, trail=trail, rows=((STAY, "Back to Check setup"),)))
 
 
 _ALL_TOPICS = "All topics"

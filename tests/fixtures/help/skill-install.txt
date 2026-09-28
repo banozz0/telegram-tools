@@ -1,0 +1,7 @@
+usage: telegram-tools skill install [-h] [--dir DIR] [--yes]
+
+options:
+  -h, --help  show this help message and exit
+  --dir DIR   The skill's own folder; SKILL.md is written inside it (default
+              ~/.claude/skills/telegram-tools)
+  --yes       Skip the y/N; the preview still prints

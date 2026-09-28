@@ -14,6 +14,7 @@ from telegram_tools._core import export as _export
 from telegram_tools._core import rid as _rid
 from telegram_tools._core import rules as _rules
 from telegram_tools._core import runner as _runner
+from telegram_tools._core import skill as _skill
 from telegram_tools._core.audit import AuditLog
 from telegram_tools._core.contract import CodedError, exit_code
 from telegram_tools._core.identity import Identity, Target
@@ -21,6 +22,7 @@ from telegram_tools._core.plan import Evidence, Mutation
 from telegram_tools._core.redaction import redact_text
 from telethon.tl.functions.messages import DeleteScheduledMessagesRequest, GetScheduledHistoryRequest
 from telethon.tl.types import InputUserSelf
+from telegram_tools import agent_skill
 from telegram_tools import archive as archive_store
 from telegram_tools import extras
 from telegram_tools import login
@@ -676,6 +678,16 @@ def build_parser() -> argparse.ArgumentParser:
         "remove", help="Delete a profile's session file and record after typing the profile's exact name"
     )
     profiles_remove.add_argument("--name", required=True, help="Profile name to remove")
+
+    skill_parser = subparsers.add_parser("skill", help="The agent skill this release ships: install puts it where an agent reads it")
+    skill_kinds = skill_parser.add_subparsers(dest="skill_kind")
+    skill_install = skill_kinds.add_parser(
+        "install", help="Copy this release's agent skill into an agent's skills folder (y/N; asks nothing when it is already there)"
+    )
+    skill_install.add_argument(
+        "--dir", metavar="DIR", help=f"The skill's own folder; SKILL.md is written inside it (default {agent_skill.DEFAULT_SHOWN})"
+    )
+    skill_install.add_argument("--yes", action="store_true", help=yes_help)
 
     subparsers.add_parser("doctor", help="Check local setup without printing secrets")
 
@@ -3466,9 +3478,9 @@ async def _run_manage_read(port, op, args, resolved, target: Target, kind: str, 
 
 
 def _watch_plan(identity: Identity, command: str, op: str, params: dict, *, approval: str = "prompt_y", targets=()):
-    """The plan a watch write carries.
+    """The plan a watch write carries, and `skill install` too.
 
-    A rule file and a runner-held schedule live on this machine, not at
+    A rule file, a runner-held schedule and the agent skill live on this machine, not at
     Telegram's end, so there is no right to preflight and the preflight is
     empty by construction rather than by omission. The other three steps are
     the same as every other write here: the plan is built before anything is
@@ -3974,6 +3986,69 @@ async def _run_schedule_cancel(args, schedules, identity: Identity, *, client, r
     return 0
 
 
+# -- skill: the agent skill this release ships ---------------------------------
+
+
+def _run_skill(args, *, report: Reporter) -> int:
+    """`skill install`: this release's SKILL.md into an agent's skills folder. Never connects.
+
+    The file lands outside ~/.telegram-tools and is wanted before the first
+    login as much as after it, so the only identity it can carry is the one the
+    profile record names: signed when `auth` wrote one -- a plan, and an audit
+    line once a file is written -- and otherwise unsigned with the warning
+    `watch status` gives. An identical file asks and writes nothing.
+    """
+    if getattr(args, "skill_kind", None) is None:
+        raise ValueError("skill needs one of: install.")
+    require_tight_modes()
+    folder = Path(os.path.abspath(os.path.expanduser(args.dir))) if args.dir else agent_skill.default_dir()
+    bundled = agent_skill.bundled_text()
+    # The core names `<root>/<name>/SKILL.md` and refuses a linked or wrong-kind
+    # folder or file (TARGET_KIND_MISMATCH); a linked root above it is followed.
+    install = _skill.install_plan(bundled, folder.name, folder.parent)
+    result = {
+        "path": str(install.target),
+        "action": install.action,
+        "installed_version": install.installed_version,
+        "bundled_version": install.bundled_version,
+    }
+    if install.action == "unchanged":
+        report.info(f"{install.target} is already version {install.bundled_version}, identical to this release's skill. Nothing to do.")
+        report.result({**result, "cancelled": False}, status="ok")
+        return 0
+
+    report.profile = _profile_name(args)
+    identity = _local_identity(SimpleNamespace(profile=report.profile), report)
+    plan = None
+    if identity is not None:
+        plan = _watch_plan(identity, "skill install", "skill.install", result)
+        report.set_plan(plan)
+    preview = "\n".join(
+        [
+            "Install the agent skill",
+            f"  File       {install.target}",
+            f"  Action     {install.action}",
+            f"  Installed  {install.installed_version or 'none'}",
+            f"  Bundled    {install.bundled_version or 'unknown'}",
+        ]
+    )
+    if _skill.skill_state(bundled, folder.name, folder.parent) == "newer":
+        preview += f"\nThe installed skill is newer than this release's; installing goes back to {install.bundled_version}."
+    if not _yes_or(args, preview, lambda: watch_ops.confirm(preview, "Install it?", **report.confirm_io()), report=report):
+        report.result({**result, "cancelled": True}, status="cancelled")
+        return 1
+
+    evidence = install.apply()
+    report.set_evidence(evidence)
+    if plan is not None:
+        if report.audit_log is None:
+            report.audit_log = AuditLog(profile_store.paths_for().audit)
+        report.audit(plan, status="ok", evidence=evidence)
+    report.info(f"Wrote {install.target} (version {install.bundled_version}). A new agent session picks it up.")
+    report.result({**result, "cancelled": False}, status="ok")
+    return 0
+
+
 def require_bot_mode_supports(args, report: Reporter) -> None:
     """Refuse an account-only command under --as-bot, before anything connects.
 
@@ -4007,6 +4082,8 @@ def require_bot_mode_supports(args, report: Reporter) -> None:
         why = "a blueprint is read and applied through the account that administers the chat, and a bot creates no chat"
     elif command == "folders":
         why = "a folder is a shelf over an account's own chat list, and a bot has no chat list to shelve"
+    elif command == "skill":
+        why = "installing the agent skill writes a file on this machine, which is nothing a bot does"
     else:
         why = "a bot has no dialog list, no history and nothing of its own to delete or set up"
     raise CommandError(
@@ -4157,11 +4234,14 @@ async def _dispatch(args, *, client=None, config=None, report: Reporter | None =
     if as_bot and args.command != "profiles":
         require_bot_mode_supports(args, report)
 
-    # Neither of these opens a connection, and neither needs credentials: one
-    # reads the profile store, the other moves a file inside it. Dispatched
-    # before `load_config` so a half-set-up machine can still use them.
+    # None of these opens a connection, and none needs credentials: one reads
+    # the profile store, one copies the agent skill out of the package, the last
+    # moves a file inside the store. Dispatched before `load_config` so a
+    # half-set-up machine can still use them.
     if args.command == "profiles":
         return _run_profiles(args, report=report)
+    if args.command == "skill":
+        return _run_skill(args, report=report)
     if args.command == "auth" and args.migrate:
         io = report.confirm_io()
         return _run_migrate(
@@ -4298,6 +4378,7 @@ def command_name(args) -> str:
         or getattr(args, "folders_kind", None)
         or getattr(args, "watch_kind", None)
         or getattr(args, "schedule_kind", None)
+        or getattr(args, "skill_kind", None)
     )
     # `watch rules <verb>` is the one command three words deep, and the envelope
     # names all three: `watch rules add` and `watch rules test` are not one command.

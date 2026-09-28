@@ -187,7 +187,9 @@ LOG_IN_QR = ("8", "3")
 LOG_OUT = ("8", "4")
 MIGRATE = ("8", "5")
 BOTS_ROW = ("8", "6")
-DOCTOR = "9"
+SETUP = "9"
+DOCTOR = ("9", "1")
+SKILL_INSTALL = ("9", "2")
 
 
 def run_menu(answers, *, session=None, runner=None, output=None):
@@ -1276,6 +1278,47 @@ def test_discover_offers_run_again_but_no_tweak():
     assert [call.all_chats for call in calls] == [False, False]
     assert "1. Run it again" in screens(output)
     assert "Tweak it" not in screens(output)
+
+
+def test_check_setup_offers_doctor_and_the_agent_skill():
+    _code, calls, output = run_menu([SETUP, "0", "0"])
+
+    text = screens(output)
+    assert calls == []
+    assert "Main › Check setup\n" in text
+    assert "1. Check the setup" in text
+    assert "2. Install the agent skill" in text
+
+
+def test_install_the_agent_skill_takes_the_default_folder_on_enter_and_never_skips_the_y_n():
+    # 9 2 = check setup > install, Enter = the default folder, 1 = back to Check setup, 0 0 = out
+    code, calls, output = run_menu([SKILL_INSTALL, "", "1", "0", "0"])
+
+    assert code == 0
+    [args] = calls
+    assert (args.command, args.skill_kind, args.dir, args.yes) == ("skill", "install", None, False)
+    assert "1. Back to Check setup" in screens(output)
+
+
+def test_the_skill_folder_prompt_names_the_default():
+    prompts = []
+    answers = iter(["", ""])
+
+    def read(prompt):
+        prompts.append(prompt)
+        return next(answers)
+
+    calls, runner = recorder()
+    asyncio.run(menu._flow_skill_install(session=FakeSession(), runner=runner, read=read, write=lambda _text: None))
+
+    assert prompts[0] == "Skill folder [~/.claude/skills/telegram-tools] (Enter uses it): "
+    assert calls[0].dir is None
+
+
+def test_install_the_agent_skill_passes_a_typed_folder_through():
+    _code, calls, _output = run_menu([SKILL_INSTALL, "~/.codex/skills/telegram-tools", "", "0"])
+
+    assert calls[0].dir == "~/.codex/skills/telegram-tools"
 
 
 def test_doctor_keeps_the_plain_enter_or_zero_prompt():

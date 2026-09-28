@@ -1,0 +1,9 @@
+usage: telegram-tools skill [-h] {install} ...
+
+positional arguments:
+  {install}
+    install   Copy this release's agent skill into an agent's skills folder
+              (y/N; asks nothing when it is already there)
+
+options:
+  -h, --help  show this help message and exit
