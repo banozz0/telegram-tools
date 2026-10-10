@@ -1,5 +1,4 @@
 # telegram-tools — agent brief
-
 Local Telethon CLI that operates the user's own Telegram account (read, export, archive, write, administer, watch).
 Public repo: never commit phone numbers, API hashes, tokens, sessions or exported chat data (CONTRIBUTING.md binds).
 
@@ -38,3 +37,4 @@ Public repo: never commit phone numbers, API hashes, tokens, sessions or exporte
 - The README picture is `assets/menu.png`. When `menu.ROOT_ITEMS` changes, recapture it from the site and fix its alt text (`test_readme_menu_picture.py`).
 - A user-visible change carries its CHANGELOG entry and version bump in one commit (`test_version.py`); only a no-behaviour change waits under `## Unreleased`.
 - Releasing (maintainer only): version in `pyproject.toml` + `__init__.py`, no git tags; rebuild `dist/`, test the sdist in a fresh `[dev]` venv.
+  PyPI account `banozz` (not the GitHub handle); the full upload recipe is in the maintainer's private runbook.
