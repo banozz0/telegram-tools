@@ -123,7 +123,7 @@ def topic_of(message: Any) -> int | None:
     General is the topic Telegram says nothing about. It has no service message
     that opened it, so there is no id to point at: a message there carries no
     reply header, and a reply there carries `forum_topic` *off* and the
-    replied-to id -- both read live off `-1004458956767` on 2026-09-18, and the
+    replied-to id -- both read live off `-1000000000002` on 2026-09-18, and the
     second is why the flag has to be honoured before the chat is. Every message
     in a forum is in a topic, so one whose header names none is General's, which
     is 1 in Telegram's own numbering and the rid the archive, the menu's topic

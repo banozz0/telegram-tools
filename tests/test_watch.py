@@ -73,7 +73,7 @@ def fake_chat(chat_id: int | None):
 def fake_reply_header(topic: int | None, replies_to: int | None):
     """The `MessageReplyHeader` Telegram really sends, for each of the four cases.
 
-    All four read off `-1004458956767` on 2026-09-18 (`message reply` and
+    All four read off `-1000000000002` on 2026-09-18 (`message reply` and
     `iter_messages`), because the one this tool got wrong is the one that is
     not there at all:
 
@@ -158,8 +158,8 @@ def test_a_general_message_is_scoped_to_the_general_topic_the_archive_already_us
     """Card agent-bo-95422355: General had two names, and the topic rid is the one.
 
     Live on 2026-09-18: message 54 went to General with `send --topic 1` and
-    moved the runner's cursor for `tg:chat:-1004458956767`, while `archive
-    sync --scope tg:topic:-1004458956767:1` held the same three messages. A
+    moved the runner's cursor for `tg:chat:-1000000000002`, while `archive
+    sync --scope tg:topic:-1000000000002:1` held the same three messages. A
     forum has no chat scope at all -- `TelegramArchiveSource` lists one scope
     per topic -- so the chat rid was a scope nothing else wrote to.
     """

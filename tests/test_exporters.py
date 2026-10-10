@@ -27,7 +27,7 @@ def test_write_records_as_csv(tmp_path):
 
 # -- non-ASCII titles -----------------------------------------------------
 
-EMOJI_ROWS = [{"id": 80, "title": "\U0001f4bb Dobby", "chat_id": -1004297050934}]
+EMOJI_ROWS = [{"id": 80, "title": "\U0001f4bb Dobby", "chat_id": -1000000000001}]
 
 
 def test_json_text_writes_the_emoji_not_its_escape():

@@ -68,7 +68,7 @@ def test_format_discovery_table_shows_human_readable_chats_and_topics():
 
 def test_discovery_shows_the_topic_emoji_telegram_draws_and_leaves_a_bare_topic_bare():
     info = dialog_to_chat_info(
-        SimpleNamespace(id=-1004297050934, title="Hermes", entity=SimpleNamespace(megagroup=True, forum=True)),
+        SimpleNamespace(id=-1000000000001, title="Hermes", entity=SimpleNamespace(megagroup=True, forum=True)),
         is_admin=True,
         topics=[
             TopicInfo(id=141, title="Dobby", top_message=141, icon_emoji="\U0001f4bb"),
