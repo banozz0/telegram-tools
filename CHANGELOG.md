@@ -4,6 +4,10 @@ All notable changes to this project will be documented here.
 
 This project follows a practical changelog style: user-visible changes, safety changes, and release notes belong here; active task tracking belongs outside the repo.
 
+## 3.40.0 - 2026-10-12
+
+- **`clear-messages` says when there is nothing to clear.** Topics holding nothing but their opener now print `Empty: those topics hold no messages — nothing to clear` and finish with status `empty` (exit 0), on a dry-run and under `--execute` alike: no count of zero, and no `DELETE` gate for nothing. The menu no longer offers "Clear them for real" after an empty dry-run; it says so and goes back to the topic list.
+
 ## 3.39.3 - 2026-09-28
 
 - **The menu's Profiles rows and Move the pre-profile session run on a machine with no config yet.** Identity > Profiles > List them and Remove a profile, and Identity > Move the pre-profile session into a profile, loaded the config before running, so with no `.env` anywhere they stopped at `error: TELEGRAM_API_ID is required.` `telegram-tools profiles`, `profiles remove` and `auth --migrate` have never needed credentials, and the three rows now reach the same commands without loading anything, the way Check the setup does since 3.39.2. Logging in and out still need the config, because they talk to Telegram.

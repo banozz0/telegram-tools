@@ -255,3 +255,27 @@ def test_clear_topic_messages_confirmation_explains_topics_are_preserved():
     assert "Forum topics will NOT be deleted" in text
     assert "Topic IDs will NOT change" in text
     assert "Only messages will be removed" in text
+
+
+def test_an_empty_topic_says_so_and_never_asks():
+    # Only the opener, which a clear always keeps: nothing to clear.
+    client = FakeClient([SimpleNamespace(id=10)])
+    lines = []
+
+    def confirm():
+        raise AssertionError("an empty topic has nothing to confirm")
+
+    for execute in (False, True):
+        result = asyncio.run(
+            delete_topic_messages(
+                client,
+                "@group",
+                [TopicInfo(id=10, title="Builds", top_message=10)],
+                execute=execute,
+                progress=lines.append,
+                confirm=confirm,
+            )
+        )
+        assert (result.matched, result.deleted, result.cancelled) == (0, 0, False)
+    assert client.deleted_batches == []
+    assert "Empty: those topics hold no messages — nothing to clear" in lines

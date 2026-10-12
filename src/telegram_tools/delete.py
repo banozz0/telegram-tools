@@ -90,6 +90,11 @@ async def delete_topic_messages(
         counts.append(TopicCount(id=topic.id, title=topic.title, matched=found))
     rows = tuple(counts)
 
+    if not ids:
+        # Nothing to delete is not a deletion to confirm: no gate, no DELETE.
+        progress("Empty: those topics hold no messages — nothing to clear")
+        return DeleteResult(matched=0, deleted=0, dry_run=not execute, topics=rows)
+
     if not execute:
         progress(f"Dry-run: {len(ids)} topic messages would be cleared")
         return DeleteResult(matched=len(ids), deleted=0, dry_run=True, topics=rows)

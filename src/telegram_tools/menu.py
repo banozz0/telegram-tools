@@ -24,7 +24,7 @@ from telegram_tools import profiles as profile_store
 from telegram_tools.config import ConfigError, load_config, lookup_bot_token, resolve_bot_token
 from telegram_tools.delete import kind_for_type
 from telegram_tools.discovery import list_dialog_choices
-from telegram_tools.envelope import error_for
+from telegram_tools.envelope import Reporter, error_for
 from telegram_tools.records import BARE_TIME_IS_LOCAL, parse_date_bound
 from telegram_tools import messages as message_ops
 from telegram_tools.prompts import BACK, CLEAR, EXIT, MENU, RULE, Extra, after_action, after_run, ask_int, ask_lines, ask_text, choose, edit_field, pick, pick_many
@@ -203,7 +203,16 @@ def _namespace(**kwargs) -> argparse.Namespace:
     return argparse.Namespace(**kwargs)
 
 
-async def _call(args, *, session, runner, write, connect: bool = True, execute_row: str | None = None) -> int | None:
+async def _call(
+    args,
+    *,
+    session,
+    runner,
+    write,
+    connect: bool = True,
+    execute_row: str | None = None,
+    report: Reporter | None = None,
+) -> int | None:
     """Run one action. Returns its exit code, or None when it errored and the
     message is already printed.
 
@@ -222,13 +231,17 @@ async def _call(args, *, session, runner, write, connect: bool = True, execute_r
     `session=None` hands over no client, config or identity, for the commands
     the CLI runs before it loads a config: reading `session.config` loads one,
     and a fresh install has none to load.
+
+    `report` is for a flow that needs more than the exit code: after the run
+    its `status` holds what the command recorded.
     """
     try:
         client = await session.client() if session is not None and connect else None
         config = session.config if session is not None else None
         acting = session.acting if session is not None else None
         with surface.menu_row(execute_row):
-            return await runner(args, client=client, config=config, acting=acting)
+            extra = {} if report is None else {"report": report}
+            return await runner(args, client=client, config=config, acting=acting, **extra)
     except MENU_ERRORS as exc:
         write_error(write, exc)
         return None
@@ -252,7 +265,16 @@ def write_error(write, exc: BaseException) -> None:
         write(f"hint: {hint}")
 
 
-async def _dry_run_passed(args, *, session, runner, write, connect: bool = True, execute_row: str | None = None) -> bool:
+async def _dry_run_passed(
+    args,
+    *,
+    session,
+    runner,
+    write,
+    connect: bool = True,
+    execute_row: str | None = None,
+    report: Reporter | None = None,
+) -> bool:
     """Run a flow's dry-run. True only when it really produced its plan.
 
     Exit code 0 -- ok, empty, dry_run -- is the only pass. A cancel at a gate or
@@ -261,8 +283,12 @@ async def _dry_run_passed(args, *, session, runner, write, connect: bool = True,
     already printed. None of those put a plan on screen, so the caller must not
     offer the for-real row above one: whatever was said is already printed, and
     the flow goes straight to its after-action prompt.
+
+    `report`, when given, holds the status afterwards: `empty` passes too.
     """
-    code = await _call(args, session=session, runner=runner, write=write, connect=connect, execute_row=execute_row)
+    code = await _call(
+        args, session=session, runner=runner, write=write, connect=connect, execute_row=execute_row, report=report
+    )
     return code == 0
 
 
@@ -1429,8 +1455,13 @@ async def _flow_clear(*, session, runner, read, write) -> bool:
             if key == scanned:
                 write("Same topics as the last dry-run; its count still stands.")
             else:
-                if not await _dry_run_passed(dry_run, session=session, runner=runner, write=write):
+                report = Reporter()
+                if not await _dry_run_passed(dry_run, session=session, runner=runner, write=write, report=report):
                     return _leave_action(after_action(read=read, write=write))
+                if report.status == "empty":
+                    # Already empty: there is nothing to offer a for-real row for.
+                    write("Nothing to clear in those topics — back to the topic list.")
+                    continue
                 scanned = key
 
             while True:

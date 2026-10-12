@@ -503,6 +503,12 @@ class Reporter:
             envelope["result"] = redact(self._result, show_invites=True)
         return envelope
 
+    @property
+    def status(self) -> str:
+        """How the run went, as its `result` recorded it. The menu reads this
+        where an exit code says too little: `empty` and `dry_run` share code 0."""
+        return self._status
+
     def finish(self, code: int) -> int:
         """Close the run: human mode keeps the command's own exit code, machine mode emits."""
         if not self.machine:

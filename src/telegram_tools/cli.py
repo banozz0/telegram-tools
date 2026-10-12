@@ -854,7 +854,7 @@ async def _run_clear_messages(client, args, *, report: Reporter | None = None) -
         recheck=recheck_for(plan, rebuild) if args.execute else None,
     )
 
-    status = "dry_run" if result.dry_run else "cancelled" if result.cancelled else "ok"
+    status = "empty" if not result.matched else "dry_run" if result.dry_run else "cancelled" if result.cancelled else "ok"
     if status == "ok":
         evidence = await read_back(
             "topic message counts",

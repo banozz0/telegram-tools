@@ -149,13 +149,16 @@ REVIEW = [
 ]
 
 
-def recorder(result=0, error=None):
+def recorder(result=0, error=None, status=None):
+    """`status` is what a run records on the menu's report, for a flow that reads it."""
     calls = []
 
-    async def runner(args, *, client=None, config=None, acting=None):
+    async def runner(args, *, client=None, config=None, acting=None, report=None):
         calls.append(args)
         if error is not None:
             raise error
+        if status is not None and report is not None:
+            report.result({}, status=status)
         return result
 
     return calls, runner
@@ -716,6 +719,18 @@ def test_clear_dry_runs_first_then_executes():
     assert calls[0].batch_size == 100
     assert calls[1].execute is True
     assert calls[1].topics == [141]
+
+
+def test_clear_says_empty_topics_are_empty_and_offers_nothing():
+    calls, runner = recorder(status="empty")
+    # 5 = clear, 1 = Hermes, 1 = tick Deploys, 5 = continue, then back out of everything.
+    code, _calls, output = run_menu([CLEAR, "1", "1", "5", "0", "0", "0", "0"], runner=runner)
+
+    assert code == 0
+    assert [args.execute for args in calls] == [False]
+    text = "\n".join(output)
+    assert "Nothing to clear in those topics" in text
+    assert "for real" not in text
 
 
 def test_clear_stops_at_the_dry_run_when_you_go_back():
