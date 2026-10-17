@@ -14,17 +14,17 @@ telegram-tools/
 │   ├── adapters/        # the Telethon port, one file per area
 │   └── _core/           # vendored cli-tools-core at the tag in _core/VERSION; never edit
 ├── tests/               # pytest, no network
-│   └── fixtures/        # help/: every frozen --help
+│   ├── fixtures/        # help/: every frozen --help
+│   └── transcripts/     # record.py and the recorded root-menu transcripts
 ├── skill/               # SKILL.md, the bundled agent skill (force-included in the wheel)
 ├── scripts/             # sync-core.sh
-├── docs/                # Telethon API notes, early superpowers specs and plans
-│   └── transcripts/     # record.py and the recorded root-menu transcripts
 ├── assets/              # menu.png, the README picture
 └── .github/             # CI workflows and issue templates
     └── workflows/  ISSUE_TEMPLATE/
 ```
 
 - `adapters/<area>.py` is the Telethon port; `<area>.py` holds the rules, plan and screens; `cli._run_<area>` is the handler.
+- Telethon API notes: `/Users/sven/hermes-vault/obsidian-vault/Projects/CLI Tools Site/Telethon API notes.md`; the early superpowers specs and plans are archived in the vault (`Archive/Repo docs/telegram-tools/`).
 - CONTEXT.md defines the domain terms (seam, profile, rid, cursor). Bare invocation is the human menu; agents pass a subcommand.
 - `_core/` is a vendored copy at the tag in `_core/VERSION`: never edit it (`test_core_copy.py`). Fix upstream, then `scripts/sync-core.sh <tag>`.
 - `skill/SKILL.md` is the bundled agent skill's source (the wheel force-includes it); a CLI-surface change updates it in the same commit.
@@ -49,7 +49,7 @@ telegram-tools/
 - An editable install's `importlib.metadata.version()` is frozen at install time; read `telegram_tools.__version__` instead.
 
 ## Working here
-- Root menu rows are a promise: regrouping needs the maintainer's sign-off on a transcript (`docs/transcripts/record.py`, real pty, invented account).
+- Root menu rows are a promise: regrouping needs the maintainer's sign-off on a transcript (`tests/transcripts/record.py`, real pty, invented account).
 - The README picture is `assets/menu.png`. When `menu.ROOT_ITEMS` changes, recapture it from the site and fix its alt text (`test_readme_menu_picture.py`).
 - A user-visible change carries its CHANGELOG entry and version bump in one commit (`test_version.py`); only a no-behaviour change waits under `## Unreleased`.
 - Releasing (maintainer only): version in `pyproject.toml` + `__init__.py`, no git tags; rebuild `dist/`, test the sdist in a fresh `[dev]` venv.

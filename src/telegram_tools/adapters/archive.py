@@ -9,8 +9,8 @@ adapter owns the two things only the platform knows:
   under two rids. A scope the account cannot resolve is still listed, invisible,
   with `no_access` as its reason, so the coverage table can say so.
 * **How history is walked.** `iter_messages` per chat and, for a topic, with
-  `reply_to` set to the topic id -- the documented pattern in
-  `docs/telethon-api-notes.md`. Telegram hands history newest first, so the
+  `reply_to` set to the topic id -- the documented Telethon
+  pattern. Telegram hands history newest first, so the
   cursor this adapter asks the store to keep is a small state, not one id:
   `top:low:open|done` -- every id in `[low, top]` is archived, and `done`
   means everything below `low` is too. A run first fetches what arrived

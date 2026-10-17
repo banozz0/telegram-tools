@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Record the menu into `docs/transcripts/`, in a real terminal, against a canned account.
+"""Record the menu into `tests/transcripts/`, in a real terminal, against a canned account.
 
 The site replays these files rather than a hand-written mock-up, so what a
 visitor sees is what the menu actually prints. Two rules make that true:
@@ -11,8 +11,8 @@ visitor sees is what the menu actually prints. Two rules make that true:
   rows below are invented; no session is opened and no request is made. Nothing
   in a recording can leak a real chat, a real id or a real name.
 
-    python docs/transcripts/record.py            # writes both files for this version
-    python docs/transcripts/record.py --check    # re-records and diffs, changing nothing
+    python tests/transcripts/record.py           # writes both files for this version
+    python tests/transcripts/record.py --check   # re-records and diffs, changing nothing
 
 The `.ansi` file is what `src/lib/transcript.ts` parses on the site; the `.txt`
 beside it is the same session with `NO_COLOR=1`, for reading in a diff.
