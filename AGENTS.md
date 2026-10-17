@@ -8,6 +8,22 @@ Public repo: never commit phone numbers, API hashes, tokens, sessions or exporte
 - Full check once before landing: `.venv/bin/python -m pytest -q`, `.venv/bin/python -m compileall -q src`, the `--help` smoke in CONTRIBUTING.md.
 
 ## Layout
+```
+telegram-tools/
+├── src/telegram_tools/  # the CLI: cli.py, menu, one rules module per area
+│   ├── adapters/        # the Telethon port, one file per area
+│   └── _core/           # vendored cli-tools-core at the tag in _core/VERSION; never edit
+├── tests/               # pytest, no network
+│   └── fixtures/        # help/: every frozen --help
+├── skill/               # SKILL.md, the bundled agent skill (force-included in the wheel)
+├── scripts/             # sync-core.sh
+├── docs/                # Telethon API notes, early superpowers specs and plans
+│   └── transcripts/     # record.py and the recorded root-menu transcripts
+├── assets/              # menu.png, the README picture
+└── .github/             # CI workflows and issue templates
+    └── workflows/  ISSUE_TEMPLATE/
+```
+
 - `adapters/<area>.py` is the Telethon port; `<area>.py` holds the rules, plan and screens; `cli._run_<area>` is the handler.
 - CONTEXT.md defines the domain terms (seam, profile, rid, cursor). Bare invocation is the human menu; agents pass a subcommand.
 - `_core/` is a vendored copy at the tag in `_core/VERSION`: never edit it (`test_core_copy.py`). Fix upstream, then `scripts/sync-core.sh <tag>`.
