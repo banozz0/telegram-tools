@@ -24,7 +24,7 @@ telegram-tools/
 ```
 
 - `adapters/<area>.py` is the Telethon port; `<area>.py` holds the rules, plan and screens; `cli._run_<area>` is the handler.
-- Telethon API notes: `/Users/sven/hermes-vault/obsidian-vault/Projects/CLI Tools Site/Telethon API notes.md`; the early superpowers specs and plans are archived in the vault (`Archive/Repo docs/telegram-tools/`).
+- Telethon API notes: vault `Projects/CLI Tools Site/Telethon API notes.md`; the early superpowers specs and plans are archived in the vault (`Archive/Repo docs/telegram-tools/`).
 - CONTEXT.md defines the domain terms (seam, profile, rid, cursor). Bare invocation is the human menu; agents pass a subcommand.
 - `_core/` is a vendored copy at the tag in `_core/VERSION`: never edit it (`test_core_copy.py`). Fix upstream, then `scripts/sync-core.sh <tag>`.
 - `skill/SKILL.md` is the bundled agent skill's source (the wheel force-includes it); a CLI-surface change updates it in the same commit.
