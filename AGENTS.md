@@ -7,21 +7,9 @@ Public repo: never commit phone numbers, API hashes, tokens, sessions or exporte
 - Iterate: `.venv/bin/python -m pytest -q tests/test_<area>.py` or `-k <name>`. No network, no scanner binary needed.
 - Full check once before landing: `.venv/bin/python -m pytest -q`, `.venv/bin/python -m compileall -q src`, the `--help` smoke in CONTRIBUTING.md.
 
-## Layout
-```
-telegram-tools/
-├── src/telegram_tools/  # the CLI: cli.py, menu, one rules module per area
-│   ├── adapters/        # the Telethon port, one file per area
-│   └── _core/           # vendored cli-tools-core at the tag in _core/VERSION; never edit
-├── tests/               # pytest, no network
-│   ├── fixtures/        # help/: every frozen --help
-│   └── transcripts/     # record.py and the recorded root-menu transcripts
-├── skill/               # SKILL.md, the bundled agent skill (force-included in the wheel)
-├── scripts/             # sync-core.sh
-├── assets/              # menu.png, the README picture
-└── .github/             # CI workflows and issue templates
-    └── workflows/  ISSUE_TEMPLATE/
-```
+## Where things are
+
+README.md's file map shows every file with its own first line; `/Users/sven/code/agents/automation/bin/file-map .` rewrites it after you add, move or rename files.
 
 - `adapters/<area>.py` is the Telethon port; `<area>.py` holds the rules, plan and screens; `cli._run_<area>` is the handler.
 - Telethon API notes: vault `Projects/CLI Tools Site/Telethon API notes.md`; the early superpowers specs and plans are archived in the vault (`Archive/Repo docs/telegram-tools/`).
