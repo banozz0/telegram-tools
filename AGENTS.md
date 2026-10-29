@@ -9,7 +9,7 @@ Public repo: never commit phone numbers, API hashes, tokens, sessions or exporte
 
 ## Where things are
 
-README.md's file map shows every file with its own first line; the agents repo's `automation/bin/file-map .` rewrites it after you add, move or rename files.
+The file map (every file with its own first line) is kept in Sven's vault, not in README.md, because this repo is public; the agents repo's `automation/bin/file-map .` rewrites it after you add, move or rename files.
 
 - `adapters/<area>.py` is the Telethon port; `<area>.py` holds the rules, plan and screens; `cli._run_<area>` is the handler.
 - Telethon API notes: vault `Projects/CLI Tools Site/Telethon API notes.md`; the early superpowers specs and plans are archived in the vault (`Archive/Repo docs/telegram-tools/`).
