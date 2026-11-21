@@ -4,6 +4,10 @@ All notable changes to this project will be documented here.
 
 This project follows a practical changelog style: user-visible changes, safety changes, and release notes belong here; active task tracking belongs outside the repo.
 
+## 3.40.1 - 2026-11-21
+
+- **Turning topics on or off works again with Telethon 1.46.** Telethon 1.46.0 gave `channels.toggleForum` a required `sidebar` argument, so on a fresh install `settings set --forum on|off` and its menu row stopped with `ToggleForumRequest.__init__() missing 1 required positional argument: 'sidebar'` (exit 2) before reaching Telegram. The request now passes `sidebar` as False when the installed Telethon takes it and leaves it out on 1.44 and 1.45, which reject it, so a group it switches on still shows the plain topic list, as before. Nothing else changed.
+
 ## 3.40.0 - 2026-10-12
 
 - **`clear-messages` says when there is nothing to clear.** Topics holding nothing but their opener now print `Empty: those topics hold no messages — nothing to clear` and finish with status `empty` (exit 0), on a dry-run and under `--execute` alike: no count of zero, and no `DELETE` gate for nothing. The menu no longer offers "Clear them for real" after an empty dry-run; it says so and goes back to the topic list.

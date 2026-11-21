@@ -1171,6 +1171,19 @@ def test_switching_topics_on_is_one_y_and_no_dry_run(run_cli, capsys):
     assert "--forum off -> on" in envelope_of(out)["evidence"]["readback"]
 
 
+def test_switching_topics_on_asks_for_the_plain_topic_list_on_every_telethon(run_cli, capsys):
+    # Telethon 1.46 made `sidebar` required and 1.44-1.45 reject it; either way
+    # the request asks for neither tabs nor a sidebar, the list every client draws.
+    code, out, _err, fake = run_cli(
+        ["--json", "settings", "set", "--chat", "-1001000000002", "--forum", "on"],
+        client=PeopledClient(), capsys=capsys, isatty=True, answer="y",
+    )
+    assert code == 0, out
+    [request] = [r for r in fake.world.requests if type(r).__name__ == "ToggleForumRequest"]
+    assert request.enabled is True and request.tabs is False
+    assert getattr(request, "sidebar", False) is False
+
+
 # -- bot mode -------------------------------------------------------------------------------
 
 

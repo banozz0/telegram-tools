@@ -30,6 +30,7 @@ which reports each drop by name.
 from __future__ import annotations
 
 import asyncio
+import inspect
 from typing import Any, Awaitable, Callable, Mapping
 
 from telethon import utils
@@ -57,6 +58,13 @@ from telegram_tools.discovery import classify_entity
 from telegram_tools.envelope import PREFIX, CommandError
 from telegram_tools.resolver import ResolvedChat, resolve_chat
 from telegram_tools.topics import get_forum_topic, get_forum_topics
+
+# The plain topic list for `channels.toggleForum`. Telethon 1.46 made `sidebar`
+# a required argument and 1.44-1.45 reject it, so it is passed only where the
+# installed Telethon's request takes it.
+_FORUM_LIST_VIEW = {"tabs": False}
+if "sidebar" in inspect.signature(ToggleForumRequest).parameters:
+    _FORUM_LIST_VIEW["sidebar"] = False
 
 # The chat kinds a blueprint names, from what `discover` calls the chat. A
 # basic group is absent on purpose (see the module docstring).
@@ -334,11 +342,11 @@ class TelegramBlueprintPort:
     async def set_forum(self, channel: Any, enabled: bool) -> None:
         """`channels.toggleForum`: topics on or off for a supergroup.
 
-        `tabs` is Telegram's newer display mode for a forum; this tool does not
-        offer it and passes False, so a group it switches on reads as the topic
-        list every client has always drawn.
+        `tabs` and `sidebar` are Telegram's newer display modes for a forum;
+        this tool offers neither and passes False, so a group it switches on
+        reads as the topic list every client has always drawn.
         """
-        await self.client(ToggleForumRequest(channel=channel, enabled=bool(enabled), tabs=False))
+        await self.client(ToggleForumRequest(channel=channel, enabled=bool(enabled), **_FORUM_LIST_VIEW))
 
     async def set_title(self, channel: Any, title: str) -> None:
         await self.client(EditTitleRequest(channel=channel, title=str(title)))
